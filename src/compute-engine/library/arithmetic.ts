@@ -17163,6 +17163,11 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         if (bounds.length === 0) {
           const canon = body.canonical;
           if (canon.isCollection) return ce._fn('Sum', [canon]);
+          // An array is not a collection (decision U4 of
+          // `docs/plans/2026-11-25-mutable-arrays-spec.md`): its sum is
+          // the sum of `ListFrom(a)`.
+          if (canon.isValid && canon.type.matches('array'))
+            return ce._fn('Sum', [ce.typeError('collection', canon.type, canon)]);
         }
         return canonicalBigop(
           'Sum',

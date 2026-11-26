@@ -20,6 +20,7 @@ import {
   isString,
   isCharacter,
   isNumber,
+  isMutableArray,
   isObject,
   isDictionary,
 } from './type-guards.js';
@@ -34,6 +35,7 @@ import {
   broadcastFrames,
   errorOpsWithoutTrace,
 } from './error-value.js';
+import { MAX_DISPLAYED_ARRAY_CELLS } from './object-walk.js';
 
 /** Helper type for expressions known to be function expressions (in operator/function callbacks) */
 type FnExpr = Expression & FunctionInterface;
@@ -1224,6 +1226,30 @@ export function toAsciiMath(
         ([key, value]) => `${key}: ${serialize(value)}`
       );
       return `${expr.typeName}(${fields.join(', ')})`;
+    } finally {
+      exitCycleQuery(expr, guard);
+    }
+  }
+
+  //
+  // A mutable array?
+  //
+  // An array of 16 cells or fewer prints as its constructor,
+  // `arrayFrom([1, 2, 3], "integer<0..255>")`; a longer one as its type and
+  // count, `array<integer<0..255>> of 64000`, and no cell of it is read
+  // (spec section 8). An array that holds itself prints the type-and-count
+  // form where it is reached again.
+  //
+  if (isMutableArray(expr)) {
+    const count = expr.count;
+    const summary = `${expr.type.toString()} of ${count}`;
+    if (count > MAX_DISPLAYED_ARRAY_CELLS) return summary;
+    const guard = enterCycleQuery(expr, CycleQuery.ObjectSlots);
+    if (guard === CYCLE_DETECTED) return summary;
+    try {
+      const cells: string[] = [];
+      for (let i = 0; i < count; i++) cells.push(serialize(expr._peek(i)));
+      return `arrayFrom([${cells.join(', ')}], "${escapeStringLiteral(expr.cellType.toString())}")`;
     } finally {
       exitCycleQuery(expr, guard);
     }

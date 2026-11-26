@@ -16,6 +16,7 @@
  */
 
 import type { Expression } from '../../global-types.js';
+import { arrayStorageKind } from '../../../common/type/array-storage.js';
 import { Decline, hostCallOp, hostVarOp, lower } from './lower.js';
 import { UNSUPPORTED_MODE } from './lower-context.js';
 import { TEXT_LIST_MAKERS, TEXT_LIST_READS } from './lower-strings.js';
@@ -127,6 +128,7 @@ export const TARGETS: Readonly<Record<Target, Profile>> = deepFreeze({
       'rows',
       'record',
       'nothing',
+      'array',
     ],
     rank: Infinity,
     runtimeLengths: true,
@@ -134,7 +136,7 @@ export const TARGETS: Readonly<Record<Target, Profile>> = deepFreeze({
     frames: true,
     recursion: true,
     elementwise: true,
-    scalarLanes: ['rows', 'record', 'nothing'],
+    scalarLanes: ['rows', 'record', 'nothing', 'array'],
     resultOnly: Object.fromEntries(
       ['rows.chunk', 'rows.partition', 'rows.pair'].map((op) => [
         op,
@@ -144,14 +146,14 @@ export const TARGETS: Readonly<Record<Target, Profile>> = deepFreeze({
     syntax: JS,
   },
   glsl: {
-    lanes: ['real', 'integer', 'boolean', 'complex', 'color'],
+    lanes: ['real', 'integer', 'boolean', 'complex', 'color', 'array'],
     rank: 1,
     runtimeLengths: false,
     draws: false,
     frames: false,
     recursion: false,
     elementwise: false,
-    scalarLanes: ['color', 'complex'],
+    scalarLanes: ['color', 'complex', 'array'],
     vectorArrays: true,
     resultOnly: Object.fromEntries(
       ['asoklab', 'asrgb', 'ashsv', 'ashsl', 'ashsv.own', 'ashsl.own'].map(
@@ -187,7 +189,7 @@ export function admits(
       return { cause: `${what}: the lane ${t.lane}` };
     if (profile.scalarLanes.includes(t.lane) && t.shape.length > 0)
       return {
-        cause: `${what}: a list of ${t.lane === 'color' ? 'colours' : t.lane === 'string' ? 'strings' : t.lane === 'rows' ? 'lists of rows' : t.lane === 'record' ? 'records' : t.lane === 'nothing' ? 'Nothing' : 'complex numbers'}`,
+        cause: `${what}: a list of ${t.lane === 'color' ? 'colours' : t.lane === 'string' ? 'strings' : t.lane === 'rows' ? 'lists of rows' : t.lane === 'record' ? 'records' : t.lane === 'nothing' ? 'Nothing' : t.lane === 'array' ? 'arrays' : 'complex numbers'}`,
       };
     if (
       t.shape.length > profile.rank &&
@@ -551,7 +553,11 @@ const MAX_UNROLLED_LIST = 16;
  * `at`, or an argument of a call whose parameter is such a list in every
  * call. Returns the refusal, or `undefined`.
  */
-function holdStorage(p: Program, names: readonly string[]): string | undefined {
+function holdStorage(
+  p: Program,
+  names: readonly string[],
+  glsl: boolean
+): string | undefined {
   const entry = entryOf(p);
   const fns = new Map(p.functions.map((f) => [f.name, f]));
   const held = new Set<V>();
@@ -562,7 +568,8 @@ function holdStorage(p: Program, names: readonly string[]): string | undefined {
   for (const name of names) {
     // An input that the program does not read has no parameter.
     const v = entry.body.params[entry.paramNames.indexOf(name)];
-    if (v === undefined) continue;
+    // An array on GLSL: `holdArrays()`.
+    if (v === undefined || (glsl && p.types[v].lane === 'array')) continue;
     if (p.types[v].lane === 'boolean' || p.types[v].shape.length !== 1)
       return `the storage of ${name}, which is not a list of numbers`;
     hold(v);
@@ -590,6 +597,84 @@ function holdStorage(p: Program, names: readonly string[]): string | undefined {
         ) {
           const what = i.k === 'op' ? rowOfOp(OPERATORS, i.op)?.row.head : i.k;
           refusal ??= `a read of a list in storage by ${what ?? i.k} (only At reads it)`;
+        }
+      });
+      for (const x of regionsOf(i)) changed = walk(x, last) || changed;
+    }
+    return changed;
+  };
+  while (p.functions.map((f) => walk(f.body, false)).some((c) => c));
+  p.functions.forEach((f) => walk(f.body, true));
+  return refusal;
+}
+
+/**
+ * On GLSL, the array inputs of the entry and the array parameters of the
+ * functions they are passed to (to a fixed point), each a sampler and its
+ * count that the host binds (`A` and `A_count`; `docs/plans/
+ * 2026-11-25-mutable-arrays-spec.md`, section 11). The texture of the cells
+ * is `IRType.storage`: `isampler2D` for signed integer cells, `sampler2D`
+ * for the names of `normalized` (cells of `Uint8Array` in a normalized
+ * texture), none for the texture of the cells by default (`typeName()` of
+ * `print-glsl.ts`). An array is read only as the operand 0 of an operation
+ * `arr.*` and passed only as an argument of a call whose parameter has the
+ * same texture in every call: a sampler is not a value of GLSL. Returns
+ * the refusal, or `undefined`.
+ */
+function holdArrays(
+  p: Program,
+  normalized: readonly string[]
+): string | undefined {
+  const entry = entryOf(p);
+  const isArray = (v: V) => p.types[v].lane === 'array';
+  for (const [k, v] of entry.body.params.entries()) {
+    const t = p.types[v];
+    if (t.lane !== 'array') continue;
+    const name = entry.paramNames[k];
+    const { storage } = arrayStorageKind(t.array!.type);
+    if (normalized.includes(name)) {
+      if (storage !== 'uint8')
+        return `the storage sampler2D of ${name}, an array<${t.array!.cell}>: a normalized texture holds cells of 0 to 255 (integer<0..255>, or a tuple of four of them)`;
+      p.types[v] = { ...t, storage: 'sampler2D' };
+    } else if (storage === 'int8' || storage === 'int16' || storage === 'int32')
+      p.types[v] = { ...t, storage: 'isampler2D' };
+  }
+  const fns = new Map(p.functions.map((f) => [f.name, f]));
+  const params = new Set(p.functions.flatMap((f) => f.body.params));
+  // The arrays whose texture is settled: the inputs, then the parameters
+  // that one of them reaches.
+  const given = new Set(entry.body.params.filter(isArray));
+  const value =
+    'an array as a value (a result, an arm of an If, a local assigned in a loop)';
+  let refusal: string | undefined;
+  /** Gives each parameter that a settled array reaches its texture;
+   *  `last`: checks every use. */
+  const walk = (r: Region, last: boolean): boolean => {
+    let changed = false;
+    if (
+      last &&
+      (r.yields.some(isArray) ||
+        r.params.some((v) => isArray(v) && !params.has(v)))
+    )
+      refusal ??= value;
+    for (const i of r.body) {
+      if (last && outsOf(i).some(isArray)) refusal ??= value;
+      argsOf(i).forEach((a, k) => {
+        if (!isArray(a)) return;
+        if (i.k === 'call') {
+          const q = fns.get(i.fn)!.body.params[k];
+          if (given.has(a) && !given.has(q)) {
+            given.add(q);
+            p.types[q] = { ...p.types[q], storage: p.types[a].storage };
+            changed = true;
+          } else if (last && p.types[q].storage !== p.types[a].storage)
+            refusal ??= `a call of ${i.fn} with arrays in two kinds of texture`;
+        } else if (
+          last &&
+          !(i.k === 'op' && i.op.startsWith('arr.') && k === 0)
+        ) {
+          const what = i.k === 'op' ? rowOfOp(OPERATORS, i.op)?.row.head : i.k;
+          refusal ??= `a read of an array by ${what ?? i.k} (At and Length read it)`;
         }
       });
       for (const x of regionsOf(i)) changed = walk(x, last) || changed;
@@ -721,6 +806,7 @@ export function sliceProgram(
     iterationBudget: interval ? undefined : options.iterationBudget,
     runtimeLengths: profile.runtimeLengths,
     javascript: options.target === 'javascript' && !interval,
+    glsl: options.target === 'glsl',
     closedIntegrals: !interval,
     quadrature: options.target === 'javascript',
     // Not past the `iterationBudget`: such a loop is NaN, or refuses to
@@ -890,7 +976,14 @@ export function compileSlice(
   program: Program;
 } {
   const p = sliceProgram(expr, options);
-  const held = options.storage && holdStorage(p, options.storage);
+  const arrays =
+    options.target === 'glsl' && p.arrays !== undefined
+      ? holdArrays(p, options.storage ?? [])
+      : undefined;
+  if (arrays) throw new Decline('program', `${arrays} on glsl`);
+  const held =
+    options.storage &&
+    holdStorage(p, options.storage, options.target === 'glsl');
   if (held) throw new Decline('program', `${held} on ${options.target}`);
   const { rows, syntax } = tables(options, p);
   // The `parallel for` loops that `runAsync()` can send to the worker pool:

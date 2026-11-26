@@ -58,6 +58,9 @@ describe('IR slice: GLSL text', () => {
       'sort', 'sort.int', 'ordering', 'median',
       'mode', 'quartile1', 'quartile3', 'skewness', 'kurtosis', 'covariance', 'pcovariance', 'correlation',
       'rbinomial', 'fibonacci.int',
+      // The write and the read of a variable of the engine around a call of
+      // the host.
+      ...OPERATORS.flatMap((r) => r.signatures.map(([, , op]) => op)).filter((op) => op.startsWith('state.')),
       'isundef', 'present.int', 'present', 'cpresent', 'present.bool', 'count.int',
       // The length of a list that the pass `forward` does not build (CE-1806).
       'listlen',
@@ -73,6 +76,8 @@ describe('IR slice: GLSL text', () => {
       // The length of the rows of a matrix input, and the run-time checks
       // of two lengths of the matrix operators.
       'rows.width', 'rows.agree', 'rows.square',
+      // A matrix input of the entry, a list of rank 2, read as its rows.
+      'rows.of',
       // The order of a matrix of run-time size, and the kernels of one.
       'rows.order', 'rows.inverse', 'rows.power',
       // The rows of two values of the lane, in order (CE-1736).
@@ -81,6 +86,10 @@ describe('IR slice: GLSL text', () => {
       'rows.row', 'rows.rowlen', 'rows.rowlen.nan',
       // A record and its `Nothing` field (CE-1652).
       'field', 'nothing',
+      // The array lane: the cells of a mutable array are written on
+      // JavaScript only; GLSL reads a cell and the count of an input.
+      ...OPERATORS.flatMap((r) => r.signatures.map(([, , op]) => op)).filter((op) => op.startsWith('arr.') &&
+        !['arr.get', 'arr.get.int', 'arr.get.r', 'arr.get.int.r', 'arr.len', 'arr.get4'].includes(op)),
       // The string lane (CE-1530), and `ColorToString` (CE-1548).
       ...OPERATORS.flatMap((r) => r.signatures.map(([, , op]) => op)).filter((op) => op.startsWith('text.') || op.startsWith('colortostring.')),
       ...Object.keys(REAL_FUNCTIONS).filter((f) => !['fract', 'atan2', 'root', 'coth', 'gcd', 'fresnelc', 'fresnels', 'sinc', 'chop',
@@ -96,12 +105,19 @@ describe('IR slice: GLSL text', () => {
         'cdigamma'].includes(f))]);
     // The floor division of integers, which only the bigint mode makes.
     const bigintOnly = new Set<string>(['floordiv.int']);
+    // The read of a tuple cell of an array as one texel of four channels.
+    const glslOnly = new Set<string>(['arr.get4']);
     for (const row of OPERATORS)
       for (const [, , op] of row.signatures) {
         if (bigintOnly.has(op)) {
           expect(spellingOf(JS_BIGINT, op)).toBeDefined();
           expect(spellingOf(JS, op)).toBeUndefined();
           expect(spellingOf(GLSL, op)).toBeUndefined();
+          continue;
+        }
+        if (glslOnly.has(op)) {
+          expect(spellingOf(GLSL, op)).toBeDefined();
+          expect(spellingOf(JS, op)).toBeUndefined();
           continue;
         }
         expect(spellingOf(JS, op)).toBeDefined();

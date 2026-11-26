@@ -56,6 +56,7 @@ import {
   isNumber,
   isFunction,
   isDictionary,
+  isMutableArray,
   isObject,
   operandsForCanonicalRebuild,
   isFreeName,
@@ -85,7 +86,11 @@ import { labelFor } from './explain-labels.js';
 import { latexSerializeOptions } from './latex-serialize-options.js';
 import { isFiniteCount } from './collection-count.js';
 import { recordObjectRead } from './object-deps.js';
-import { containsObject } from './object-walk.js';
+import {
+  containsObject,
+  displayReferenceJson,
+  type DisplayJsonSerializationOptions,
+} from './object-walk.js';
 import {
   declarationReadsOuterNames,
   statementDeclaredNames,
@@ -605,10 +610,13 @@ export abstract class _BoxedExpression implements Expression {
     // without it, numbers are rounded to the engine precision. The cache
     // check above compares the values of `ce.latexOptions`, so a change of
     // this setting is not served from the cache.
-    const jsonOptions: Partial<JsonSerializationOptions> = {
+    // A long array is written as its type and count, and no cell of it is
+    // read (`displayReferenceJson()`, spec section 8).
+    const jsonOptions: DisplayJsonSerializationOptions = {
       prettify: true,
       digits: (options.digits as JsonSerializationOptions['digits']) ?? 'auto',
       repeatingDecimal: jsonRepeatingDecimal(ce),
+      _referenceJson: displayReferenceJson,
     };
     const json = this.toMathJson(jsonOptions);
     const latex = syntax.serialize(
@@ -696,10 +704,11 @@ export abstract class _BoxedExpression implements Expression {
     // `digits` and rounds a float again, which gives the same digits. The
     // per-call `digits` wins, then the engine-wide `ce.latexOptions.digits`,
     // then `'auto'` (round to the engine precision).
-    const jsonOptions: Partial<JsonSerializationOptions> = {
+    const jsonOptions: DisplayJsonSerializationOptions = {
       prettify: options?.prettify ?? true,
       digits: options?.digits ?? this.engine.latexOptions.digits ?? 'auto',
       repeatingDecimal: jsonRepeatingDecimal(this.engine, options),
+      _referenceJson: displayReferenceJson,
     };
     const json = this.toMathJson(jsonOptions);
 
@@ -781,6 +790,19 @@ export abstract class _BoxedExpression implements Expression {
       shorthands: defaultOptions.shorthands,
       metadata: defaultOptions.metadata,
     };
+    // The public `objects` function is asked at each object and array, by
+    // the internal hook of the walk: it first, then the display rule of a
+    // caller that passes one (`.latex`). When both are present, an
+    // expression that `objects` returns for a value wins.
+    const objects = options?.objects;
+    if (objects !== undefined) {
+      const display = (options as DisplayJsonSerializationOptions)
+        ._referenceJson;
+      (opts as DisplayJsonSerializationOptions)._referenceJson =
+        display === undefined
+          ? objects
+          : (value) => objects(value) ?? display(value);
+    }
 
     return _serializeJson(this.engine, this, opts);
   }
@@ -1806,6 +1828,18 @@ export function hasSymbolOrOperator(
       // the fields without advancing any engine cache generation.
       recordObjectRead(e, e._version);
       for (const value of e._slots.values()) pending.push(value);
+    } else if (isMutableArray(e)) {
+      // The cells of an array are read as the fields of an object are.
+      // Scalar machine cells hold numbers, which match no name. A cell of the
+      // tuple of four bytes reads as `Pixel(r, g, b, a)` or `Tuple(…)`: a
+      // non-empty array of them holds that head, matched once with no cell
+      // read; its elements are numbers.
+      if (visited.has(e)) continue;
+      visited.add(e);
+      recordObjectRead(e, e._version);
+      if (e._storage === 'expression')
+        for (let i = 0; i < e.count; i++) pending.push(e._peek(i));
+      else if (e._tuple && e.count > 0 && matches(e._tupleTag!)) return true;
     } else if (isSymbol(e)) {
       if (matches(e.symbol)) return true;
     }

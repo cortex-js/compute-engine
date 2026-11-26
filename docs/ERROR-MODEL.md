@@ -415,7 +415,17 @@ value and reports its error; a failed RHS does not overwrite a numeric slot.
   write). The evaluation of `Assign` makes this check for
   every assignment whose value is a `ReplaceAt` chain rooted at the target
   symbol, parsed or written in MathJSON: `Assign(L, ReplaceAt(L, 99, 1))` is
-  `out-of-range`, and `L` keeps its value. A `ReplaceAt` that is not such a
+  `out-of-range`, and `L` keeps its value. On a name that holds a mutable
+  array, and through any base that evaluates to one (`p.pixels[i] \coloneq v`,
+  `Assign(At(base, i), v)`), the write is a store to a cell and no list is
+  made (`docs/plans/2026-11-25-mutable-arrays-spec.md`, section 6): an index
+  that is zero, not an integer or out of range is `out-of-range`, a value
+  outside the cell type is `incompatible-type`, and the array keeps its
+  cells. A write to an element of a value that is neither an array nor a
+  list that a name holds (a list field of an object, a list cell of an
+  array) is `immutable-value-assignment`. A construction whose storage the
+  host's `ce.arrayAllocation` refuses, or that JavaScript cannot allocate, is
+  `array-allocation-refused`. A `ReplaceAt` that is not such a
   rebinding keeps its documented result: `ReplaceAt([1, 2], 5, 1)` alone, or
   `y \coloneq \operatorname{ReplaceAt}(L, 5, 1)`, stays unevaluated. It reads an
   assignment whose target is a function of a library (`a+b \coloneq 5`,

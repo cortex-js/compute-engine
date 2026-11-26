@@ -48,6 +48,7 @@ echo "Checking CLI and type-level assertions..."
   ./test/compute-engine/bigint-count.test.ts \
   ./test/compute-engine/ce-581-runner-list-argument-type.test.ts \
   ./test/compute-engine/ce-631-633-boolean-results-and-inputs.test.ts \
-  ./test/compute-engine/ce-1276-stored-profile-type.test.ts
+  ./test/compute-engine/ce-1276-stored-profile-type.test.ts \
+  ./test/compute-engine/array-host.test.ts
 
 echo 'PASS typecheck'

@@ -3374,11 +3374,10 @@ provenance head,
 `CircularReference` markers). Even the element-type rule is a
 corollary: every array slot is a readwrite position, so `array<T>` is
 **invariant** in `T` and array types have no subtyping among
-themselves — B13's stored-field rule applied to slots. An
-implementation may even represent an array internally as
-`object{items: list<T>}` with indexing sugar, composing with
-copy-elision-when-unique so the persistent interior updates in place
-when unshared.
+themselves — B13's stored-field rule applied to slots. (An earlier
+text of this paragraph let an implementation hold an array as
+`object{items: list<T>}`; the storage is now flat, see the amendments
+below.)
 
 **The forcing function is algorithmic code.** A sort — or a sieve, a
 partition, a dynamic-programming table, a Fisher–Yates shuffle — is
@@ -3394,6 +3393,25 @@ semantics, and `a[i] = v` on an array is that semantics.
 `array` is deliberately **not part of this appendix's v1**: it rides
 the object machinery, so it lands after it, as a follow-on with its
 own short ruling list —
+
+> **Amended 2026-11-25.** The specification of `array` is
+> `docs/plans/2026-11-25-mutable-arrays-spec.md`, approved by the user
+> on that date. It is normative for arrays, and it replaces five points
+> of the list below (its section 17 quotes them):
+>
+> - **Storage.** The cell type selects flat storage: a typed array of
+>   JavaScript for a bounded integer type, for `real` and for a tuple of
+>   four bytes, and evaluated expressions otherwise. `ArrayFrom` of a
+>   list and `ListFrom` of an array are O(n) copies, not the O(1) wraps
+>   of "Construction" below, and a store never copies.
+> - **Construction.** `ArrayFrom(xs, type)` takes the cell type as a
+>   second operand.
+> - **Collection integration and effect-directed traversal** are a later
+>   stage: in the first version an array is not a `collection`, and a
+>   program takes `ListFrom(a)`.
+> - **Compilation.** A shader reads an array input (see B9 below); the
+>   other object rules hold.
+> - **Exchange.** `Swap(a, b)` exchanges the cells of two arrays.
 
 - **Collection integration.** `array` should be a `collection`
   (enumerable, `at`, `count` — each read recording a version
@@ -3502,7 +3520,10 @@ subscript?), and neither the object core nor `array` depends on it.
   or broadcast over (the same atomicity ruling as sum values).
 - **Compilation**: JavaScript has native reference
   semantics, so objects compile naturally there. The GPU target has no
-  references and declines, fail-closed like its other capability gates.
+  references and declines, fail-closed like its other capability gates
+  (amended 2026-11-25 for arrays: a shader reads an array input as a
+  texture and declines every write,
+  `docs/plans/2026-11-25-mutable-arrays-spec.md`, section 11).
   At the engine⇄compiled boundary, the tagged-sum rule of §3 is
   mirrored: object-typed *parameters* into a compiled unit are
   supported; object-typed unit *results* decline in v1 (ruling B9).
@@ -3643,7 +3664,8 @@ deferral by design.)
   qualifications, recorded there: commutative operators evaluate in
   canonical (unspecified) order; named arguments in declaration order.
 - **B9 — compile boundary.** Ruled (parameters in, results decline,
-  GPU declines); see "The rest of the system".
+  GPU declines); see "The rest of the system". Amended 2026-11-25 for
+  arrays: a GLSL program reads an array input.
 - **B10 — the Appendix A amendments.** See "Changes to shipped
   documents" below.
 - **B11 — named constructors.** Ruled (named arguments required;

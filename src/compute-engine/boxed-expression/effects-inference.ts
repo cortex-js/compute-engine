@@ -74,6 +74,8 @@ import {
 import { restrictionParts } from './conditional-value.js';
 import { protocolDispatcherMarks } from './definition-guards.js';
 import {
+  cellStoreLabels,
+  homeValueType,
   effectiveDischarge,
   blockStatementsOf,
   homeBinding,
@@ -3225,6 +3227,12 @@ class Walker {
       // name, a destructuring target, a receiver whose declared type does not
       // establish an object — stays on the `scope` path, where `assignTargets`
       // judges the write on the base symbol.
+      // The store of a cell, `Assign(At(x, p…), v)`: `state` for an array
+      // base, both labels when the types do not decide (`cellStore()`).
+      if (this.cellStore(expr, ctx)) {
+        for (const op of expr.ops.slice(1)) this.visit(op, ctx);
+        return;
+      }
       const store = this.propertyStoreTarget(expr);
       if (store !== undefined) {
         this.state.effects = unionEffectSets(this.state.effects, ['state']);
@@ -3266,11 +3274,14 @@ class Walker {
       // `Assign` forms they stand for do (`evaluateAddTo()`,
       // `library/control-structures.ts`), so the write is judged on that
       // name: a write to a local of the literal is confined. The positions
-      // of an `At` target and the value are evaluated.
-      this.scopeWrite(expr, ctx, /* confinable */ true);
-      const target = expr.ops[0];
-      if (isFunction(target, 'At'))
-        for (const op of target.ops.slice(1)) this.visit(op, ctx);
+      // of an `At` target and the value are evaluated. A target whose base
+      // can be an array is the store of a cell (`cellStore()`).
+      if (!this.cellStore(expr, ctx)) {
+        this.scopeWrite(expr, ctx, /* confinable */ true);
+        const target = expr.ops[0];
+        if (isFunction(target, 'At'))
+          for (const op of target.ops.slice(1)) this.visit(op, ctx);
+      }
       for (const op of expr.ops.slice(1)) this.visit(op, ctx);
       return;
     }
@@ -3996,6 +4007,43 @@ class Walker {
     return undefined;
   }
 
+  /**
+   * The store of a cell, `Assign(At(x, p…), v)` or `AddTo(At(x, p…), e)`,
+   * labelled by `cellStoreLabels()` (`effects-of.ts`), the rule of both
+   * channels: `state` for an array base, `scope` (judged on the name `x`, as
+   * the element write of a list variable) when the types prove a list, both
+   * when they do not decide. The type of `x` is its declared parameter type,
+   * the type of the local or the parameter that the node of `x` is bound to
+   * (`homeValueType()`, the type that the run-time channel reads), or the
+   * type of its definition. The positions of the target, and a root
+   * that is not a name, are visited. False, with nothing recorded, for an
+   * `AddTo` whose types prove a list: the caller judges it as a rebinding.
+   */
+  private cellStore(expr: Expression & FunctionInterface, ctx: WalkContext): boolean {
+    const target = expr.ops[0];
+    if (!isFunction(target, 'At') || target.nops < 2) return false;
+    const root = target.ops[0];
+    const name = sym(root);
+    let rootType: Type | undefined;
+    if (name !== undefined) {
+      rootType = this.paramTypes.get(name);
+      if (rootType === undefined && ctx.declared.has(name))
+        rootType = homeValueType(root, name);
+      else if (rootType === undefined) {
+        const def = definitionOf(this.ce, name);
+        if (def !== undefined && 'value' in def) rootType = def.value.type.type;
+      }
+    } else rootType = this.receiverType(root);
+    const labels = cellStoreLabels(rootType, target.nops - 1, name !== undefined);
+    if (expr.operator === 'AddTo' && !labels.state) return false;
+    if (labels.state)
+      this.state.effects = unionEffectSets(this.state.effects, ['state']);
+    if (labels.scope) this.scopeWrite(expr, ctx, /* confinable */ true);
+    if (name === undefined) this.visit(root, ctx);
+    for (const op of target.ops.slice(1)) this.visit(op, ctx);
+    return true;
+  }
+
   /** An `Assign`: `{scope}` unless provably confined. */
   private scopeWrite(
     expr: Expression,
@@ -4597,8 +4645,8 @@ function assignTargets(expr: Expression): (string | undefined)[] {
   // `Assign(Subscript(L, i), v)` is a SEQUENCE DEFINITION (`L_0 := 1`
   // registers a base case in the engine-wide pending-sequence state — see
   // the Subscript branch of `Assign`'s evaluate in `library/core.ts`),
-  // never a local rebind, and an `At` target has no assignment semantics
-  // at all today — both stay on the unresolvable-target fallback below.
+  // never a local rebind, and stays on the unresolvable-target fallback
+  // below. An `At` target is judged on its base symbol (below).
   // A mutable-object STORE reuses the `Assign(Field(…))` spelling with heap
   // semantics, and it does not reach this branch: `Walker.isFieldStore`
   // recognizes it from the receiver's declared parameter type and contributes
@@ -4611,9 +4659,15 @@ function assignTargets(expr: Expression): (string | undefined)[] {
     const base = sym(target.ops[0]);
     if (base !== undefined) return [base];
   }
-  // The `At` target of an `AddTo`, `AddTo(At(L, i), e)`, rebinds the list
-  // `L` (`evaluateAddTo()`, `library/control-structures.ts`).
-  if (expr.operator === 'AddTo' && isFunction(target, 'At')) {
+  // The `At` target of an `AddTo`, `AddTo(At(L, i), e)`, and of an
+  // `Assign`, `Assign(At(L, i), v)`, rebinds the list `L` when `L` holds a
+  // list (`evaluateAddTo()`, `library/control-structures.ts`, and
+  // `cellAssignSteps()`, `library/core.ts`); a store of a cell of an array
+  // is labelled `state` by `Walker.cellStore`.
+  if (
+    (expr.operator === 'AddTo' || expr.operator === 'Assign') &&
+    isFunction(target, 'At')
+  ) {
     const base = sym(target.ops[0]);
     if (base !== undefined) return [base];
   }

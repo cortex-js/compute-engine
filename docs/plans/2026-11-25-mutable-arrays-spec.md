@@ -57,8 +57,10 @@ of each.
 - An array type is disjoint from `list`, `tuple`, `record`, `dictionary`,
   `object`, `collection` and `indexed_collection`. An array is not a
   collection in this version (decision U4): the operators of sections 4 to 6
-  read and write it, and every other operator refuses it with
-  `incompatible-type`. A program that needs a collection takes `ListFrom(a)`.
+  read and write it. Every other operator gives no value for it: it refuses
+  it with `incompatible-type` where its signature states a collection or a
+  number, and otherwise leaves the expression unevaluated. A program that
+  needs a collection takes `ListFrom(a)`.
 - An array is never broadcast over: `a + 1` is `incompatible-type`.
 - An array has one dimension and its type states no length. A grid is
   arithmetic on the index, written by the program (`(y - 1) * w + x`).
@@ -98,7 +100,8 @@ starts from a large finite number, not from `+∞`.
 
 **Tuple cells (decision U5).** One tuple type is a machine cell: a tuple of
 four elements, named or not, each an integer type whose range is within 0 to
-255, such as `type Pixel = tuple<r: Byte, g: Byte, b: Byte, a: Byte>`. It is
+255, such as `type Pixel = tuple<r: Byte, g: Byte, b: Byte, a: Byte>` with
+`type alias Byte = integer<0..255>`. It is
 stored flat: cell `i` holds its four bytes at the positions `4(i − 1)` to
 `4(i − 1) + 3` of one `Uint8Array`. An `array<Pixel>` of `n` cells is a
 `Uint8Array` of `4n` bytes, the bytes of an `ImageData` and of an RGBA
@@ -107,10 +110,24 @@ tuple, a value: `a[i].r` reads one byte, and `a[i] == live` compares two
 tuples. A store writes a whole tuple, each element checked as a store of its
 type is. A tuple is immutable, so `a[i].r = v` is
 `immutable-value-assignment`; the program writes `a[i] = Pixel(v, p.g, p.b,
-p.a)`. A read at an index out of range gives the tuple of `NaN`, as `At`
-gives for a list of points. Every other tuple type has expression cells (an
+p.a)`. A read at an index out of range gives a tuple of four `NaN`, a plain
+tuple also when the cell type is named (a list of points gives a point of
+`NaN` there; a list of values of a named tuple type gives `Missing`, and a
+tuple cell does not follow it). A cell of a named tuple type takes a value of
+that type: `Pixel(1, 2, 3, 4)`, not `(1, 2, 3, 4)`. Every other tuple type has expression cells (an
 array of points, `array<tuple<real, real>>`, for example), and compiled code
 declines it.
+
+**Aliases and declared types.** A cell type is read through a type alias
+(`type alias Byte = integer<0..255>` is the type `integer<0..255>`). A type
+declared with `type` is a distinct type whose values carry its name
+(`type Byte = integer<0..255>` makes `Byte(1)`, which is not a number, and
+`1` is not a `Byte`): as a cell type, or as an element of a tuple cell, it
+has expression cells. The one declared type that is a machine cell is the
+tuple of four bytes above: a read of an `array<Pixel>` gives `Pixel(r, g, b,
+a)`. The array keeps the definition of its cell type as it is at the
+construction: a later declaration of the same name does not change the
+storage or the checks of an array that exists.
 
 **The value of a store, in the interpreter.** A store evaluates the value,
 then:
@@ -146,31 +163,45 @@ literal and no variadic constructor (Appendix B, "Construction").
   leaves `ArrayFrom` unevaluated. A source with no element gives an array of
   no cell. The count of `Repeat(v, n)` is the count that `ListFrom` reads.
 - `type` is a string literal that names the cell type. An operand that is
-  not a string literal, or a string that is not a type, is the error that
-  `Typed` gives for such a type.
-- Without `type`, the cell type is the element type of the type that
-  `let L = xs` gives `L` (`docs/TYPE-SYSTEM.md`, "Initialization-defined
-  Program and Block contracts"), and `any` when that type states no element
-  type (an empty list, a list of two kinds of elements with no common type).
+  not a string literal, or a string that is not a type, is the error
+  `invalid-type-declaration`, as for `Declare` (`Typed` gives no error for
+  such a string).
+- Without `type`, the cell type comes from the static type of `xs`, not
+  from its value, so that the type of the expression is the type of the
+  array: it is the element type of the type that `let L = xs` gives `L`
+  (`docs/TYPE-SYSTEM.md`, "Initialization-defined Program and Block
+  contracts"), and `any` when that type states no element type (an empty
+  list, a list of two kinds of elements with no common type, an untyped
+  parameter).
   A list of numbers gives `number`, so `ArrayFrom([0, 0])` is an
   `array<number>` of expression cells: a program gets machine cells only
-  where it names them (`arrayFrom(repeat(0, n), "integer<0..255>")`). With an
-  array as `xs` and no `type`, the cell type is that of `xs`.
+  where it names them (`arrayFrom(repeat(0, n), "integer<0..255>")`). With
+  `xs` of an array type and no `type`, the cell type is that of `xs`.
+- A source that is a name of an array type with no value yet leaves
+  `ArrayFrom` unevaluated, and so does `ListFrom`.
 - Each element is checked and converted as the value of a store is. One
   element that fails makes the construction an error, and no array is made.
-- `ArrayFrom(Repeat(v, n), type)` fills the storage and builds no list.
+- `ArrayFrom(Repeat(v, n), type)` with `n` above `ce.maxCollectionSize`
+  (10,000 by default) fills the storage and builds no list: `Repeat` stays
+  unevaluated above that count, and the construction reads `v` and `n` from
+  it. Up to that count, `Repeat` gives its list first, as for every other
+  operator. The source is an ordinary operand: it is evaluated before the
+  construction, also under `evaluateAsync`.
 - Each evaluation makes a new array. The construction has the effect `state`.
 - When the count is known and before the storage is allocated, the
   allocation function of the host (section 9) is called once. When it
   refuses or throws, and when JavaScript cannot allocate the storage, the
   construction is the error `array-allocation-refused`. With no allocation
-  function, the engine sets no limit of its own.
+  function, the engine refuses a storage of more than 2^31 bytes (2 GiB) for
+  one array: JavaScript accepts the allocation of a typed array far larger
+  than the memory and fails when the cells are filled, which ends the
+  process.
 
 A declaration with a type does not give the cell type to its initializer
 (decision C3): `let px: array<integer<0..255>> = arrayFrom(repeat(0, n))` is
 `incompatible-type` (an `array<number>` for an `array<integer<0..255>>`), and
 its message names the second operand of `arrayFrom`. A prelude names a cell
-type once with a type alias (`type Byte = integer<0..255>`).
+type once with a type alias (`type alias Byte = integer<0..255>`).
 
 ## 5. Reads
 
@@ -184,7 +215,10 @@ type once with a type alias (`type Byte = integer<0..255>`).
 The index is that of a list: from 1, and a negative index counts from the
 end. An index that is 0, not an integer or out of range gives what `At` gives
 for a list of that element type (`NaN` for a number cell). A list read out of
-range is `NaN` today, not an error (probed at the commit above).
+range is `NaN` today, not an error (probed at the commit above). The static
+type of a read is that of the same read of a list of the cell type: it
+carries the absence value where a list read does. `Length` and every read
+record a dependency on the version of the array, also a read of no cell.
 
 `At(a, p1, …, pk)` is `At(…At(a, p1)…, pk)`: one index at each step, each
 step by the rule of its base (an array, a list, a tuple).
@@ -244,8 +278,9 @@ already read as "the element write of `a`" by the interpreter
 (`docs/COMPILATION-MODEL.md`, "List updates"). Its canonical form depends on
 the static type of `a`, and of `At(a, p1, …, p(k−1))` when `k` is 2 or more:
 
-- The types prove that every base on the path is a list: the canonical form
-  is the element-write form, as today.
+- The types prove that every base on the path is an indexed collection (a
+  list, and also a tuple or a string, which keep the write that they have
+  today): the canonical form is the element-write form, as today.
 - Otherwise (a base is an array, or its type does not decide: an untyped
   parameter, `any`, a union): the canonical form is
   `Assign(At(a, p1, …, pk), v)`.
@@ -301,7 +336,7 @@ arrays of two cell types are `incompatible-type`.
 This is the exchange of a program that computes into a second buffer (a
 cellular automaton, a blur): it writes `next` from `cur`, then
 `swap(cur, next)`, and `cur` names the current cells at every step. The same
-exchange by assignment, `(cur, next) = (next, cur)`, assigns two variables
+exchange by assignment, `(cur, next) := (next, cur)`, assigns two variables
 and changes which array each name holds. `Swap` assigns none: it also
 exchanges two arrays that no name holds (`swap(r.pixels, scratch)` for a
 raster that is a tuple, whose field cannot be assigned).
@@ -339,10 +374,13 @@ increments it at each store (section 10.5).
 - `toMathJSON()` takes an option `objects`, a function from an object or an
   array to the MathJSON written in its place, or `undefined` for the default.
   A host that sends a figure to another thread writes a reference of its own
-  there and sends the storage beside it. The values `'record'` and `'reject'`
+  there and sends the storage beside it. The function builds its MathJSON
+  itself: it does not serialize, evaluate or box an expression of the
+  engine. The values `'record'` and `'reject'`
   of Phase 3 of the objects plan are not part of this spec.
 - A display (`print`, the Epsil form of a value, the text of a result,
-  `toString()`) writes an array of 16 cells or fewer as its constructor
+  `toString()`, and `.latex`, also for a value that holds the array) writes
+  an array of 16 cells or fewer as its constructor
   (`arrayFrom([1, 2, 3], "integer<0..255>")`) and a longer one as its type and
   count: `array<integer<0..255>> of 64000`.
 
@@ -388,8 +426,11 @@ are this spec's choice.
   `ArrayFrom` made, after the construction, from the interpreter and from
   compiled code. A host that limits the bytes alive holds a weak reference to
   each array: the prelude code that makes a raster gives the host no other
-  reference. The engine does not catch an exception that this function
-  throws.
+  reference. An exception that this function throws is an exception of
+  the operator `ArrayFrom`: the engine's rule for a handler that throws
+  applies (a `TypeError`, a `RangeError` or a `ReferenceError` becomes the
+  error `internal-error` of the construction; another exception
+  propagates).
 
 **What the host guarantees.** The engine does not check these, and the result
 is unspecified when one does not hold:
@@ -400,6 +441,9 @@ is unspecified when one does not hold:
   the cell type.
 - The host calls `noteStore()` after it writes through `cells`, before any
   code of the engine reads the array.
+- A storage keeps its length while it is the cells of an array: the host
+  does not detach or transfer its buffer. `ce.array()` and `swapCells()`
+  refuse a view of a resizable buffer.
 
 The storage that `cells` gives is valid until the array changes its length
 (section 13), or `swapCells()` or `Swap` runs. A host reads `cells` at each use and
@@ -461,15 +505,29 @@ argument of a host function: the host receives the engine's value, the same
 reference as in the interpreter.
 
 A tuple cell compiles: a read is a tuple of the code (an array of four
-numbers), a read of one element (`a[i].r`, `a[i][2]`) is one read of the
-typed array with no tuple built, and a store of a tuple writes its four
-bytes. A tuple that the code builds and stores (`a[i] = Pixel(r, g, b, 255)`)
+numbers), a read of one element (`a[i].r`, and `a[i][2]` for a tuple type
+with no name: a value of a named tuple type is not read by position) is one
+read of the typed array with no tuple built, and a store of a tuple writes
+its four bytes. A tuple that the code builds and stores (`a[i] = Pixel(r, g, b, 255)`)
 allocates nothing.
 
 A user function called by its name reads and writes an array that it takes
 as a parameter or that a name holds, whatever the form of its definition
 (`function set(r, x, y, p) { … }`, `let at = (x, y) => …` called as
 `at(…)`): the helpers `get` and `set` of a prelude compile.
+
+A root function literal whose body ends in a store, or in a loop
+(`t => do { for k in 1..n { screen[k] = t } }`), compiles: its value is
+`Nothing`, which the code gives as `NaN`, as for a body that ends in a call
+of a host function of result `nothing`. This holds for every root function
+literal, with or without an array.
+
+A function that is declared in a program before the global array that it
+writes is bound when that global is initialized by a call of `arrayFrom` or
+is declared with its type. A global given an array by another call
+(`let board = makeBoard(n)`) has no type when the function is checked, and
+the calls of the function are then not bound in a function literal: the
+program declares the type (`let board: array<integer<0..1>> = …`).
 
 ### 10.4 The values
 
@@ -485,7 +543,9 @@ as a parameter or that a name holds, whatever the form of its definition
   for each under "Caveats of compiled code".
 - A value of another lane declines with `lane-mismatch`: a real for integer
   cells, a boolean or a complex number for any cell. An integer for `real`
-  cells compiles.
+  cells compiles. A parameter with no type is a real in compiled code, so a
+  helper that stores its parameter in integer cells declares it:
+  `function set(r: Raster, x: integer, y: integer, p: integer) { … }`.
 - `AddTo(At(a, i), e)` evaluates `i` once, before `e`.
 - The code reads the storage and the length from the array at each use, not
   once for the unit. An exchange of two storages between two uses needs no
@@ -515,7 +575,13 @@ or throws, not at each store.
   (`docs/COMPILATION-MODEL.md`, "Variables that a function assigns", has the
   same decline for a variable). The program writes a loop or takes
   `listFrom(a)`.
-- A list of arrays, and an array in a `parallel for` or in `runAsync()`.
+- A list of arrays, and an array in a `parallel for`. `runAsync()` of code
+  that holds an array runs on the calling thread, with no worker.
+- A discharge (`IsMissing`, `Coalesce`, `AssertPresent`) of a value of a
+  declared type that is a tuple cell (`isMissing(px[i])` with `px` an
+  `array<Pixel>`): the read of such a cell out of range is a tuple of `NaN`,
+  which the interpreter reads as absent and the code does not test. A
+  discharge of a number cell and of a tuple cell with no name compiles.
 - `interval-js` and the `bigint` mode.
 
 The code is not `shippable`, and `load()` refuses it: it holds values of the
@@ -539,14 +605,14 @@ that is a number, a boolean or an array:
   arms of an `If` give each one, and a user function that reaches a host
   call, itself or through its calls, takes and returns each one.
 - A variable of an array type is in `assigns` like a variable of a number:
-  `board = next` and `(cur, next) = (next, cur)` compile, in the root
+  `board = next` and `(cur, next) := (next, cur)` compile, in the root
   function and in a user function where the same assignment of a number
   compiles. Its write and its read are one reference.
 - A call that throws keeps the values written at the last host call before
   the throw, and the values that a host function assigned. With no host call
   before the throw it writes nothing, as today.
 
-So `t => do { step(); (cur, next) = (next, cur); draw(cur) }` and
+So `t => do { step(); (cur, next) := (next, cur); draw(cur) }` and
 `t => do { s = s + t; hostDraw(s) }` compile. These decline:
 
 - a list variable, or a variable that is a list of lists, in `assigns` of a
@@ -665,7 +731,13 @@ unsigned integer framebuffer does not guarantee in OpenGL ES 3.0. The result
 of a pixel function is a tuple of values from 0 to 255: the shader of the
 host divides it by 255 before it writes a normalized framebuffer. The host
 chooses between the two. Tycho's session asked for this choice on 2026-11-25
-and did not check it in a browser; stage 5 checks it.
+and did not check it in a browser. Stage 5 checked it on 2026-11-26
+(`scripts/repros/2026-11-26-array-glsl-texel-read.mjs`, headless Chromium
+with SwiftShader): the shader reads the cells of every format, and an
+`RGBA8` framebuffer is read back as the bytes. An `RGBA8UI` framebuffer is
+not read with `RGBA`, `UNSIGNED_BYTE` (`INVALID_OPERATION`); it is read with
+`RGBA_INTEGER`, `UNSIGNED_INT`, as 32-bit words. The sampler types that the
+code reports carry `highp`, `highp sampler2D` included.
 
 ## 12. Other targets and modes
 
@@ -793,9 +865,9 @@ before each host call (the state event), at the same place.
 section 6. The MathJSON that the parser writes for a list write does not
 change, and the user's decision of 2026-11-06 on that form stands. The
 canonical form changes for one case: an element write of a name whose type
-does not prove a list (an untyped parameter) becomes `Assign(At(…), v)`. The
-number of tests and snapshots that this changes is not measured; stage 2
-measures it first. Alternative (a) of the ruling list: the parser gives
+does not prove a list (an untyped parameter) becomes `Assign(At(…), v)`.
+Measured in stage 2b with the full suite: 4 tests changed (they pinned the
+canonical form or the refusal of an `At` target) and no snapshot. Alternative (a) of the ruling list: the parser gives
 `Assign(At(a, i), v)` for every target; the element-write form is read in 19
 source files and named in 19 test files (counted with `grep` at the commit
 above). Alternative (b): a store only through a field or a method.
@@ -817,7 +889,10 @@ expected type into a call, and invariance refuses the conversion afterwards.
 The interpreter drops a store that changes nothing, as a field store does;
 compiled code does not compare. Alternative: once for each array when the
 unit returns; it needs the set of the arrays stored to, which the code does
-not know statically. Measured in stage 4.
+not know statically. Measured in stage 4 (the M5 Max, the box lock held,
+load average 2.8): a compiled loop of 64,000 stores takes 0.090 ms with the
+increment and 0.069 ms without it, so the increment is 0.021 ms of a frame of
+320 × 200.
 
 **C5. Phase 4 of the objects plan is not on the path.** Taken: section 10.8.
 Alternative of the ruling list: compile object fields on JavaScript with the
@@ -918,7 +993,10 @@ The other documents:
 - `src/compute-engine/compilation/ir/README.md` and the header of
   `compilation/storage-hints.ts`: the array lane, the storage of an array
   input.
-- `src/math-json/OPERATORS.json`: `ArrayFrom`, `Swap`.
+- `src/math-json/OPERATORS.json` is generated
+  (`src/math-json/scripts/generate_OPERATORS.ts`): `ArrayFrom` and `Swap`
+  enter it when it is next generated. It was out of date for other operators
+  on 2026-11-26, so this work did not regenerate it.
 - `src/epsil/docs/` (the language reference, with the compound assignment to
   an index of a field, and the library reference) and the guides of
   `~/dev/cortexjs.io/docs/compute-engine/` that list the types, the
@@ -970,8 +1048,11 @@ interpreter and compiled JavaScript.
    the interpreter.
 6. **The forms of a store.** `a[i] = v` of a name declared an array has the
    canonical form `Assign(At(a, i), v)` and the effect `state`. In a function
-   with an untyped parameter, `a[i] = v` works for a list argument and for an
-   array argument, and has the effects `scope` and `state`. `p.pixels[i] += v`
+   with an untyped parameter, `a[i] = v` stores for an array argument and has
+   the effects `scope` and `state`; a list argument is mapped over, as it is
+   today for every function with an untyped parameter. A local declared
+   `any` that holds a list keeps its element write, and one that holds an
+   array stores. `p.pixels[i] += v`
    parses and stores. `m[i][j] = v` with `m` a list of arrays stores to
    `m[i]`. `s.px[2] = 9` with `px` a list field, and `a[i][j] = v` with `a`
    an `array<list<integer>>`, are `immutable-value-assignment`.
@@ -1025,7 +1106,7 @@ interpreter and compiled JavaScript.
     compiles, and the host function reads the new `s` in the engine when it
     runs. A host function that assigns `s` changes the value that the code
     reads after the call. The Game of Life of case 12a with
-    `(cur, next) = (next, cur)` in the body of the callback, in place of the
+    `(cur, next) := (next, cur)` in the body of the callback, in place of the
     `swap` in `step()`, compiles and gives the same cells. A host call in a
     `Loop` that assigns `s` at each pass shows each value to the host. After
     a throw that follows a host call, the engine holds the values written at
@@ -1033,7 +1114,10 @@ interpreter and compiled JavaScript.
     compiled function that reads `cur` is seen by the next call. Each
     decline of section 10.7 declines with its message.
 13. **Compiled speed** (measured, the M5 Max). A compiled loop of 64,000
-    stores to an array parameter takes less than 2 ms, and Tycho's instrument
+    stores to an array parameter takes less than 2 ms (measured in stage 4
+    with `scripts/repros/2026-11-26-array-compiled-store-cost.mts`: 0.09 ms,
+    and 0.09 to 0.11 ms for a frame of 320 × 200 written through a helper
+    `set(r, x, y, p)` on tuple cells of four bytes), and Tycho's instrument
     (`~/dev/tycho/scripts/repros/2026-11-24-epsil-raster-host-call-cost.mts`)
     gets the array route.
 14. **Declines.** Each case of section 10.6 declines with a message that

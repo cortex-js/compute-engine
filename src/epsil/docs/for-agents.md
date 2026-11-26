@@ -131,6 +131,7 @@ actually happens → write instead:**
 | `s[0]` / `len(s)` on a string | Works — a string is a collection of its characters (grapheme clusters), 1-based | `s[1]`, `length(s)` |
 | `"a" + "b"` | Error values inside an `Add` | `"\(a) and \(b)"` interpolation, or `join(a, b)` |
 | `xs[2] = 9` | Works, as a rebinding: `xs = replaceAt(xs, 2, 9)`. Collections are immutable values, so another name that holds the old list keeps it | *(nothing to change)* |
+| A buffer written in place (`bytearray`, a NumPy array) | A list is rebuilt at each element write | An array: `let a = arrayFrom(repeat(0, n), "integer<0..255>")`, then `a[i] = v` stores in place, and every name that holds `a` sees it. Not a collection: `sum(listFrom(a))` ([Arrays](/epsil/evaluation/#arrays)) |
 | `and` / `or` / `not` | Parse diagnostics (reserved words) | `&&`, `\|\|`, `!` |
 | `x**0.5` habits: `x^1/2` | Parses as `(x^1)/2` — precedence, not a root | `sqrt(x)` or `x^(1/2)` |
 | `math.floor`, `np.mean` | No modules/namespaces | Everything is global: `floor`, `mean`, `sin`, … |

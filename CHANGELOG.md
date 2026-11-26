@@ -22,15 +22,166 @@
 
 ### New Features
 
-- **`array<T>` is a type: the type of a mutable array.** The type parses,
-  prints and takes part in the type checks; no operator makes an array yet.
-  The cell type is invariant: an `array<integer>` is not an `array<number>`,
-  because a store of `1.5` through the wider type would break the narrower
-  one. Every `array<T>` is a subtype of bare `array`, the type of an array of
-  any cell type. An array type is not a collection type: it is not a subtype
-  of `list`, `collection` or `indexed_collection`, and it is never broadcast
-  over. `array` is now the name of a primitive type, and an array type has
-  the new kind `'array'` in a type read by its `kind`.
+- **Mutable arrays: the type `array<T>`, `ArrayFrom` and a store to a cell.**
+  An array is a sequence of cells that a program reads and writes in place.
+  It has identity: two names can hold one array, a store through one shows
+  through the other, and `==` is true only for the same array. A store costs
+  the same for every length (measured: 20,000 interpreted stores take 350 ms
+  on an array of 100 cells and 356 ms on one of 1,000,000 cells).
+
+  ```epsil
+  let a = arrayFrom(repeat(0, 5), "integer<0..255>")
+  a[2] = 7
+  a[2] += 1
+  let b = a
+  b[1] = 9
+  listFrom(a)       // [9, 8, 0, 0, 0]
+  ```
+
+  - `ArrayFrom(xs)` and `ArrayFrom(xs, type)` (`arrayFrom`) make an array
+    from a finite collection or from another array. `type` is a string that
+    names the cell type. The cell type selects the storage: a typed array of
+    JavaScript for a bounded integer type (`integer<0..255>` is a
+    `Uint8Array`), for `real` (a `Float64Array`, so `1/3` is stored as
+    `0.3333333333333333`) and for a tuple of four bytes; evaluated
+    expressions for every other type. Without `type`, a list of numbers gives
+    an `array<number>`, whose cells are expressions.
+  - `a[i]` reads a cell, `a[m..n]` and `a[[i, j]]` give a list of cells,
+    `length(a)` the count and `listFrom(a)` a list of the cells now. The
+    index is that of a list: from 1, a negative index counts from the end,
+    and a read out of range is `NaN`.
+  - `a[i] = v` and `a[i] += v` store to a cell, also through a field
+    (`p.pixels[i] = v`, and `p.pixels[i] += v`, which Epsil refused with
+    `add-to-target`) and through a list of arrays (`m[i][j] = v`). A store
+    out of range is the error `out-of-range`, and a value outside the cell
+    type is `incompatible-type`. A constant that holds an array accepts a
+    store. A store has the effect `state`.
+  - `Swap(a, b)` (`swap`) exchanges the cells of two arrays of one cell type,
+    with no copy.
+  - **An array of machine cells compiles on JavaScript.** A compiled
+    function reads and stores the cells of the engine's array, with no copy
+    when `run()` starts or returns: the interpreter, the code and the host
+    share one typed array. The result lists in `arrays` the names that hold
+    an array; the code reads the array of each one at each call. A compiled
+    loop of 64,000 stores takes 0.09 ms (measured on an M5 Max).
+
+    ```js
+    executeEpsil(ce, `let screen = arrayFrom(repeat(0, 64000), "integer<0..255>")
+    let frame = (t: integer) => do {
+      for k in 1..64000 { screen[k] = (k + t) % 256 }
+      hostDraw(screen)
+    }`);
+    const result = compile(ce.box('frame').evaluate());
+    result.arrays;          // ['screen']
+    result.run(1);          // hostDraw receives the engine's array
+    ```
+
+    A compiled read gives `NaN` out of range, as the interpreter does. A
+    compiled store makes no range test: out of range it writes nothing,
+    where the interpreter gives `out-of-range`, and a value outside the cell
+    type is written as JavaScript writes it in the typed array. An array of
+    expression cells, an array as the result of the code, a read or a store
+    in a callback (`map(k => a[k], 1..n)`) and `interval-js` decline. Such
+    code is not `shippable`.
+  - **A compiled function that assigns a variable can call the host.** For a
+    variable that is a number, a boolean or an array, the code writes its
+    value to the engine before each call of a function of the host and reads
+    it again after the call, so the host function sees the new value and can
+    assign another one. A name that holds an array can be assigned
+    (`board = next`, `(cur, next) := (next, cur)`); it is in `assigns`, not
+    in `arrays`. A name that holds an array and that the code only reads is
+    read again after each call of the host, so an array that the host
+    function assigns to it is seen. A call that throws keeps the values
+    written at the last call of the host before the throw.
+
+    ```js
+    executeEpsil(ce, `let s = 0
+    let f = (t: real) => do { s = s + t; hostDraw(s) }`);
+    const result = compile(ce.box('f').evaluate());
+    result.assigns;         // ['s']
+    result.run(1);          // hostDraw reads s in the engine: 1
+    result.run(2);          // 3
+    ```
+
+    A list variable in such a function declines, as before, and so does a
+    call of the host in a `Sum` or a callback of `Map`, and a recursive
+    function that calls the host.
+  - **A GLSL program reads an array input.** `At(A, i)` and `Length(A)`
+    compile on `glsl` when `A` is an input of an array type of machine
+    cells: a name declared `array<T>` with no value, or a name of the option
+    `inputs`. The host binds two uniforms: a sampler named `A`, with one
+    cell per texel, row by row from texel (0, 0), and an `int` named
+    `A_count`, the count of the cells. The sampler is `highp usampler2D` for
+    unsigned integer cells and for tuple cells of four bytes (`R8UI`,
+    `R16UI`, `R32UI`, `RGBA8UI`), `highp isampler2D` for signed integer
+    cells and `highp sampler2D` for `real` cells (`R32F`). With
+    `storage: { A: 'sampler2D' }`, cells of a `Uint8Array` are read from a
+    normalized texture (`R8`, `RGBA8`). `freeSymbolTypes.A.lowered` is the
+    sampler type, and the new field `freeSymbolTypes.A.count` is the name of
+    the count uniform. A read gives NaN (a `vec4` of NaN for a tuple cell)
+    for an index that is 0, not an integer or out of range.
+
+    ```js
+    ce.declare('A', 'array<integer<0..255>>');
+    ce.declare('i', 'integer');
+    const r = compile(ce.box(['At', 'A', 'i']), { to: 'glsl' });
+    r.code;
+    // float v2 = (i == floor(i) && i != 0.0 && abs(i) <= float(A_count) ? _gpu_ir_cell_u(A, i > 0.0 ? int(i) - 1 : A_count + int(i)) : uintBitsToFloat(0x7fc00000u));
+    // return v2;
+    r.freeSymbolTypes.A;
+    // { type: 'array<integer<0..255>>', lowered: 'highp usampler2D',
+    //   provenance: 'declared', count: 'A_count' }
+    ```
+
+    A store, `Swap`, `ArrayFrom`, `ListFrom`, a name whose value is an
+    array, an array result, and integer cells whose range is outside
+    -16,777,216 to 16,777,216 decline on GLSL.
+  - The cell type is invariant: an `array<integer>` is not an
+    `array<number>`. An array is not a collection: `Sum(a)`, `Map(a, f)` and
+    `a + 1` are refused, and a program takes `listFrom(a)`.
+  - A host reads and writes the cells with no copy. On an array value
+    (`isMutableArray(x)`), `cells` is the storage by reference (a typed array
+    for machine cells), `count` the number of cells, `cellType` the cell type
+    and `version` a number that increases at each store. A host that wrote
+    through `cells` calls `noteStore()`. `swapCells(storage)` gives the array
+    another typed array of the same kind and length as its cells and returns
+    the one it had, so a frame computed in a second buffer is exchanged with
+    no copy.
+
+    ```ts
+    const pixels = ce.array(new Uint8Array(4 * width * height));
+    ce.assign('screen', pixels);
+    // ... the program stores to screen[i]
+    if (pixels.version !== shown) upload(pixels.cells);
+    ```
+
+    `ce.array(storage, cellType?)` adopts a typed array as the cells of a new
+    array, with no pass over them. It refuses a `Uint8ClampedArray` (pass
+    `new Uint8Array(data.buffer, data.byteOffset, data.byteLength)`), a
+    `Float32Array`, a view of a `SharedArrayBuffer` and a view of a resizable
+    buffer.
+  - `ce.arrayAllocation`, a function `(count, bytesPerCell) => boolean`, is
+    called before the engine allocates the cells of a new array; when it
+    returns `false`, the construction is the error
+    `array-allocation-refused`. With no function, the engine refuses more
+    than 2 GiB for one array. `ce.arrayCreated`, a function `(array) =>
+    void`, is called with each array that `ArrayFrom` made.
+  - `toMathJson({ objects })` takes a function from an object or an array to
+    the MathJSON written in its place: a host that sends a value to another
+    thread writes a reference of its own, and no cell is read. `.json` of an
+    array is `["Object", ["List", …cells], "'array<T>'"]`. A display (`print`,
+    `toString()`, `.latex`) writes an array of more than 16 cells as its type
+    and count, `array<integer<0..255>> of 64000`.
+  - The MathJSON of an element write of a name whose type does not prove a
+    list (an untyped parameter, a name typed `any`) has the canonical form
+    `Assign(At(a, i), v)`; a name whose type proves a list keeps
+    `Assign(a, ReplaceAt(a, i, v))`. `Assign(At(L, i), v)` is now accepted as
+    the element write of a list variable.
+  - `s.px[2] = 9`, with `px` a list field of an object, is the error
+    `immutable-value-assignment` (CE-1797): it was "expected `symbol`, got
+    `integer`".
+  - `array` is now the name of a primitive type, and an array type has the
+    new kind `'array'` in a type read by its `kind`.
 
 - **The Epsil editor functions document each parameter, and the keys of an
   options dictionary** (CE-1812). A parameter of `epsilSignatureHelp()` has

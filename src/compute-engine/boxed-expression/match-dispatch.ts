@@ -13,7 +13,7 @@ import {
   isDictionary,
   isFunction,
   isNumber,
-  isObject,
+  isObjectOrArray,
   isString,
   isCharacter,
   isSymbol,
@@ -713,7 +713,8 @@ function leafEquals(subject: Expression, value: Expression): boolean {
   // every equality tier gives, and the reason a pinned object value selects
   // its case only for the very object it pins. Decided before the leaf
   // branches so neither side can be read as content.
-  if (isObject(value) || isObject(subject)) return subject === value;
+  if (isObjectOrArray(value) || isObjectOrArray(subject))
+    return subject === value;
   // The matcher treats an undecidable `isEqual` (undefined) as no-match.
   if (isNumber(value))
     return isNumber(subject) && numberPatternMatches(value, subject);

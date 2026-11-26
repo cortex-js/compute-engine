@@ -8254,12 +8254,14 @@ export class Parser {
 
   /**
    * The compound assignment `t += e` → `["AddTo", t, e]`. The target is a
-   * variable (`s += e`) or a list element with the positions that `L[i] = v`
-   * accepts: `L[i] += e`, `m[j, i] += e` and `m[j][i] += e`, which all lower
-   * to one `At` with the positions in order (`["At", "m", j, i]`). Any other
-   * target (a field `p.x`, a call, a literal) and a string position are the
-   * diagnostic `add-to-target`, and the statement is `Nothing`, which
-   * changes no variable.
+   * variable (`s += e`) or an index of any expression: `L[i] += e`,
+   * `m[j, i] += e` and `m[j][i] += e`, which all lower to one `At` with the
+   * positions in order (`["At", "m", j, i]`), and `p.pixels[i] += e` and
+   * `f(x)[i] += e`, whose base is the field or the call
+   * (`["At", ["Field", "p", "'pixels'"], i]`), the store of a cell of an
+   * array. Any other target (a field `p.x`, a call, a literal) and a string
+   * position are the diagnostic `add-to-target`, and the statement is
+   * `Nothing`, which changes no variable.
    *
    * The `AddTo` head is kept, not lowered to `Assign(t, Add(t, e))`: inside a
    * `parallel for` loop it is an accumulator update, which the static checks
@@ -8274,13 +8276,13 @@ export class Parser {
     this.checkAssignTarget(target);
     if (symbolNameOf(target) !== null && this.startsWithSymbolToken(target))
       return this.wrap(['AddTo', target, value], start, end);
-    const element = elementTargetParts(target);
+    const element = indexTargetParts(target);
     if (element !== null && !element.positions.some(isStringNode))
       return this.wrap(
         [
           'AddTo',
           this.wrap(
-            ['At', element.list, ...element.positions],
+            ['At', element.base, ...element.positions],
             this.outerStart(target) ?? start,
             this.outerEnd(target) ?? end
           ),
@@ -10593,6 +10595,30 @@ function elementTargetParts(
   if (inner === null) return null;
   return {
     list: inner.list,
+    positions: [...inner.positions, ...ops.slice(2)],
+  };
+}
+
+/**
+ * The base and the positions, in order, of an indexed target whose base is
+ * any expression: `m[j][i]` and `m[j, i]` give `m` and `[j, i]`, and
+ * `p.pixels[i]` gives `Field(p, "pixels")` and `[i]`. `null` when `expr` is
+ * not an `At` with a position, or when an `At` of its chain has none
+ * (`a[][i]`).
+ */
+function indexTargetParts(
+  expr: MathJsonExpression
+): { base: MathJsonExpression; positions: MathJsonExpression[] } | null {
+  const ops = fnOps(expr);
+  if (ops === null || ops[0] !== 'At' || ops.length < 3) return null;
+  // An inner `At` with no position (`a[][i]`) is not a base.
+  const inner =
+    fnOps(ops[1])?.[0] === 'At'
+      ? indexTargetParts(ops[1])
+      : { base: ops[1], positions: [] };
+  if (inner === null) return null;
+  return {
+    base: inner.base,
     positions: [...inner.positions, ...ops.slice(2)],
   };
 }

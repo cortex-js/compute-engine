@@ -295,20 +295,25 @@ describe('an assignment to a list element that is still an error', () => {
       'unexpected-operator'
     );
   });
+});
 
-  test('the MathJSON form keeps its own error', () => {
+describe('an assignment to an element through At', () => {
+  // `Assign(At(L, i), v)` is the store of a cell
+  // (`docs/plans/2026-11-25-mutable-arrays-spec.md`, section 6). With `L` a
+  // list, its canonical form is the element write of the list.
+  test('the MathJSON form is the element write of a list', () => {
     const ce = engine();
     const expr = ce.box(['Assign', ['At', 'L', 2], 5]);
-    expect(expr.isValid).toBe(false);
-    expect(JSON.stringify(expr.json)).toContain('incompatible-type');
+    expect(expr.json).toEqual(['Assign', 'L', ['ReplaceAt', 'L', 2, 5]]);
+    expr.evaluate();
+    expect(valueOf(ce, 'L')).toEqual(['List', 10, 5, 30]);
     expectElementReadsUnchanged(ce);
   });
 
-  test('the function spelling of Assign keeps its own error', () => {
+  test('the function spelling of Assign is the element write of a list', () => {
     const ce = engine();
     const expr = ce.parse('\\mathrm{Assign}(L[k], 5)');
-    expect(expr.isValid).toBe(false);
-    expect(JSON.stringify(expr.json)).toContain('incompatible-type');
+    expect(expr.json).toEqual(['Assign', 'L', ['ReplaceAt', 'L', 'k', 5]]);
     expectElementReadsUnchanged(ce);
   });
 });

@@ -146,15 +146,19 @@ describe('compiled code never writes to an input or to a list computed once', ()
       expect(value).toEqual(run(existing(json), structuredClone(before)));
   });
 
-  test('a write to an element of a list constant declines', () => {
-    expect(() =>
-      js([
-        'Block',
-        ['Declare', 'L', "'unknown'", K],
-        ['Assign', ['At', 'L', 1], 'x'],
-        ['At', 'L', 1],
-      ])
-    ).toThrow(/static type error/);
+  test('a write to an element of a local that holds a list constant writes a copy', () => {
+    // `Assign(At(L, 1), x)` is the element write of `L`: the local owns a
+    // copy of the list computed once, so the write changes no constant.
+    const r = js([
+      'Block',
+      ['Declare', 'L', "'unknown'", K],
+      ['Assign', ['At', 'L', 1], 'x'],
+      ['At', 'L', 1],
+    ]);
+    expect(run(r, { x: 99 })).toBe(99);
+    expect(run(r, { x: 5 })).toBe(5);
+    expect(run(js(K), {})).toEqual(CONSTANTS);
+    expect(run(js(['At', K, 1]), {})).toBe(CONSTANTS[0]);
   });
 
   test('a list computed once is the same array at each call, and unchanged', () => {

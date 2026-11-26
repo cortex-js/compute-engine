@@ -75,7 +75,7 @@ export function epsilDiagnosticMessage(diagnostic: ParsingDiagnostic): string {
     case 'chained-assignment':
       return `An assignment is a statement, not a value, so assignments do not chain; write two statements, "b := 5; a := b", or "a := (b == 5)" if the comparison was meant`;
     case 'add-to-target':
-      return `The target of "+=" must be a variable or a list element at integer positions: "s += e" or "L[i] += e"`;
+      return `The target of "+=" must be a variable or an element at integer positions: "s += e", "L[i] += e" or "p.pixels[i] += e"`;
     case 'parallel-clause-not-first':
       return `Only the first clause of a comprehension can be "parallel": the other clauses run in order inside each pass of the first one`;
     case 'parallel-outer-write':

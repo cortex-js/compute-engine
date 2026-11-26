@@ -42,7 +42,13 @@ import type { ParsingDiagnostic } from './diagnostics.js';
 //
 // Rule 3 (the targets of `+=`) is checked by the parser (`add-to-target`), as
 // is the rule that only the first clause of a comprehension can be parallel
-// (`parallel-clause-not-first`).
+// (`parallel-clause-not-first`). A `+=` to a name or to an element of a name
+// (`s += e`, `L[i] += e`) is an accumulator update. A `+=` to an index of
+// another expression (`p.pixels[i] += e`, `f(x)[i] += e`) is the store of a
+// cell: its root is an outer write, as for the plain store
+// `p.pixels[i] = e` (rule 1), and it also reads its base, since a `+=` reads
+// the cell before it writes it. So when the root is an accumulator of the
+// same pass, the statement is reported for the read too.
 //
 // The walk reads the RAW statement, the tree that has the source offsets. A
 // name is LOCAL to a pass when the body declares it (`let`, `const`, a
@@ -519,7 +525,20 @@ function walk(
     }
     case 'AddTo': {
       const [target, value] = ops;
-      if (target !== undefined) {
+      const base =
+        target !== undefined && operator(target) === 'At'
+          ? operands(target)[0]
+          : undefined;
+      if (target !== undefined && base !== undefined && symbol(base) === null) {
+        // The store of a cell through a base that is not a name
+        // (`p.pixels[i] += v`, `f(x)[i] += v`) follows the rule of the plain
+        // store `p.pixels[i] = v`: a write of the root of the target, not an
+        // accumulator. The base and the positions are read.
+        const root = targetRoot(target);
+        if (root !== null && !locals.has(root))
+          result.outerWrites.push({ name: root, node });
+        for (const op of operands(target)) visit(op);
+      } else if (target !== undefined) {
         const root = targetRoot(target);
         if (root !== null && !locals.has(root))
           result.accumulators.push({ name: root, node });

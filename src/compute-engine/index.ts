@@ -50,6 +50,8 @@ import type {
   AssignValue,
   AssumeResult,
   InferResult,
+  ArrayCells,
+  ArrayInterface,
   Expression,
   BoxedRule,
   BoxedRuleSet,
@@ -165,6 +167,12 @@ import {
 } from './boxed-expression/boxed-character.js';
 import { BoxedFunction } from './boxed-expression/boxed-function.js';
 import { makeObject } from './boxed-expression/boxed-object.js';
+import {
+  hostArray,
+  makeArray,
+  type ArraySource,
+  type BoxedArray,
+} from './boxed-expression/boxed-array.js';
 import { _BoxedExpression } from './boxed-expression/abstract-boxed-expression.js';
 import './boxed-expression/init-lazy-refs.js';
 import { _BoxedOperatorDefinition } from './boxed-expression/boxed-operator-definition.js';
@@ -1699,6 +1707,38 @@ export class ComputeEngine implements IComputeEngine {
    * given or replaced at any time.
    */
   workers: KernelPool | undefined = undefined;
+
+  /**
+   * The permission to allocate the storage of a mutable array, asked once
+   * by `ArrayFrom` when the count of cells is known and before the engine
+   * allocates the storage. `bytesPerCell` is the size of one cell: 1, 2, 4
+   * or 8 for a machine cell, 4 for a tuple cell, 8 for an expression cell.
+   * A result of `false`, an exception thrown by the function, and a failure
+   * of the JavaScript allocation give the error `array-allocation-refused`.
+   * It is a permission: the engine reports no release. It is not called for
+   * the storage of an array that the host gives. With no function, every
+   * allocation is permitted.
+   *
+   * @experimental
+   */
+  arrayAllocation:
+    | undefined
+    | ((count: number, bytesPerCell: number) => boolean) = undefined;
+
+  /**
+   * A function called with each array that `ArrayFrom` made, after the
+   * construction succeeded: not for a construction that failed, and not for
+   * an array that the host made with `ce.array()`. A host that limits the
+   * bytes alive holds a weak reference to each array. The engine does not
+   * catch an exception that the function throws, except a `TypeError`, a
+   * `RangeError` and a `ReferenceError`, which become the error
+   * `internal-error` of `ArrayFrom` as from the handler of any operator.
+   *
+   * @experimental
+   */
+  arrayCreated:
+    | undefined
+    | ((array: Expression & ArrayInterface) => void) = undefined;
 
   /**
    * Return symbol tables suitable for the specified categories, or `"all"`
@@ -5135,6 +5175,29 @@ export class ComputeEngine implements IComputeEngine {
     pinnedType?: BoxedType
   ): Expression {
     return makeObject(this, typeName, slots, metadata, pinnedType);
+  }
+
+  /**
+   * A new mutable array that adopts the typed array `storage` as its cells,
+   * with no pass over them and no copy. See {@link IComputeEngine.array}.
+   */
+  array(
+    storage: Exclude<ArrayCells, Expression[]>,
+    cellType?: Type | TypeString | BoxedType
+  ): BoxedArray {
+    return hostArray(this, storage, cellType);
+  }
+
+  /**
+   * Construct a mutable array whose cells have the type `cellType`. See
+   * {@link IComputeEngine._array}.
+   * @internal
+   */
+  _array(
+    cellType: Type | TypeString | BoxedType,
+    source: ArraySource
+  ): Expression {
+    return makeArray(this, this.type(cellType), source);
   }
 
   /**

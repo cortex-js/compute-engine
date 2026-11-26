@@ -7,7 +7,7 @@ import type {
   DisplayDigits,
   FormOption,
   Hold,
-  JsonSerializationOptions,
+  JsonSerializationOptions as KernelJsonSerializationOptions,
   Metadata,
   PatternMatchOptions as KernelPatternMatchOptions,
   ReplaceOptions,
@@ -16,7 +16,6 @@ import type {
 
 export type {
   Hold,
-  JsonSerializationOptions,
   DisplayDigits,
   ReplaceOptions,
   CanonicalForm,
@@ -35,6 +34,15 @@ export type {
  * @category Pattern Matching
  */
 export type Substitution<T = ExpressionInput> = KernelSubstitution<T>;
+
+/**
+ * Options to control serialization to MathJSON when using
+ * `Expression.toMathJson()`.
+ *
+ * @category Serialization
+ */
+export type JsonSerializationOptions<T = Expression> =
+  KernelJsonSerializationOptions<T>;
 
 /**
  * @category Pattern Matching

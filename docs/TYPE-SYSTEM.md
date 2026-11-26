@@ -1609,7 +1609,11 @@ array of any cell type. The rules:
 - `arrayStorageKind()` (`common/type/array-storage.ts`) gives the storage of
   the cells from the cell type alone: a typed array of JavaScript for a
   bounded integer type, for `real` and for a tuple of four bytes, and
-  evaluated expressions for every other type. No other code decides a
+  evaluated expressions for every other type. It reads a cell type through a
+  transparent alias (`type alias Byte = integer<0..255>`). A type declared
+  with `type` is nominal, and its values carry its name (`Byte(1)`), so it
+  has expression cells; the one exception is a declared tuple of four bytes,
+  whose cells are read as values of that type. No other code decides a
   storage.
 
 ## The type of a name with no explicit type

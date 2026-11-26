@@ -182,6 +182,7 @@ import {
   isTensor,
   isDictionary,
   isObject,
+  isMutableArray,
   isCollection,
   isIndexedCollection,
   numericValue,
@@ -197,6 +198,7 @@ export {
   isTensor,
   isDictionary,
   isObject,
+  isMutableArray,
   isCollection,
   isIndexedCollection,
   numericValue,
@@ -210,6 +212,7 @@ export type { BoxedFunction } from './compute-engine/boxed-expression/boxed-func
 export type { BoxedString } from './compute-engine/boxed-expression/boxed-string.js';
 export type { BoxedCharacter } from './compute-engine/boxed-expression/boxed-character.js';
 export type { BoxedObject } from './compute-engine/boxed-expression/boxed-object.js';
+export type { BoxedArray } from './compute-engine/boxed-expression/boxed-array.js';
 
 // ── Global registration ─────────────────────────────────────────────
 // The self-registration slot is the only discovery channel that works with
@@ -238,6 +241,7 @@ const COMPUTE_ENGINE_GLOBAL: ComputeEngineGlobal = {
   isTensor,
   isDictionary,
   isObject,
+  isMutableArray,
   isCollection,
   isIndexedCollection,
   numericValue,
@@ -293,6 +297,7 @@ export interface ComputeEngineGlobal {
   isTensor: typeof isTensor;
   isDictionary: typeof isDictionary;
   isObject: typeof isObject;
+  isMutableArray: typeof isMutableArray;
   isCollection: typeof isCollection;
   isIndexedCollection: typeof isIndexedCollection;
   numericValue: typeof numericValue;

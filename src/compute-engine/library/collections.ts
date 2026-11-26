@@ -165,6 +165,7 @@ import {
   DICTIONARY_SHAPE_TYPE,
   INDEXED_COLLECTION_SHAPE_TYPE,
   SIGNED_INFINITY_TYPE,
+  isValidType,
 } from '../../common/type/primitive.js';
 import { admissionOf } from '../boxed-expression/value-membership.js';
 import { DISPLAY_MATERIALIZATION } from '../boxed-expression/abstract-boxed-expression.js';
@@ -267,6 +268,7 @@ import type {
   Expression,
   ExpressionInput,
   FunctionInterface,
+  ArrayInterface,
   OperandDescriptor,
   OperandStructure,
   OperatorDefinition,
@@ -324,6 +326,7 @@ import {
   isFunction,
   isNumber,
   isObject,
+  isMutableArray,
   isString,
   isCharacter,
   isSymbol,
@@ -333,6 +336,13 @@ import {
   isFreeCallHead,
   freeBinding,
 } from '../boxed-expression/type-guards.js';
+import type { BoxedArray } from '../boxed-expression/boxed-array.js';
+import { recordObjectRead } from '../boxed-expression/object-deps.js';
+import { widenLocalType } from '../boxed-expression/boxed-value-definition.js';
+import {
+  arrayCellType,
+  arrayStorageKind,
+} from '../../common/type/array-storage.js';
 import {
   isRestriction,
   mayHoldRestriction,
@@ -846,6 +856,8 @@ function atRefusesBase(d: OperandDescriptor, engine: PureEngineView): boolean {
     return false;
   if (provablyAdmits('missing', t) || provablyAdmits('nothing', t))
     return false;
+  // An array is read by `At` (`arrayAt()`).
+  if (isArrayType(t)) return false;
   // The evaluation of an access reads a `NaN` base as absent and gives
   // `NaN`: with `d(a) := a[1] + a[2]`, `d(NaN)` is `NaN`.
   if (!provablyDisjoint(t, 'nan')) return false;
@@ -869,6 +881,321 @@ function atRefusesBase(d: OperandDescriptor, engine: PureEngineView): boolean {
     return def?.value !== undefined && !def.value.inferredType;
   }
   return false;
+}
+
+/**
+ * Record a read of the array `a` at its version, as `BoxedArray._read()`
+ * records one, for a result that reads the count or the cells of `a`: its
+ * length, a copy of its cells (also of no cell), a gather or a mask. A store
+ * and a `Swap` advance the version, so a memoized result that read the
+ * count is computed again after a `Swap` of two counts.
+ */
+function noteArrayRead(a: Expression & ArrayInterface): void {
+  recordObjectRead(a, a._version);
+}
+
+/** True when `t` is an array type, `array<T>` or bare `array`. */
+function isArrayType(t: Type): boolean {
+  return t !== 'never' && t !== 'error' && isSubtype(t, 'array');
+}
+
+/** True when `t` is an array type, or a union with an array type: an
+ * operand of that type with no value yet can still become an array. */
+function typeCouldBeArray(t: Type): boolean {
+  if (isArrayType(t)) return true;
+  return (
+    typeof t !== 'string' && t.kind === 'union' && t.types.some(typeCouldBeArray)
+  );
+}
+
+/**
+ * The read of an array by one index of `At` (spec
+ * `docs/plans/2026-11-25-mutable-arrays-spec.md`, section 5): the cell at a
+ * number index (`BoxedArray._read()`: what `At` gives for a list of the cell
+ * type at an index that is 0, not an integer or out of range), and for a
+ * finite collection of indexes (a `Range`, a list of integers, a list of
+ * booleans) the list of those cells now, built at once, as `At` reads a
+ * list: a gather is position-preserving, a mask is a filter over the
+ * positions up to the shorter of the mask and the array. `undefined` for an
+ * index that names no position yet (a symbol with no value), and for a
+ * string key: `At` stays unevaluated.
+ */
+function arrayAt(
+  ce: ComputeEngine,
+  a: Expression & ArrayInterface,
+  index: Expression
+): Expression | undefined {
+  if (isNumber(index)) return a._read(index.im === 0 ? index.re : NaN);
+  // An exact constant that is provably not an integer (`π`, `5 + √17`)
+  // names no cell, as for a list (`isProvablyNonIntegerIndex()`).
+  if (isProvablyNonIntegerIndex(index)) return a._read(NaN);
+  if (!index.isCollection || !isWalkableFiniteCollection(index))
+    return undefined;
+  // A gather or a mask reads the count, and can read no cell.
+  noteArrayRead(a);
+  const indexes = Array.from(index.each()) as Expression[];
+  const boolean = (m: Expression) => sym(m) === 'True' || sym(m) === 'False';
+  const picked: Expression[] = [];
+  if (
+    indexes.some(boolean) &&
+    indexes.every((m) => boolean(m) || isAbsentValue(m))
+  ) {
+    const n = Math.min(a.count, indexes.length);
+    for (let i = 0; i < n; i++)
+      if (sym(indexes[i]) === 'True') picked.push(a._read(i + 1));
+  } else {
+    for (const m of indexes) {
+      if (isNumber(m)) picked.push(a._read(m.im === 0 ? m.re : NaN));
+      else if (isAbsentValue(m) || isProvablyNonIntegerIndex(m))
+        picked.push(a._read(0));
+      else return undefined;
+    }
+  }
+  return ce._fn('List', picked);
+}
+
+/**
+ * True when no value of the type `t` is, or holds, an object or an array:
+ * a machine cell, a number, a boolean, a string, and a list, a set, a tuple,
+ * a record or a dictionary of such values. `ListFrom` of an array whose
+ * cells can hold a reference is refused (`arrayOfReferencesError()`).
+ */
+function cellsHoldNoReference(t: Type, depth = 0): boolean {
+  if (depth > 16) return false;
+  if (arrayStorageKind(t).storage !== 'expression') return true;
+  if (t === 'never' || t === 'nothing' || t === 'missing') return true;
+  for (const leaf of ['number', 'boolean', 'string', 'character'] as const)
+    if (isSubtype(t, leaf)) return true;
+  const r = resolveTypeReference(t) ?? t;
+  if (typeof r === 'string') return false;
+  switch (r.kind) {
+    case 'list':
+    case 'set':
+      return cellsHoldNoReference(r.elements, depth + 1);
+    case 'tuple':
+      return r.elements.every((e) => cellsHoldNoReference(e.type, depth + 1));
+    case 'record':
+      return Object.values(r.elements).every((e) =>
+        cellsHoldNoReference(e, depth + 1)
+      );
+    case 'dictionary':
+      return cellsHoldNoReference(r.values, depth + 1);
+    case 'union':
+      return r.types.every((e) => cellsHoldNoReference(e, depth + 1));
+    default:
+      return false;
+  }
+}
+
+/** The error of `ListFrom(a)` for an array whose cells can hold an object or
+ * an array. */
+function arrayOfReferencesError(
+  ce: ComputeEngine,
+  a: Expression & ArrayInterface
+): Expression {
+  return ce.error([
+    'incompatible-type',
+    'an array whose cells hold no object and no array (list the cells with a comprehension, `[a[k] for k in 1..length(a)]`)',
+    typeToString(a.type.type),
+  ]);
+}
+
+/**
+ * The cell type of `ArrayFrom(xs)` with no type operand, from the static
+ * type `t` of `xs`: the cell type of an array, or the element type of the
+ * type that `let L = xs` gives `L` (`widenLocalType()`), and `any` when that
+ * type states no element type (an empty list). `undefined` for bare
+ * `array`, whose cell type is the one of the value.
+ */
+function arrayFromCellType(engine: PureEngineView, t: Type): Type | undefined {
+  if (isArrayType(t)) return arrayCellType(t);
+  const local = widenLocalType(engine as unknown as ComputeEngine, t);
+  const element = collectionElementType(local);
+  if (element === undefined || element === 'unknown' || element === 'never')
+    return 'any';
+  return element;
+}
+
+/**
+ * The cell type named by the type operand of `ArrayFrom`, or the error of
+ * that operand: a string literal that parses as a type. The error is
+ * `invalid-type-declaration`, the error of `Declare` for a type that does not
+ * parse.
+ */
+function arrayFromTypeOperand(
+  ce: ComputeEngine,
+  t: Expression
+): { type: Type } | { error: Expression } {
+  if (!isString(t))
+    return {
+      error: ce.error(
+      [
+        'invalid-type-declaration',
+        'the type of the cells is a string literal, such as "integer<0..255>"',
+      ],
+      t.toString()
+      ),
+    };
+  try {
+    const parsed = parseType(t.string, ce._typeResolver);
+    if (isValidType(parsed)) return { type: parsed };
+  } catch (e) {
+    return {
+      error: ce.error(
+        [
+          'invalid-type-declaration',
+          e instanceof Error ? e.message : String(e),
+        ],
+        t.string
+      ),
+    };
+  }
+  return {
+    error: ce.error(
+      ['invalid-type-declaration', `"${t.string}" is not a type`],
+      t.string
+    ),
+  };
+}
+
+/** The largest storage of one array that `ArrayFrom` allocates when the
+ * host gives no allocation function (`ce.arrayAllocation`): 2 GiB. */
+const DEFAULT_MAX_ARRAY_BYTES = 2 ** 31;
+
+/**
+ * The permission to allocate the storage of an array of `count` cells of
+ * `bytesPerCell` bytes each, asked once by `ArrayFrom` when the count is
+ * known and before the storage is allocated: the allocation function of the
+ * host, `ce.arrayAllocation` (spec section 9). With no function, a storage
+ * of more than `DEFAULT_MAX_ARRAY_BYTES` is refused: JavaScript accepts the
+ * allocation of a typed array far larger than the memory and fails when the
+ * cells are filled, which ends the process
+ * (`arrayFrom(repeat(0, 10^12), "real")`). A `false` result and an exception
+ * thrown by the function refuse it, which is the error
+ * `array-allocation-refused`.
+ */
+function beforeArrayAllocation(
+  ce: ComputeEngine,
+  count: number,
+  bytesPerCell: number
+): boolean {
+  const permit = ce.arrayAllocation;
+  if (permit === undefined)
+    return count * bytesPerCell <= DEFAULT_MAX_ARRAY_BYTES;
+  try {
+    return permit(count, bytesPerCell) !== false;
+  } catch {
+    return false;
+  }
+}
+
+/** Report to the host, `ce.arrayCreated` (spec section 9), the array that a
+ * construction made: nothing when `result` is the error of a construction
+ * that failed. It catches no exception that the function throws (the
+ * handler rule of the evaluation still turns a `TypeError`, a `RangeError`
+ * or a `ReferenceError` into `internal-error`). */
+function afterArrayCreated(ce: ComputeEngine, result: Expression): void {
+  if (isMutableArray(result)) ce.arrayCreated?.(result);
+}
+
+/** The size of one cell in the storage of the cell type `t`: 4 bytes for a
+ * tuple cell, 8 for expression cells (spec section 9). */
+function bytesPerCell(t: Type): number {
+  const { storage, tuple } = arrayStorageKind(t);
+  if (tuple) return 4;
+  switch (storage) {
+    case 'uint8':
+    case 'int8':
+      return 1;
+    case 'uint16':
+    case 'int16':
+      return 2;
+    case 'uint32':
+    case 'int32':
+      return 4;
+    default:
+      return 8;
+  }
+}
+
+/** The error of an allocation that the host refused, or that JavaScript
+ * could not make. */
+function arrayAllocationRefused(ce: ComputeEngine, count: number): Expression {
+  return ce.error([
+    'array-allocation-refused',
+    `the storage of an array of ${count} cells could not be allocated`,
+  ]);
+}
+
+/**
+ * The evaluation of `ArrayFrom(xs, type?)`, with `xs` and the type operand
+ * evaluated. A new array each time; `undefined` (unevaluated) for a source
+ * whose length is not finite or not known.
+ *
+ * With no type operand, the cell type comes from `staticType`, the static
+ * type of the canonical source (`arrayFromCellType()`, as the `type` handler
+ * gives it), and from the value only for bare `array`. A source that is
+ * still `Repeat(v, n)` after its evaluation (`Repeat` stays unevaluated for
+ * a count above `ce.maxCollectionSize`), with `v` pure and `n` a safe
+ * integer of at least 1, fills the storage with `v` and builds no list.
+ */
+function evaluateArrayFrom(
+  ce: ComputeEngine,
+  xs: Expression,
+  typeOperand: Expression | undefined,
+  staticType: Type
+): Expression | undefined {
+  let cellType: Type | undefined;
+  if (typeOperand !== undefined) {
+    const parsed = arrayFromTypeOperand(ce, typeOperand);
+    if ('error' in parsed) return parsed.error;
+    cellType = parsed.type;
+  } else cellType = arrayFromCellType(ce, staticType);
+
+  let source:
+    | { fill: Expression; count: number }
+    | { elements: ReadonlyArray<Expression> }
+    | undefined;
+  const fill =
+    isFunction(xs, 'Repeat') && xs.nops === 2 && xs.op1.isPure
+      ? { fill: xs.op1, count: toInteger(xs.op2) }
+      : undefined;
+  if (fill !== undefined && fill.count !== null && fill.count >= 1) {
+    source = { fill: fill.fill, count: fill.count };
+  } else if (isMutableArray(xs)) {
+    noteArrayRead(xs);
+    cellType ??= xs.cellType.type;
+    const elements: Expression[] = [];
+    for (let k = 1; k <= xs.count; k++) elements.push(xs._read(k));
+    source = { elements };
+  } else if (!xs.isCollection) {
+    // A source typed a collection or an array with no value yet stays
+    // unevaluated.
+    if (typeCouldBeCollection(xs.type.type) || typeCouldBeArray(xs.type.type))
+      return undefined;
+    return ce.typeError('collection', xs.type, xs);
+  } else {
+    if (!isWalkableFiniteCollection(xs) || typeof xs.count === 'bigint')
+      return undefined;
+    const elements: Expression[] = [];
+    for (const x of xs.each()) elements.push(x);
+    source = { elements };
+  }
+  cellType ??= 'any';
+  if (source === undefined) return undefined;
+
+  const count = 'fill' in source ? source.count : source.elements.length;
+  if (!beforeArrayAllocation(ce, count, bytesPerCell(cellType)))
+    return arrayAllocationRefused(ce, count);
+  let result: Expression;
+  try {
+    result = ce._array(cellType, source);
+  } catch (e) {
+    if (e instanceof RangeError) return arrayAllocationRefused(ce, count);
+    throw e;
+  }
+  afterArrayCreated(ce, result);
+  return result;
 }
 
 // The index type of `AT_SIGNATURE`, reported as the expected type when an
@@ -9502,6 +9829,26 @@ export function fieldStoreRefusal(
 }
 
 /**
+ * The error of a store of a cell whose base is a value that is not an array
+ * (a list that a field of an object holds, a list cell of an array): a list
+ * is immutable, so one of its elements cannot be stored. The message names
+ * the two remedies.
+ */
+export function immutableCellAssignmentError(
+  ce: ComputeEngine,
+  base: Expression
+): Expression {
+  const t = base.type.type;
+  const cell = collectionElementType(t);
+  return ce.error([
+    'immutable-value-assignment',
+    `\`${typeToString(t)}\` is a value, and an element of it cannot be ` +
+      `stored. Store a new value in the field or the cell, or declare it ` +
+      `an array (\`array<${typeToString(cell ?? 'any')}>\`)`,
+  ]);
+}
+
+/**
  * The store target of `Assign(Field(base, name), value)`, for `Assign`'s
  * evaluate handlers — the route where a real receiver is in hand: the field
  * name and its declared type, or `undefined` when this is not a store (the
@@ -12577,7 +12924,9 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
           return BoxedType.forResult('integer', context.engine._typeResolver);
         const t = xs.type;
         // The bare `tuple` is a tuple of any arity, and every tuple is finite.
+        // An array has a count of cells.
         if (
+          isArrayType(t) ||
           t === 'string' ||
           t === 'tuple' ||
           (typeof t !== 'string' &&
@@ -12634,6 +12983,11 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       // unevaluated and gives 3 only at a second evaluation. `IsEmpty` and
       // `Contains` do the same.
       const xs = peekCountPreserving(operand) ?? operand;
+      // The number of cells of an array.
+      if (isMutableArray(xs)) {
+        noteArrayRead(xs);
+        return engine.number(xs.count);
+      }
       // `Length(5)` and `Length(True)` are decided non-collections and answer
       // an `incompatible-type` error; an operand that is merely not decided
       // yet keeps the inert form (see `nonCollectionSizeOperandError`). An
@@ -18047,6 +18401,24 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       };
 
       if (ops.length === 2) {
+        // A read of an array is typed as the same read of a list of the cell
+        // type `T` of `array<T>` (`any` for bare `array`): a scalar index or
+        // a gather reads `T` or its absence marker (`elementReadType()`), and
+        // a mask gives `list<T>`.
+        if (isArrayType(ops[0].type)) {
+          const cell = arrayCellType(ops[0].type) ?? 'any';
+          if (isMaskIndex(ops[1]))
+            return BoxedType.forResult(
+              { kind: 'list', elements: cell },
+              context.engine._typeResolver
+            );
+          // A read of a `list<any>` is `any` (`declaresAnyElement()`).
+          const read = cell === 'any' ? 'any' : elementReadType(ops[0], cell);
+          return BoxedType.forResult(
+            isGatherIndex(ops[1]) ? { kind: 'list', elements: read } : read,
+            context.engine._typeResolver
+          );
+        }
         if (
           isSubtype(ops[0].type, INDEXED_COLLECTION_SHAPE_TYPE) &&
           isGatherIndex(ops[1])
@@ -18189,7 +18561,9 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
           (typeof valueType !== 'string' &&
             valueType?.kind === 'broadcastable') ||
           valueType === 'value' ||
-          valueType === 'expression')
+          valueType === 'expression' ||
+          // An array is read by `At` (`arrayAt()`).
+          (valueType !== undefined && isArrayType(valueType)))
       )
         patched[0] = value;
       // Absent base/index positions (`missing`, `T | missing`) are handled by
@@ -18339,6 +18713,15 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
           isString(opAtIndex) || isCharacter(opAtIndex)
             ? opAtIndex.string
             : undefined;
+
+        // An array: one index at each step (`arrayAt()`).
+        if (isMutableArray(expr)) {
+          const v = key === undefined ? arrayAt(ce, expr, opAtIndex) : undefined;
+          if (v === undefined) return undefined;
+          expr = v;
+          index += 1;
+          continue;
+        }
 
         // Dictionary key access: a `dictionary` is a keyed (not indexed)
         // collection with no `collection.at` handler, so look the value up by
@@ -23199,6 +23582,12 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         return BoxedType.forResult('list', context.engine._typeResolver);
       let type: Type = 'unknown';
       for (const xs of ops) {
+        // An array contributes its cells (`array<T>` gives `T`, bare
+        // `array` gives `any`).
+        if (isArrayType(xs.type)) {
+          type = widen(type, arrayCellType(xs.type) ?? 'any');
+          continue;
+        }
         if (unboundedCollectionOperand(xs))
           return BoxedType.forResult('list', context.engine._typeResolver);
         type = widen(type, collectionElementType(xs.type) ?? type);
@@ -23230,13 +23619,30 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         });
         if (listed?.operator === 'Error') return listed;
         const xs = listed ?? operand;
+        // An array contributes a copy of its cells now: a later store does
+        // not change the list. The cells of an array whose cell type can
+        // hold an object or an array would have to be detached one by one,
+        // which is not implemented: that is `incompatible-type` (spec
+        // `docs/plans/2026-11-25-mutable-arrays-spec.md`, section 5).
+        if (isMutableArray(xs)) {
+          if (!cellsHoldNoReference(xs.cellType.type))
+            return arrayOfReferencesError(ce, xs);
+          noteArrayRead(xs);
+          for (let k = 1; k <= xs.count; k++) elements.push(xs._read(k));
+          continue;
+        }
         if (!xs.isCollection) {
           // A collection-TYPED operand that is not a collection right now (a
           // valueless `list<integer>` symbol, an unevaluated eager producer)
           // is UNRESOLVED, not a scalar datum: wrapping it (`["xs"]`) bakes
           // an answer a later `xs := [1, 5]` contradicts. Stay inert
           // (USER-RULED 2026-08-11); genuine scalars contribute themselves.
-          if (typeCouldBeCollection(xs.type.type)) return undefined;
+          // An operand typed an array with no value yet is unresolved too.
+          if (
+            typeCouldBeCollection(xs.type.type) ||
+            typeCouldBeArray(xs.type.type)
+          )
+            return undefined;
           elements.push(xs);
         } else {
           if (!isWalkableFiniteCollection(xs)) return undefined;
@@ -23257,6 +23663,102 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         }
       }
       return ce.function('List', elements);
+    },
+  },
+
+  ArrayFrom: {
+    examples: [
+      'ArrayFrom([1, 2, 3])',
+      'ArrayFrom(Repeat(0, 4), "integer<0..255>")',
+    ],
+    description: [
+      'Make a new mutable array from the elements of a finite collection, or from the cells of an array, in order.',
+      'The second operand is a string that names the type of the cells, such as `"integer<0..255>"`. Without it, the cell type is the element type that a variable initialized with the collection takes (`number` for a list of numbers, `any` for an empty list), or the cell type of an array.',
+      'Each evaluation makes a new array. A source whose length is not finite or not known leaves the expression unevaluated.',
+    ],
+    complexity: 8200,
+    // Each evaluation mints a new array, which `==` tells apart from every
+    // other: the `state` label, as the constructor of an object carries.
+    signature: '(value, string?) state -> array',
+    parameters: [
+      {
+        description:
+          'A finite collection whose elements are the cells, or an array whose cells are copied.',
+        sample: '[1, 2, 3]',
+      },
+      {
+        description: 'The type of the cells, as a string.',
+        sample: '"integer<0..255>"',
+      },
+    ],
+    type: ([xs, t], { engine }) => {
+      let cell: Type | undefined;
+      if (t !== undefined) {
+        const text = stringLiteralOf(t);
+        if (text === undefined)
+          return BoxedType.forResult('array', engine._typeResolver);
+        try {
+          cell = parseType(text, engine._typeResolver);
+        } catch {
+          cell = undefined;
+        }
+        if (cell !== undefined && !isValidType(cell)) cell = undefined;
+      } else if (xs !== undefined) cell = arrayFromCellType(engine, xs.type);
+      return BoxedType.forResult(
+        cell === undefined ? 'array' : { kind: 'array', elements: cell },
+        engine._typeResolver
+      );
+    },
+    // The type operand is a string literal that names a type, checked here
+    // so that a type that does not parse is a static error.
+    canonical: (ops, { engine: ce }) => {
+      const args = validateAgainstDeclaration(ce, 'ArrayFrom', ops) ?? [
+        ...ops,
+      ];
+      const t = args[1];
+      if (t !== undefined && t.isValid) {
+        const parsed = arrayFromTypeOperand(ce, t);
+        if ('error' in parsed) return ce._fn('ArrayFrom', [args[0], parsed.error]);
+      }
+      return ce._fn('ArrayFrom', args);
+    },
+    // The cell type comes from the static type of the canonical source, the
+    // type that the `type` handler reads.
+    evaluate: (ops, { engine: ce, expression }) =>
+      evaluateArrayFrom(
+        ce,
+        ops[0],
+        ops[1],
+        isFunction(expression) && expression.nops === ops.length
+          ? expression.op1.type.type
+          : ops[0].type.type
+      ),
+  },
+
+  Swap: {
+    examples: ['Swap(ArrayFrom([1, 2]), ArrayFrom([3, 4, 5]))'],
+    description: [
+      'Exchange the cells and the counts of two arrays of one cell type, in constant time, with no cell copied.',
+      'Neither array changes identity: every name, field and tuple that holds an array still holds it, with the cells of the other. The value is `Nothing`.',
+    ],
+    complexity: 8200,
+    signature: '(array, array) state -> nothing',
+    parameters: [
+      {
+        description: 'The first array.',
+        sample: 'arrayFrom([1, 2])',
+      },
+      {
+        description: 'The second array, of the same cell type.',
+        sample: 'arrayFrom([3, 4, 5])',
+      },
+    ],
+    evaluate: ([a, b], { engine: ce }) => {
+      if (!isMutableArray(a)) return ce.typeError('array', a.type, a);
+      if (!isMutableArray(b)) return ce.typeError('array', b.type, b);
+      if (!(a as unknown as BoxedArray)._swapWith(b as unknown as BoxedArray))
+        return ce.typeError(a.type.type, b.type, b);
+      return ce.Nothing;
     },
   },
 

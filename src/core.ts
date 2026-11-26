@@ -67,6 +67,7 @@ export {
   isTensor,
   isDictionary,
   isObject,
+  isMutableArray,
   isCollection,
   isIndexedCollection,
   numericValue,
@@ -77,3 +78,4 @@ export type { BoxedSymbol } from './compute-engine/boxed-expression/boxed-symbol
 export type { BoxedFunction } from './compute-engine/boxed-expression/boxed-function.js';
 export type { BoxedString } from './compute-engine/boxed-expression/boxed-string.js';
 export type { BoxedObject } from './compute-engine/boxed-expression/boxed-object.js';
+export type { BoxedArray } from './compute-engine/boxed-expression/boxed-array.js';

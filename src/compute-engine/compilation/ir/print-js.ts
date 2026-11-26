@@ -25,7 +25,12 @@ import type {
   Expression,
 } from '../../global-types.js';
 import { isCancellationError } from '../../interval/run-support.js';
-import { isNumber, isSymbol } from '../../boxed-expression/type-guards.js';
+import {
+  isMutableArray,
+  isNumber,
+  isString,
+  isSymbol,
+} from '../../boxed-expression/type-guards.js';
 import {
   createSysRuntime,
   engineRuntimeSource,
@@ -40,6 +45,9 @@ import {
   recursiveFunctions,
   regionsOf,
   useIndex,
+  type ArrayMaker,
+  type ArrayUse,
+  type Assigned,
   type HostCall,
   type Instr,
   type IRType,
@@ -65,6 +73,7 @@ import {
   type Syntax,
 } from './print.js';
 import { TEXT, TEXT_REGIONS } from './print-js-text.js';
+import { arrayEntryCheck } from './lower-arrays.js';
 
 const IDENTIFIER = /^[A-Za-z_$][\w$]*$/;
 
@@ -285,6 +294,49 @@ export const JS: Syntax = deepFreeze({
     'set': '($0[$1] = $2)',
     'getat': { text: '_at($0, $1)', helpers: ['_at'] },
     'getatu': { text: '_atu($0, $1)', helpers: ['_atu'] },
+    // A mutable array of the engine (`operators.ts`, `lower-arrays.ts`):
+    // the storage and the count are read from the array at each use. A read
+    // outside the cells of a typed array is `undefined`, which the unary
+    // plus makes NaN; a store there is ignored. A tuple cell is four bytes
+    // of the storage; at an index on the real lane (`.r`), one that is not
+    // an integer names no cell or byte (`c.length + i` of a fraction can
+    // round to an integer).
+    'arr.get': '(+$0._cells[$1 > 0 ? $1 - 1 : $0._cells.length + $1])',
+    'arr.set':
+      '($0._version++, $0._cells[$1 > 0 ? $1 - 1 : $0._cells.length + $1] = $2)',
+    'arr.get.int': '(+$0._cells[$1 > 0 ? $1 - 1 : $0._cells.length + $1])',
+    'arr.set.int':
+      '($0._version++, $0._cells[$1 > 0 ? $1 - 1 : $0._cells.length + $1] = $2)',
+    'arr.get.r':
+      '(+$0._cells[Number.isInteger($1) ? ($1 > 0 ? $1 - 1 : $0._cells.length + $1) : -1])',
+    'arr.set.r':
+      '($0._version++, $0._cells[Number.isInteger($1) ? ($1 > 0 ? $1 - 1 : $0._cells.length + $1) : -1] = $2)',
+    'arr.get.int.r':
+      '(+$0._cells[Number.isInteger($1) ? ($1 > 0 ? $1 - 1 : $0._cells.length + $1) : -1])',
+    'arr.set.int.r':
+      '($0._version++, $0._cells[Number.isInteger($1) ? ($1 > 0 ? $1 - 1 : $0._cells.length + $1) : -1] = $2)',
+    'arr.byte': '(+$0._cells[4 * ($1 > 0 ? $1 - 1 : $0._count + $1) + $2])',
+    'arr.byte.r':
+      '(+$0._cells[Number.isInteger($1) ? 4 * ($1 > 0 ? $1 - 1 : $0._count + $1) + $2 : -1])',
+    'arr.setbyte': '($0._cells[4 * ($1 > 0 ? $1 - 1 : $0._count + $1) + $2] = $3)',
+    'arr.setbyte.r':
+      '($0._cells[Number.isInteger($1) ? 4 * ($1 > 0 ? $1 - 1 : $0._count + $1) + $2 : -1] = $3)',
+    'arr.touch': '($0._version++)',
+    'arr.len': '$0._count',
+    'arr.swap': { text: '_aswap($0, $1)', helpers: ['_aswap'] },
+    'arr.ref': '_SYS.arrays.refs[$0]',
+    'arr.from.list': '_SYS.arrays.make[$1]($0)',
+    'arr.from.copy': '_SYS.arrays.make[$1]($0)',
+    'arr.from.fill': '_SYS.arrays.make[$2]($0, $1)',
+    'arr.from.fillrec': '_SYS.arrays.make[$2]($0, $1)',
+    // A variable of the engine around a call of the host (`operators.ts`).
+    'state.put': '_SYS.state.put($0, $1)',
+    'state.put.bool': '_SYS.state.put($0, $1)',
+    'state.put.arr': '_SYS.state.put($0, $1)',
+    'state.get': '_SYS.state.get($0)',
+    'state.get.int': '_SYS.state.get($0)',
+    'state.get.bool': '_SYS.state.get($0)',
+    'state.get.arr': '_SYS.state.get($0)',
     'isnan': 'Number.isNaN($0)',
     'isundef': '($0 === undefined)',
     ...Object.fromEntries(
@@ -332,6 +384,8 @@ export const JS: Syntax = deepFreeze({
     // The length of the rows of a matrix, and the checks of two lengths
     // (`agree()` of `lower-lists.ts`).
     'rows.width': '($0.length === 0 ? 0 : $0[0].length)',
+    // The host's array of arrays, as it is.
+    'rows.of': '$0',
     'rows.agree': { text: '_agree($0, $1)', helpers: ['_agree'] },
     'rows.square': { text: '_square($0, $1)', helpers: ['_square'] },
     'rows.order': { text: '_order($0, $1)', helpers: ['_order'] },
@@ -463,6 +517,13 @@ export const JS: Syntax = deepFreeze({
   },
   helpers: {
     _round: 'const _round = (x) => (x < 0 ? -Math.round(-x) : Math.round(x));',
+    // `Swap(a, b)` of two arrays of one cell type, which the lowering
+    // proved (`lower-arrays.ts`): the exchange of their storages and counts
+    // (`BoxedArray._swapWith()`, with no test of the cell types), each
+    // version incremented. Its value is NaN, the `Nothing` that the code
+    // does not read.
+    _aswap:
+      'const _aswap = (a, b) => { if (a !== b) { const c = a._cells, n = a._count; a._cells = b._cells; a._count = b._count; b._cells = c; b._count = n; a._version++; b._version++; } return NaN; };',
     _at: 'const _at = (l, i) => { const k = i > 0 ? i - 1 : l.length + i; return Number.isInteger(i) && i !== 0 && k >= 0 && k < l.length ? l[k] : NaN; };',
     _atu: 'const _atu = (l, i) => { const k = i > 0 ? i - 1 : l.length + i; return Number.isInteger(i) && i !== 0 && k >= 0 && k < l.length ? l[k] : undefined; };',
     // The length of a list that is not built (`listlen`): the guard of a
@@ -535,6 +596,7 @@ export const JS: Syntax = deepFreeze({
     IDENTIFIER.test(name) ? `_.${name}` : `_[${JSON.stringify(name)}]`,
   positional: (_name, k) => `a${k}`,
   length: (list) => `${list}.length`,
+  width: (list) => `(${list}.length === 0 ? 0 : ${list}[0].length)`,
   part: (tuple, index) => `${tuple}[${index}]`,
   list: (elements) => `[${elements.join(', ')}]`,
   // An array of the length, filled in index order by a `for` loop: an
@@ -653,22 +715,104 @@ export type JavaScriptResult = {
 /** The runtime `_SYS` of the code: over the engine `ce` (its draws, its
  *  random frame and its deadline, read at each call), or with no engine,
  *  that of `createJavaScriptRuntime()`. With `hosts`, the functions of the
- *  host that the code calls, as `_SYS.hosts` (`hostCaller()`). */
+ *  host that the code calls, as `_SYS.hosts` (`hostCaller()`). With
+ *  `arrays`, the arrays of the program (`ArrayUse`), as `_SYS.arrays`:
+ *  the references and the constructions; and the step after the stores of
+ *  a unit (`arrayNote()`), which a call of the host runs first. With
+ *  `hosts` and `assigns`, the write and the read of each variable that the
+ *  code makes around a call of the host, as `_SYS.state` (`readAssigned()`,
+ *  `writeAssigned()`). */
 export function runtimeOf(
   ce?: ComputeEngine,
-  hosts?: readonly HostCall[]
+  hosts?: readonly HostCall[],
+  arrays?: ArrayUse,
+  assigns?: readonly Assigned[]
 ): SysHelpers {
   if (ce === undefined) {
     if (hosts !== undefined)
       throw new Error('slice: a call of a function of the host with no engine');
+    if (arrays !== undefined)
+      throw new Error('slice: an array of the engine with no engine');
     return createSysRuntime();
   }
   const sys = makeSysHelpers(engineRuntimeSource(ce));
+  const note = arrays?.stores === true ? arrayNote(ce) : undefined;
   if (hosts !== undefined)
     Object.defineProperty(sys, 'hosts', {
-      value: Object.freeze(hosts.map((h) => hostCaller(ce, h))),
+      value: Object.freeze(hosts.map((h) => hostCaller(ce, h, note))),
+    });
+  if (hosts !== undefined && assigns !== undefined)
+    Object.defineProperty(sys, 'state', {
+      value: Object.freeze({
+        put: (j: number, y: unknown) => {
+          writeAssigned(ce, assigns[j], y);
+          return NaN;
+        },
+        get: (j: number) => readAssigned(assigns[j]),
+      }),
+    });
+  if (arrays !== undefined)
+    Object.defineProperty(sys, 'arrays', {
+      value: Object.freeze({
+        refs: Object.freeze([...arrays.refs]),
+        make: Object.freeze(arrays.makers.map((m) => arrayMaker(ce, m))),
+      }),
     });
   return sys;
+}
+
+/** What a store of the interpreter does after its write
+ *  (`BoxedArray._store()`), once for the stores of a unit of compiled code
+ *  (decision C4 of `docs/plans/2026-11-25-mutable-arrays-spec.md`): the
+ *  store epoch of the engine advances, which the memo of a pure
+ *  application reads, and one state event is registered. The code runs it
+ *  before each call of a function of the host and when `run()` returns or
+ *  throws. */
+export function arrayNote(ce: ComputeEngine): () => void {
+  return () => {
+    ce._objectStoreEpoch += 1;
+    ce._noteStateEvent({ kind: 'object-store' });
+  };
+}
+
+/** The construction `m` (`ArrayFrom(xs, type)` of the program) of the
+ *  engine: the call of the program over the engine's value of the source
+ *  that the code gives (a `List` of its numbers, `Repeat(v, n)`, or the
+ *  array), evaluated as the interpreter evaluates it, so that the
+ *  allocation function and `ce.arrayCreated` of the host see it and the
+ *  array has the cell type of the operand. An error of the engine
+ *  (`array-allocation-refused`, `incompatible-type`) throws. */
+function arrayMaker(
+  ce: ComputeEngine,
+  m: ArrayMaker
+): (...args: unknown[]) => Expression {
+  const call = m.call as unknown as {
+    _withSameBinding(ops: ReadonlyArray<Expression>): Expression;
+    ops: ReadonlyArray<Expression>;
+  };
+  const type = call.ops.slice(1, 2);
+  return (x, n) => {
+    const source =
+      m.source === 'copy'
+        ? (x as Expression)
+        : m.source === 'fill'
+          ? ce.function('Repeat', [
+              m.value!.lane === 'record'
+                ? boxValue(ce, m.value!, undefined, x)
+                : ce.number(x as number),
+              ce.number(n as number),
+            ])
+          : ce.function(
+              'List',
+              Array.from(x as ArrayLike<number>, (y) => ce.number(y))
+            );
+    const r = call._withSameBinding([source, ...type]).evaluate();
+    if (!isMutableArray(r))
+      throw new Error(
+        `ArrayFrom of compiled code gives ${r.toString()}, not an array`
+      );
+    return r;
+  };
 }
 
 /**
@@ -689,6 +833,8 @@ function boxValue(
   mark: number | undefined,
   x: unknown
 ): Expression {
+  // An array of the engine: the same reference.
+  if (t.lane === 'array') return x as Expression;
   if (t.lane === 'record') {
     const xs = x as readonly unknown[];
     // A dictionary literal (CE-1771): the dictionary of its keys.
@@ -741,16 +887,20 @@ function boxValue(
  */
 function hostCaller(
   ce: ComputeEngine,
-  h: HostCall
+  h: HostCall,
+  before?: () => void
 ): (...args: unknown[]) => number | boolean {
   const call = h.call as unknown as {
     _withSameBinding(ops: ReadonlyArray<Expression>): Expression;
   };
   return (...args) => {
+    // The stores of the unit before the call (`arrayNote()`).
+    before?.();
     const ops = args.map((x, k) =>
       h.types[k].shape.length > 0 ||
       h.marks[k] !== undefined ||
-      h.types[k].lane === 'record'
+      h.types[k].lane === 'record' ||
+      h.types[k].lane === 'array'
         ? boxValue(ce, h.types[k], h.marks[k], x)
         : h.args[k] === 'boolean'
           ? x
@@ -777,6 +927,86 @@ function hostCaller(
     const n = value.N();
     return isNumber(n) && n.im === 0 ? n.re : NaN;
   };
+}
+
+/**
+ * The value of the variable `x` of the engine that a root function literal
+ * assigns (`Program.assigns`), as the code takes it: a machine number, a
+ * boolean, a list of them or a list of such lists, or the engine's array.
+ * `run()` reads it when it starts, and the code after each call of a
+ * function of the host (`_SYS.state`). An exact value (`1/30 * pi`) is read
+ * as its machine number, and a list that an interpreted call holds lazily
+ * (`Rest(List(1, 2, 3))`) by its elements. A variable that holds no value of
+ * its lane (no value, a complex number for a `number`, an array of other
+ * cells) throws a `TypeError`.
+ */
+export function readAssigned(
+  x: Assigned
+): number | boolean | Expression | (number | boolean)[] | (number | boolean)[][] {
+  const v = x.definition.value;
+  if (x.array !== undefined) {
+    arrayEntryCheck(x.array, `The variable "${x.name}"`)(v);
+    return v!;
+  }
+  // The machine value of the element `y` of the lane of `x`, or `undefined`.
+  const scalar = (y: Expression | undefined): number | boolean | undefined => {
+    if (x.lane === 'boolean') {
+      if (isSymbol(y, 'True')) return true;
+      if (isSymbol(y, 'False')) return false;
+      return undefined;
+    }
+    const n = y?.N();
+    return isNumber(n) && n.im === 0 ? n.re : undefined;
+  };
+  const elements = (y: Expression | undefined): Expression[] | undefined =>
+    y?.isFiniteCollection === true && !isString(y) ? [...y.each()] : undefined;
+  if (x.rows) {
+    // A list of lists: an array of arrays of the values of the elements.
+    const rows = elements(v)?.map((row) => elements(row)?.map(scalar));
+    if (rows?.every((row) => row?.every((y) => y !== undefined)))
+      return rows as (number | boolean)[][];
+  } else if (x.list) {
+    const items = elements(v)?.map(scalar);
+    if (items?.every((y) => y !== undefined))
+      return items as (number | boolean)[];
+  } else {
+    const y = scalar(v);
+    if (y !== undefined) return y;
+  }
+  const what = x.rows
+    ? 'list of lists of values'
+    : x.list
+      ? 'list of values'
+      : 'value';
+  throw new TypeError(
+    `The variable "${x.name}" that the compiled function assigns holds ` +
+      `${v === undefined ? 'no value' : v.toString()}, not a ` +
+      `${what} of the lane ${x.lane}.`
+  );
+}
+
+/** The write of the value `y` of the code to the variable `x` of the engine
+ *  (`readAssigned()`), as an evaluation of an assignment writes it: a
+ *  number, `True` or `False`, a `List` of them or of such lists, or the
+ *  array itself. `run()` writes each variable when it returns, and the code
+ *  before each call of a function of the host (`_SYS.state`). */
+export function writeAssigned(
+  ce: ComputeEngine,
+  x: Assigned,
+  y: unknown
+): void {
+  const box = (z: unknown): Expression =>
+    x.lane === 'boolean' ? (z ? ce.True : ce.False) : ce.number(z as number);
+  const list = (z: unknown): Expression =>
+    ce.function('List', Array.from(z as ArrayLike<unknown>, box));
+  x.definition.value =
+    x.array !== undefined
+      ? (y as Expression)
+      : x.rows
+        ? ce.function('List', Array.from(y as ArrayLike<unknown>, list))
+        : x.list
+          ? list(y)
+          : box(y);
 }
 
 /** The lists of constants (and of such lists) of at least 16 constants in
@@ -934,7 +1164,7 @@ export function printJavaScript(
   // The construction of `load()` of `createJavaScriptRuntime()`.
   const make = (): JavaScriptResult['run'] => {
     try {
-      const sys = runtimeOf(ce, p.hosts);
+      const sys = runtimeOf(ce, p.hosts, p.arrays, p.assigns);
       return (
         literal
           ? twoStageRunner(sys, preambleOnce, [], `return (${code});`)()

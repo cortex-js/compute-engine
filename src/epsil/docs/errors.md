@@ -326,9 +326,23 @@ A string and a tuple are written as `replaceAt` writes them, and give a list: wi
 
 ## `add-to-target`
 
-The target of `+=` is not a variable or a list element. `s += e` is `s = s + e`, and `L[i] += e` is `L[i] = L[i] + e`, with the positions that `L[i] = v` accepts: `m[j, i] += e` and `m[j][i] += e` are the same element.
+The target of `+=` is not a variable or an element. `s += e` is `s = s + e`, and `L[i] += e` is `L[i] = L[i] + e`, with the positions that `L[i] = v` accepts: `m[j, i] += e` and `m[j][i] += e` are the same element. The base of an element can be any expression: `p.pixels[i] += e` and `f(x)[i] += e` add to a cell of the array that the field or the call gives.
 
 A field (`p.x += 1`), a call (`f(x) += 1`) and a string position (`d["a"] += 1`) are not accepted. Write the assignment in full, `p.x = p.x + 1`, where that form is valid.
+
+## `immutable-value-assignment`
+
+A store was made into a value that cannot change: a field of a record or a tuple (`r.x = 1`), or an element of a list that is not held by a variable (`s.px[2] = 9` with `px` a list field of an object, `m[1][1] = 5` with `m` an array whose cells are lists). Records, tuples and lists are values. Only an object has fields that can be stored, and only an array has cells that can be stored.
+
+For a field of a record, build an updated copy, or declare the type as `object{…}`.
+
+For an element, store a new value in the field or the cell: `s.px = replaceAt(s.px, 2, 9)`. Or declare it an array, whose cells are stored in place: with `type S = object{px: array<integer>}` and `s = S(px: arrayFrom([1, 2, 3], "integer"))`, `s.px[2] = 9` stores 9 in the second cell. An element of a list that a variable holds is not this error: `xs[2] = 9` gives `xs` a new list.
+
+## `array-allocation-refused`
+
+The storage of a new array could not be allocated: the host refused it, or JavaScript could not allocate it. `arrayFrom` asks the host once, with the number of cells and the size of one cell in bytes, before it allocates the storage (`ce.arrayAllocation`). A host that permits at most 1,000 cells makes `arrayFrom(repeat(0, 100000), "integer<0..255>")` this error, and no array is made.
+
+With no such function, the engine refuses a storage of more than 2 GiB for one array. Make a smaller array, or ask the host for a larger limit.
 
 ## `parallel-clause-not-first`
 
@@ -384,7 +398,7 @@ A value was assigned to a constant: a name bound by `const`, or a constant of th
 
 `epsil check` reports an assignment to a `const` of the same program (at any depth, and each name of a destructuring `const`) before anything runs, wherever the assignment is: at the top level, in a block, a loop body or a function body. The run does not report it a second time. A function defined before a `const` of the same block is included, because the `const` of a block is declared when the block starts: an assignment in the function writes the constant when the call comes after the `const`. The declarations of a program are prepared together, so a function defined before a top-level `const` resolves that binding too. Moving the function above the declaration does not make the constant writable. A constant write that is not reported statically is reported when the assignment runs, as a `runtime-error` with this code.
 
-To change the value, declare the name with `let` instead of `const`. To hold a second value, choose another name, or declare a local that shadows the constant: `let c = 2` in a function body or a block makes a new binding, and an assignment to it is valid. An indexed assignment such as `c[1] = 2` is the rebinding `c = replaceAt(c, 1, 2)`, so it is an assignment to `c` too, and gives this error.
+To change the value, declare the name with `let` instead of `const`. To hold a second value, choose another name, or declare a local that shadows the constant: `let c = 2` in a function body or a block makes a new binding, and an assignment to it is valid. An indexed assignment such as `c[1] = 2` of a constant that holds a list is the rebinding `c = replaceAt(c, 1, 2)`, so it is an assignment to `c` too, and gives this error. A constant that holds an array accepts `c[1] = 2`: the store writes a cell of the array, and the binding does not change.
 
 A host that calls `ce.assign()` on a constant gets a thrown error with the same message, whose `code` property is `constant-assignment`.
 

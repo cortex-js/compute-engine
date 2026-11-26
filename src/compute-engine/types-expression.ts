@@ -1348,9 +1348,12 @@ export interface Expression {
    * Use `{ digits: 'auto' }` to round arbitrary-precision
    * numbers to `ce.precision` significant digits. The default
    * (`'max'`) emits all available digits with no rounding.
+   *
+   * Use `{ objects }` to write a MathJSON expression of your own in place of
+   * each object and mutable array (see `JsonSerializationOptions.objects`).
    */
   toMathJson(
-    options?: Readonly<Partial<JsonSerializationOptions>>
+    options?: Readonly<Partial<JsonSerializationOptions<Expression>>>
   ): MathJsonExpression;
 
   /** MathJSON representation of this expression.
@@ -3674,6 +3677,157 @@ export interface ObjectInterface {
    * increments `_version` and reports an `object-store` state event.
    * @internal */
   _store(name: string, value: Expression): void;
+}
+
+/**
+ * The storage of the cells of a mutable array: a typed array for machine
+ * cells (four bytes for each cell of a tuple of four bytes), an array of
+ * evaluated expressions for every other cell type.
+ *
+ * @category Boxed Expression
+ */
+export type ArrayCells =
+  | Uint8Array
+  | Int8Array
+  | Uint16Array
+  | Int16Array
+  | Uint32Array
+  | Int32Array
+  | Float64Array
+  | Expression[];
+
+/**
+ * Narrowed interface for a **mutable array**, a value of type `array<T>`.
+ *
+ * Obtained via `isMutableArray()`, or made by the host with `ce.array()`. As
+ * for an object, the instance is the array: two arrays are equal only when
+ * they are the same instance, and the hash does not change when a cell
+ * changes.
+ *
+ * A host reads and writes the cells through {@link cells}:
+ *
+ * ```ts
+ * const a = ce.array(new Uint8Array(4 * width * height), 'Pixel');
+ * const bytes = a.cells as Uint8Array;
+ * bytes[0] = 255; // the red byte of the first pixel
+ * a.noteStore();
+ * ```
+ *
+ * The engine does not check what the host guarantees, and the result is
+ * unspecified when one of these does not hold:
+ *
+ * - one typed array, or two views that overlap, are the cells of one array
+ *   only;
+ * - every cell of a storage that the host adopted or wrote holds a value of
+ *   the cell type;
+ * - the host calls {@link noteStore} after it writes through `cells`, before
+ *   any code of the engine reads the array;
+ * - a storage keeps its length while it is the cells of an array: the host
+ *   does not detach or transfer its buffer.
+ *
+ * Design: `docs/plans/2026-11-25-mutable-arrays-spec.md`.
+ *
+ * @category Boxed Expression
+ */
+export interface ArrayInterface {
+  /** The storage, by reference. A typed array for machine cells, with four
+   * bytes for each cell of a tuple of four bytes (its length is then
+   * `4 × count`), and a read-only array of expressions for expression cells.
+   *
+   * The storage is valid until the array changes its length, or
+   * `swapCells()` or `Swap` runs. Read `cells` at each use, and keep no copy
+   * of the reference between two calls. */
+  readonly cells:
+    | Uint8Array
+    | Int8Array
+    | Uint16Array
+    | Int16Array
+    | Uint32Array
+    | Int32Array
+    | Float64Array
+    | ReadonlyArray<Expression>;
+
+  /** The change signal: two reads at the same version saw the same cells. A
+   * larger version does not prove that a cell changed. */
+  readonly version: number;
+
+  /** The number of cells. */
+  readonly count: number;
+
+  /** The cell type: `T` for an `array<T>`. */
+  readonly cellType: BoxedType;
+
+  /** A host that wrote cells through {@link cells} calls it once after its
+   * writes. It does what a store does after its write: it increments the
+   * version, invalidates the results that the engine computed from the
+   * array, and reports one state event. */
+  noteStore(): void;
+
+  /**
+   * Take the typed array `storage` as the cells, and return the cells that
+   * the array had. `storage` has the storage kind and the length of the
+   * current cells. It counts as a store (the version, the results of the
+   * engine, one state event). A host that computes a frame in a second
+   * buffer exchanges the two with no copy:
+   *
+   * ```ts
+   * let back = new Uint8Array(frame.cells.length);
+   * // ... write the next frame in `back`
+   * back = frame.swapCells(back);
+   * ```
+   *
+   * The result has the type of `storage`, so that the exchange above
+   * type-checks. The value is the typed array that the array held: when
+   * `storage` is an instance of a subclass (a Node `Buffer`), the cells
+   * returned are a plain typed array of the same kind, not an instance of
+   * that subclass.
+   *
+   * Throws a `TypeError` for a storage of another kind or another length,
+   * for an array of expression cells, for a view of a `SharedArrayBuffer`,
+   * and for a view of a resizable `ArrayBuffer`.
+   */
+  swapCells<S extends Exclude<ArrayCells, Expression[]>>(storage: S): S;
+
+  /** The storage kind that the cell type selects (`arrayStorageKind()`).
+   * @internal */
+  readonly _storage:
+    | 'uint8'
+    | 'int8'
+    | 'uint16'
+    | 'int16'
+    | 'uint32'
+    | 'int32'
+    | 'float64'
+    | 'expression';
+
+  /** True when the cell is the tuple of four bytes. @internal */
+  readonly _tuple: boolean;
+
+  /** For the tuple of four bytes: the head of the value of a cell, the name
+   * of the nominal cell type (`Pixel`) or `Tuple`. @internal */
+  readonly _tupleTag: string | undefined;
+
+  /** Per-array cache currency: incremented by every store that changes a
+   * cell, and by an exchange of cells. @internal */
+  readonly _version: number;
+
+  /** Per-engine construction serial, the sole input to the hash.
+   * @internal */
+  readonly _serial: number;
+
+  /** The cell at a 1-based index (a negative index counts from the end), or
+   * for an index that is 0, not an integer or out of range, what `At` gives
+   * for a list of the cell type. Records a read of the array. @internal */
+  _read(index: number): Expression;
+
+  /** The cell at the 0-based offset `i`, in range, with no read recorded:
+   * for serialization and display. @internal */
+  _peek(i: number): Expression;
+
+  /** Store an evaluated value at a 1-based index: `undefined` when the cell
+   * holds the value after the call, else the error (`out-of-range`,
+   * `incompatible-type`, or the value when it is an error). @internal */
+  _store(index: number, value: Expression): Expression | undefined;
 }
 
 /** Interface for dictionary-like structures.

@@ -305,7 +305,20 @@ export function compileWithIrProfileGlsl(
     const walk = (r: Region): void =>
       r.body.forEach((i) => {
         regionsOf(i).forEach(walk);
-        if (i.k !== 'op' || i.op !== 'at') return;
+        if (i.k !== 'op') return;
+        // A cell of an array: the count is known at run time only, so a
+        // constant index that names no cell for any count declines.
+        if (i.op.startsWith('arr.get')) {
+          const c = def.get(i.args[1]);
+          const x = c?.k === 'const' ? Number(c.value.value) : 1;
+          if (!Number.isInteger(x) || x === 0)
+            throw decline(
+              `the index ${x} of At of an array, which names no cell, on glsl`,
+              { operator: 'At' }
+            );
+          return;
+        }
+        if (i.op !== 'at') return;
         const [list, index] = i.args;
         const k = def.get(index);
         const n = p.types[list].shape[0];
@@ -352,6 +365,30 @@ export function compileWithIrProfileGlsl(
       expressionOf(body) ?? body.map((line) => line.slice(2)).join('\n');
     const inputs = entry.paramNames;
     const lowered: Record<string, string> = {};
+    // The uniform of the count of each array input (`A_count`).
+    const counts: Record<string, string> = {};
+    entry.body.params.forEach((v, k) => {
+      const name = inputs[k];
+      if (p.types[v].lane !== 'array') return;
+      if (Object.hasOwn(vars, name))
+        throw decline(`the vars entry of ${name}, an array, on glsl`, {
+          binding: name,
+        });
+      counts[name] = `${name}_count`;
+    });
+    // The sampler and the count of an array are two identifiers of the
+    // shader: no other input is spelled as one of them (its name, or the
+    // first name of its `vars` text).
+    for (const [array, count] of Object.entries(counts))
+      for (const other of inputs) {
+        if (other === array) continue;
+        const id = /^[^.[]*/.exec(vars[other] ?? other)![0];
+        if (id === array || id === count)
+          throw decline(
+            `the input ${other}, spelled ${id}, which is the name of the ${id === array ? 'sampler' : 'count'} of the array ${array}, on glsl`,
+            { binding: other }
+          );
+      }
     entry.body.params.forEach((v, k) => {
       const name = inputs[k];
       // A list input of 2 to 4 elements is a vector, of another stated
@@ -365,16 +402,25 @@ export function compileWithIrProfileGlsl(
         !/^[A-Za-z_][A-Za-z0-9_]*$/.test(id) ||
         /__|^(gl_|webgl_|_webgl_|_gpu_|_fn_)|^v\d/.test(id) ||
         gpuIsReservedWord(id, 'glsl') ||
-        new RegExp(`\\b${id}\\s*\\(`).test(`${code}\n${preamble}`)
+        new RegExp(`\\b${id}\\s*\\(`).test(`${code}\n${preamble}`) ||
+        // `A__count` holds `__`, which GLSL reserves.
+        (counts[name] !== undefined && id.endsWith('_'))
       )
         throw decline(`the input name \`${id}\` on glsl`, { binding: name });
-      // A list in storage: its array type (`float[5]`).
-      lowered[name] = typeName({ ...p.types[v], storage: undefined });
+      // A list in storage: its array type (`float[5]`); an array: its
+      // sampler (`highp usampler2D`).
+      lowered[name] = typeName(
+        p.types[v].lane === 'array'
+          ? p.types[v]
+          : { ...p.types[v], storage: undefined }
+      );
     });
     addSymbolDeps(p, options?.symbolDeps);
     // A name of `vars` is an entry parameter (`bareInputs`); `lowered` is
     // the GLSL type of the parameter, which the host binds the uniform as.
     const report = inputReport(p, inputs, (name) => lowered[name]);
+    for (const [name, count] of Object.entries(counts))
+      report.freeSymbolTypes[name].count = count;
     const warnings = float32Warnings(expr, options?.constantFold !== false);
     return {
       target: 'glsl',

@@ -13,6 +13,19 @@ Dimensioned tensor types bridge to their nested-list encoding. Shape
 regularity is independent of the cell type, and tensor operations must keep
 the inferred cell type a sound upper bound of the literal cells.
 
+A mutable array (`array<T>`, a `BoxedArray`;
+`docs/plans/2026-11-25-mutable-arrays-spec.md`) is not a collection: its type
+is disjoint from `collection` and `indexed_collection`, it is never broadcast
+over, and no collection handler reads it. Four operators read it: `At` (a
+cell; with a `Range`, a list of indexes or a list of booleans as the index, a
+list of cells built at once), `Length`, `ListFrom` (a list of the cells now,
+a copy) and `ArrayFrom` (an array from an array). Every other operator gives
+no value for an array: `incompatible-type` where its signature states a
+collection or a number, an unevaluated expression otherwise. `ArrayFrom` is
+the arm of the `…From` family that makes an array from a finite collection;
+`ListFrom(a)` is the way from an array to the collection operators
+(`Sum(ListFrom(a))`).
+
 ## Broadcasting and pairing
 
 Implicitly lifted operators use strict length agreement. Explicit pairing

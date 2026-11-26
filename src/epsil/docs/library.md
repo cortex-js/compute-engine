@@ -11,7 +11,7 @@ date: Last Modified
 ---
 # Epsil Standard Library
 
-The 748 functions and constants of the standard library, by category.
+The 750 functions and constants of the standard library, by category.
 Each row gives a name, its signature (for a function) or its kind and type
 (for a constant or variable), and the first sentence of its description —
 the same description `epsil doc <name>` prints in full and the editor
@@ -25,7 +25,7 @@ To search the library by concept rather than by name, use
 - [Core](#core) — 122 definitions · [full reference](/epsil/reference/core/)
 - [Control structures](#control-structures) — 16 definitions · [full reference](/epsil/reference/control-structures/)
 - [Logic](#logic) — 27 definitions · [full reference](/epsil/reference/logic/)
-- [Collections](#collections) — 125 definitions · [full reference](/epsil/reference/collections/)
+- [Collections](#collections) — 127 definitions · [full reference](/epsil/reference/collections/)
 - [Colors](#colors) — 20 definitions · [full reference](/epsil/reference/colors/)
 - [Regular expressions](#regular-expressions) — 4 definitions · [full reference](/epsil/reference/regexp/)
 - [Relations](#relations) — 30 definitions · [full reference](/epsil/reference/relop/)
@@ -240,6 +240,7 @@ The [Collections reference](/epsil/reference/collections/) has the full descript
 | `append` | `Append` | `(collection<any>, any+) -> collection` | Return the collection with one or more elements added at its end. |
 | `argMax` | `ArgMax` | `(xs: indexed_collection<T>, key: ((T) any -> unknown)?) -> integer where T` | Return the 1-based index of the element that maximizes the given key function (or of the largest element when no key is given); of several such elements, the first. |
 | `argMin` | `ArgMin` | `(xs: indexed_collection<T>, key: ((T) any -> unknown)?) -> integer where T` | Return the 1-based index of the element that minimizes the given key function (or of the smallest element when no key is given); of several such elements, the first. |
+| `arrayFrom` | `ArrayFrom` | `(value, string?) state -> array` | Make a new mutable array from the elements of a finite collection, or from the cells of an array, in order. |
 | — | `At` | `(value: any, index: (boolean \| character \| indexed_collection<any> \| number \| string)+) -> unknown` | Access an element of an indexed collection. |
 | `chunk` | `Chunk` | `((xs: S, count: integer) -> list<string> where S: string) & ((xs: indexed_collection, count: integer) -> list<list>)` | Return the collection split into `count` groups of consecutive elements. |
 | `chunkBy` | `ChunkBy` | `((xs: S, key: (character) any -> unknown) -> list<string> where S: string) & ((xs: indexed_collection<T>, key: (T) any -> unknown) -> list<list<T>> where T: any)` | Split the collection into maximal runs of consecutive elements over which the key function yields the same value. |
@@ -345,6 +346,7 @@ The [Collections reference](/epsil/reference/collections/) has the full descript
 | `subsetEqual` | `SubsetEqual` | `(any, any*) -> boolean` | Test whether the first collection is a subset (possibly equal) of the second. |
 | `superset` | `Superset` | `(any, any*) -> boolean` | Test whether the first collection is a strict superset of the second. |
 | `supersetEqual` | `SupersetEqual` | `(any, any*) -> boolean` | Test whether the first collection is a superset (possibly equal) of the second. |
+| `swap` | `Swap` | `(array, array) state -> nothing` | Exchange the cells and the counts of two arrays of one cell type, in constant time, with no cell copied. |
 | `symmetricDifference` | `SymmetricDifference` | `(set<any>, set<any>) -> set` | Return the symmetric difference of two sets (elements in either set but not both). |
 | `table` | `Table` | `(function, integer+) -> collection` | Return the list of the values of a function at each index of the given dimensions, as `tabulate` (the preferred name) does. |
 | `tabulate` | `Tabulate` | `(generator: function, integer+) -> list` | Create a collection by applying a function to each index in the specified dimensions. |

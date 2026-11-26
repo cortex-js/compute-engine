@@ -71,7 +71,11 @@ export function implicitCompile(
     // calls a function of the host (`hostCalls`), is interpreted: a caller
     // can compute an element again with the interpreter, which would assign
     // the variable or call the host function a second time.
-    return result.assigns === undefined && result.hostCalls === undefined
+    // So is a function that reads or writes an array of the engine
+    // (`arrays`): a store would run again.
+    return result.assigns === undefined &&
+      result.hostCalls === undefined &&
+      result.arrays === undefined
       ? result
       : undefined;
   } catch (e) {

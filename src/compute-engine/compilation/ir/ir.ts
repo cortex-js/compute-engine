@@ -41,7 +41,22 @@ export type Lane =
   | 'string'
   | 'rows'
   | 'record'
-  | 'nothing';
+  | 'nothing'
+  | 'array';
+
+/** The cells of a value of the lane `array`, a mutable array of the engine
+ *  of machine cells (`lower-arrays.ts`, `arrayStorageKind()`): `cell`, its
+ *  cell type spelled (`typeToString()` of the engine), which makes two
+ *  array types one IR type; `type`, that cell type; `lane`, the lane of a
+ *  cell of one number or of each byte of a tuple cell; `tuple`, for the
+ *  tuple cell of four bytes, the head of the value of a cell (the name of
+ *  its nominal type, or `Tuple`) and its field names. */
+export type ArrayCells = {
+  readonly cell: string;
+  readonly type: Type;
+  readonly lane: 'integer' | 'real';
+  readonly tuple?: { readonly tag: string; readonly names?: readonly string[] };
+};
 
 /** The value of a constant of the `complex` lane. */
 export type Cx = { readonly re: number; readonly im: number };
@@ -55,6 +70,9 @@ export type Length = number | { readonly v: V };
 /** `storage`: a list that the host holds in a storage of that kind (the
  *  option `storage` of `compile()`), set after the passes; it is read only
  *  by `elem` and `at` and passed to calls (`holdStorage()` of `index.ts`).
+ *  On GLSL, an array whose texture is not the one of its cells by default
+ *  (`holdArrays()` of `index.ts`): `isampler2D` for signed integer cells,
+ *  `sampler2D` for cells of `Uint8Array` in a normalized texture.
  *
  *  A value of the lane `record` (shape `[]`) is a record of settled fields
  *  (`README.md`, "Records"): `fields` is the IR type of each field, in
@@ -65,7 +83,7 @@ export type Length = number | { readonly v: V };
 export type IRType = {
   readonly lane: Lane;
   readonly shape: readonly Length[];
-  readonly storage?: 'sampler2D';
+  readonly storage?: 'sampler2D' | 'isampler2D';
   readonly fields?: readonly IRType[];
   readonly marks?: readonly (number | undefined)[];
   readonly nominal?: string;
@@ -85,6 +103,8 @@ export type IRType = {
    *  of the head `Dictionary` is a dictionary literal (CE-1771): its
    *  `names` are the keys, and it is read by its keys only. */
   readonly head?: 'Tuple' | 'List' | 'Dictionary';
+  /** A value of the lane `array` (shape `[]`): its cells. */
+  readonly array?: ArrayCells;
 };
 
 /** A typed literal. An integer beyond the safe integers is a `bigint`
@@ -182,6 +202,11 @@ export type IRFunction = {
    *  `lengthOf` parameter is the length of the input of that name. */
   readonly paramNames: string[];
   readonly lengthOf: boolean[];
+  /** The entry: a `lengthOf` parameter that is `widthOf` too is the length
+   *  of the first row of the input of that name, a matrix of run-time size
+   *  (0 for a matrix of no row), whose number of rows is the `lengthOf`
+   *  parameter before it. */
+  readonly widthOf?: boolean[];
   /** The entry: a parameter with a `partOf` index is the part of that index
    *  of the input of its name, a tuple whose parts have different lanes
    *  (`tupleParts()`, JavaScript only). */
@@ -236,6 +261,39 @@ export type Program = {
    *  operation `hostCallOp(k)` of `lower.ts` calls the entry `k`
    *  (`hostCall()` of `lower.ts`). */
   readonly hosts?: readonly HostCall[];
+  /** The mutable arrays that the program reads or writes
+   *  (`lower-arrays.ts`); absent when it touches none. */
+  readonly arrays?: ArrayUse;
+};
+
+/** The arrays of a program: `names`, the names of the engine whose value is
+ *  an array, inputs of the entry that `run()` reads from the definition of
+ *  each name at each call (`Program.arrays` is not in `captures`); `refs`,
+ *  the arrays that a value of a name holds (a field of a named tuple),
+ *  which the operation `arr.ref` of index `k` reads (`_SYS.arrays.refs`);
+ *  `makers`, the constructions `ArrayFrom(xs, type)` that the code asks the
+ *  engine for (`_SYS.arrays.make`); `stores`, the program stores to a cell
+ *  or exchanges two arrays, so the code advances the store epoch of the
+ *  engine and registers one state event before each call of a function of
+ *  the host and when `run()` returns or throws. */
+export type ArrayUse = {
+  readonly names: readonly {
+    readonly name: string;
+    readonly definition: BoxedValueDefinition;
+    readonly cells: ArrayCells;
+  }[];
+  readonly refs: readonly Expression[];
+  readonly makers: readonly ArrayMaker[];
+  readonly stores: boolean;
+};
+
+/** A construction `ArrayFrom(xs, type)` of the program (`call`): the source
+ *  that the code gives (a list of numbers, the value and the count of a
+ *  `Repeat`, or an array) and the IR type of the value of a `Repeat`. */
+export type ArrayMaker = {
+  readonly call: Expression;
+  readonly source: 'list' | 'fill' | 'copy';
+  readonly value?: IRType;
 };
 
 /** A call of a function that the host declared with an `evaluate`
@@ -263,13 +321,19 @@ export type HostCall = {
  *  change at each call: the entry takes its length, then the list, and
  *  returns the list. With `rows`, a list of lists of elements of that lane
  *  (CE-1721): the entry takes the host's array of arrays (the lane `rows`)
- *  and returns the list of rank 2 that the body writes. */
+ *  and returns the list of rank 2 that the body writes. With `array`, of
+ *  the lane `array`, an array of the engine of those cells: the entry takes
+ *  and returns the reference. With `read`, an array that the program only
+ *  reads, in a program that calls the host: the code reads it again after
+ *  each call of the host (`hostCall()`), and `run()` writes nothing back. */
 export type Assigned = {
   readonly name: string;
   readonly definition: BoxedValueDefinition;
   readonly lane: Lane;
   readonly list?: true;
   readonly rows?: true;
+  readonly array?: ArrayCells;
+  readonly read?: true;
 };
 
 /** A sign that the declared type of an input proves. */
@@ -387,6 +451,10 @@ export function sameFields(
   b: IRType,
   constants: 'same' | 'sub' | 'loose' = 'same'
 ): boolean {
+  // Two arrays are one type when their cell types are (an array type is
+  // invariant in its cell type).
+  if (a.lane === 'array' || b.lane === 'array')
+    return a.lane === b.lane && a.array?.cell === b.array?.cell;
   if (a.lane !== 'record' && b.lane !== 'record') return true;
   const [f, g] = [a.fields ?? [], b.fields ?? []];
   const [m, n] = [a.marks ?? [], b.marks ?? []];
@@ -429,6 +497,8 @@ function commonConstants(a: IRType, b: IRType): IRType {
  *  fields: a field whose constants differ is a string (CE-1652, step 4c). */
 export function joinType(a: IRType, b: IRType): IRType | undefined {
   if (!sameShape(a.shape, b.shape)) return undefined;
+  if (a.lane === 'array' || b.lane === 'array')
+    return sameFields(a, b) ? a : undefined;
   if (a.lane === 'record' || b.lane === 'record')
     return sameFields(a, b, 'loose') ? commonConstants(a, b) : undefined;
   if (widensTo(a.lane, b.lane)) return b;
@@ -466,6 +536,7 @@ export function typeToString(
 ): string {
   // A string field of a known value (CE-1652, step 4c).
   if (t.constant !== undefined) return JSON.stringify(t.constant);
+  if (t.array !== undefined) return `array<${t.array.cell}>`;
   // A record: its fields, named or not.
   if (t.lane === 'record')
     return `${t.nominal ?? t.head ?? 'record'}(${(t.fields ?? [])
@@ -582,6 +653,7 @@ export class Builder {
   private open: Region[] = [];
   private readonly paramNames: string[] = [];
   private readonly lengthOf: boolean[] = [];
+  private readonly widthOf: boolean[] = [];
   private readonly partOf: (number | undefined)[] = [];
   private readonly made = new Map<string, { v: V; region: Region }>();
   /** The number of effectful instructions emitted so far. */
@@ -662,6 +734,7 @@ export class Builder {
       name: 'main',
       paramNames: this.paramNames,
       lengthOf: this.lengthOf,
+      ...(this.widthOf.some((w) => w) ? { widthOf: this.widthOf } : {}),
       ...(this.partOf.some((j) => j !== undefined)
         ? { partOf: this.partOf }
         : {}),
@@ -719,13 +792,20 @@ export class Builder {
     this.current().body.push(i);
   }
 
-  /** A parameter of the entry: the input `name`, its length, or its part
-   *  of the index `part`. */
-  param(name: string, type: IRType, lengthOf = false, part?: number): V {
+  /** A parameter of the entry: the input `name`, its length (with `width`,
+   *  the length of its first row), or its part of the index `part`. */
+  param(
+    name: string,
+    type: IRType,
+    lengthOf = false,
+    part?: number,
+    width = false
+  ): V {
     const v = this.newValue(type);
     this.open[0].params.push(v);
     this.paramNames.push(name);
     this.lengthOf.push(lengthOf);
+    this.widthOf.push(width);
     this.partOf.push(part);
     return v;
   }

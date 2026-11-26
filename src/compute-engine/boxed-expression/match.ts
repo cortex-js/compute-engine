@@ -22,7 +22,7 @@ import {
   isFunction,
   isSymbol,
   isString,
-  isObject,
+  isObjectOrArray,
   isUnorderedSet,
 } from './type-guards.js';
 import { parse as parseLatex } from '../latex-syntax/latex-syntax.js';
@@ -272,7 +272,8 @@ function matchOnce(
   // branch (an object on either side of a comparison answers by reference
   // identity, everywhere).
   //
-  if (isObject(pattern) || isObject(expr))
+  // A mutable array, the same.
+  if (isObjectOrArray(pattern) || isObjectOrArray(expr))
     return expr === pattern ? substitution : null;
 
   // Reset accept variant (we don't want to call it recursively for the same

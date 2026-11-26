@@ -142,6 +142,13 @@ when it compiles. A difference that this list does not name is a defect.
   input left out, or for an error that the static type does not show.
   "Shapes are settled at compile time" (R5) and "Fail closed" below list
   these cases.
+- A store to a cell of a mutable array that the interpreter refuses
+  ("Arrays" below). A store at an index that is 0, not an integer or out of
+  range writes nothing, where the interpreter gives `out-of-range`. A store
+  of a value outside the cell type writes what JavaScript writes in the
+  typed array (a `Uint8Array` cell keeps the low 8 bits of 300), where the
+  interpreter gives `incompatible-type`. Both are errors that the static
+  type does not show, and the code makes no test for them.
 
 **Not allowed.** For a program with inputs of their declared types, a finite
 number that differs from the interpreter's by more than the precision of the
@@ -171,6 +178,13 @@ once, or an issue file.
 
 One line each: the target, the program, the compiled value, the
 interpreter's value. A line is removed when the case declines or is fixed.
+
+- `glsl` (crafted): an array input of more than 16,777,216 cells. The index
+  is a float, exact only to that count: with `A: array<integer<0..255>>` of
+  16,777,218 cells, `At(A, i)` at `i = 16777217` reads the cell 16,777,216;
+  the interpreter gives the cell 16,777,217. The host guarantees the count,
+  and uses JavaScript for a longer array. Not run: it follows from the
+  arithmetic of 32-bit floats.
 
 - `plausible?` — `javascript`, `x: real`: the CDF of a gamma or chi-square
   distribution at a symbolic point compiles as `1 - GammaRegularized(α, x/θ)`,
@@ -2793,7 +2807,11 @@ Each call of `run()` reads the value of each variable of `assigns` in the
 engine, runs the code, and writes the new values back to the engine as
 machine numbers, as an evaluation of the call writes them. An exact value
 (`1/30 * pi`, which an interpreted call can write) is read as its machine
-number. A call that throws writes nothing. A variable that holds no value,
+number. A call that throws writes nothing more: the engine keeps the
+values that the code wrote at the last call of a function of the host
+before the throw, and the values that such a function assigned ("Functions
+of the host"); with no such call, it holds the values before the call. A
+variable that holds no value,
 or a complex number for a variable of type `number`, throws a `TypeError`
 before the call, as an input of type `number` does. The `code` takes the value of each variable
 after the arguments and returns an array of the value of the function and
@@ -2805,7 +2823,8 @@ a second time.
 
 The variable is a variable of the scope of the compilation, not a local or a
 parameter of the literal, with a declared type whose lane is `real`,
-`integer` or `boolean` (`let s = 0.5` in Epsil declares `s`), or a list of
+`integer` or `boolean` (`let s = 0.5` in Epsil declares `s`), an array of
+machine cells ("Arrays": `board = next` writes the reference), or a list of
 such values of no stated length (`let L = [0, 0, 0]` declares
 `list<number>`). A list variable is a list local that the body writes whole,
 and its length can change at each call: `L = L + [1, 2, 3]`,
@@ -2939,10 +2958,41 @@ These decline:
 - a static type of the call other than `real`, `integer`, `boolean` or
   `nothing`: `(real) -> any` gives no settled shape (R3);
 - a value `nothing` read anywhere but as the value of the root function
-  literal (`[hostDraw(t)]`, `'possible-nothing'`); a statement is not read;
-- a call in a function that assigns a variable of the engine
-  (`do { s = s + t; hostDraw(s) }`): the host function could read the
-  variable before the code writes it back.
+  literal (`[hostDraw(t)]`, `'possible-nothing'`); a statement is not read.
+
+A call in a function that assigns variables of the engine ("Variables that a
+function assigns") reads and writes each one: the code writes the value of
+each variable to the engine before the call, as `run()` does when it
+returns, and reads it again after the call, since the host function can
+assign it. A variable that then holds no value of its lane throws the
+`TypeError` of `run()`. So a `Loop` around the call carries each variable,
+the two arms of an `If` give each one, and a user function that calls the
+host, itself or through its calls, takes and returns each one:
+
+```js
+ce.declare('hostDraw', {
+  signature: '(real) -> nothing',
+  evaluate: (ops) => { record(ops[0].re, ce.box('s').evaluate().re); return ce.symbol('Nothing'); },
+});
+executeEpsil(ce, `let s = 0
+let f = (t: real) => do { s = s + t; hostDraw(s) }`);
+const result = compile(ce.box('f').evaluate());
+result.assigns;            // ['s']
+result.run(1);             // record(1, 1): the host reads the new s
+result.run(2);             // record(3, 3)
+```
+
+In such a function these decline:
+
+- a list variable, or a list of lists, in `assigns` (`do { L = L + [t];
+  hostDraw(t) }`): a list is not carried as a number is;
+- a call, or a call of a user function that calls the host, in a body that
+  is evaluated several times (the body of a `Sum`, a callback of `Map` or
+  `Filter`, a user function given by its name to `Map`): that body carries
+  no variable;
+- a user function that calls the host and is mapped over a list
+  (`g([1, 2])`), and a recursive function or a cycle of functions that calls
+  the host.
 
 A function whose one parameter is a rest parameter
 (`function draw(...args) -> nothing { figureDraw(listFrom(args)) }`)
@@ -3343,6 +3393,13 @@ with `P: tuple<real, real>`, `At(P, 3)` declines ("the index 3 of At is
 outside the 2 elements of its list on glsl"), so that a host can key a retry
 on the refusal (`compilation/ir/README.md`, "Options and results").
 
+`At(A, i)` of an array input `A` (`array<T>`, "Arrays" below) follows the
+same rule, with the count of the cells from the uniform `A_count` in place
+of a stated length: the test runs in floats, before the conversion to
+`int`. A constant index that is 0 or not an integer declines ("the index 0
+of At of an array, which names no cell, on glsl"); every other constant
+index gets the run-time test, since the count is known at run time only.
+
 ## Color values
 
 A color VALUE on the JavaScript target is a flat object that carries the color
@@ -3450,7 +3507,186 @@ type lattice.
 
 Compiled code has no tagged representation of a sum: an input whose type is
 a union of shapes declines (`real | string`: `outside-profile`; R4). Mutable
-boxed objects do not cross into compiled code.
+boxed objects do not cross into compiled code: a field read and a field
+store of an object decline. A mutable array does on JavaScript, and an
+array input is read on GLSL ("Arrays" below).
+
+## Arrays
+
+A mutable array (`array<T>`, `docs/plans/2026-11-25-mutable-arrays-spec.md`)
+whose cells are machine cells compiles on `javascript`, in the default mode.
+Machine cells are a bounded integer type (`integer<0..255>`), `real`, and a
+tuple of four bytes; an array of any other cell type declines.
+
+```js
+executeEpsil(ce, `let screen = arrayFrom(repeat(0, 64000), "integer<0..255>")
+let frame = (t: integer) => do {
+  for k in 1..64000 { screen[k] = (k + t) % 256 }
+  hostDraw(screen)
+}`);
+const result = compile(ce.box('frame').evaluate());
+result.arrays;             // ['screen']
+result.run(1);             // writes the cells of the engine's array
+```
+
+**One storage.** The cells exist once: the interpreter, the code and the
+host read and write the same typed array. `run()` copies no cell. The code
+reads the storage and the count from the array at each use, so an exchange
+of two storages (`Swap`, the host's `swapCells()`) between two uses is seen.
+
+**How an array reaches the code.**
+
+- A parameter of the root function literal declared `array<T>`: the host
+  passes the engine's array value. The entry refuses another value with a
+  `TypeError`.
+- A name whose value is an array: `run()` reads the array that the name
+  holds at each call, so an assignment of the name between two calls needs
+  no new compilation. The name is in `arrays`, not in `symbolDeps`.
+- A name whose value is an array and that the function assigns
+  (`board = next`, `(cur, next) := (next, cur)`), in the root function
+  literal or in a user function where the same assignment of a number
+  compiles: a variable of `assigns` ("Variables that a function assigns"),
+  not of `arrays`. `run()` reads the array that the name holds at each
+  call and writes the reference back when it returns, and the code does
+  so around each call of a function of the host ("Functions of the
+  host").
+- In code that calls a function of the host, itself or through a user
+  function, every name whose value is an array and that the code reads is
+  read again from the engine after each such call, with the check of the
+  entry: a host function that assigns the name another array is seen, and
+  one of other cells throws a `TypeError`. The name stays in `arrays`. A
+  call of the host in a body that is evaluated several times (a `Sum`, a
+  callback) declines in such code.
+- A name whose value holds an array (a named tuple with an array field):
+  the code holds the reference that the value has when it is compiled; the
+  name is in `symbolDeps`.
+- A parameter declared `array<T>` of a user function called by its name, a
+  field of a record, a block local, and the two arms of an `If` of one cell
+  type. An array is one shape whatever its length.
+- `ArrayFrom(xs, type)`: one call into the engine, which makes the engine's
+  array, so the allocation function of the host is asked.
+
+**What compiles.** `At(a, i)`, the store `Assign(At(a, i), v)`,
+`AddTo(At(a, i), e)`, `Swap(a, b)`, `Length(a)`, `ListFrom(a)`, `At` with a
+range, a list of indexes or a list of booleans (cells of one number), and an
+array, or a record or a list literal that holds one, as an argument of a
+function of the host, which receives the engine's value. A tuple cell is read
+as a record of its type (`px[i].g` is one read of a byte) and written from a
+tuple that the code builds, with no allocation.
+
+**The values.**
+
+- A read gives the interpreter's value for every index: from 1, from the
+  end when negative, `NaN` for an index that is 0, not an integer or out of
+  range. The code makes no range test: a read outside the cells of a typed
+  array is `undefined`, which it converts to a number.
+- A store maps a negative index from the end and makes no other test (see
+  "Caveats of compiled code"). An index on the real lane is tested for an
+  integer, since `n + i` can round to one.
+- A value of another lane declines with `lane-mismatch`: a real for integer
+  cells, a boolean or a complex number. A parameter with no type is a real,
+  so a helper that stores its parameter in integer cells declares it
+  (`p: integer`).
+- Each store increments the version of its array. A unit that stores
+  registers one state event before each call of a function of the host and
+  when `run()` returns or throws.
+
+A root function literal whose body ends in a store or in a loop
+(`t => do { for k in 1..n { screen[k] = t } }`) compiles, and `run()` gives
+`NaN`, the value `Nothing`, as for a body that ends in an assignment of a
+variable of the engine or in a call of a host function of result `nothing`.
+This holds with no array too (`n => do { for k in 1..n { hostDraw(k) } }`).
+The loop or the store is the body or the last statement of its block: a
+body that ends in an `If` whose arm is a loop
+(`do { if t > 1 { for … } }`) declines.
+
+**These decline:** an array of expression cells, and a value typed bare
+`array`; an array as the result of the code, alone or in a record or a
+list; a host call whose result is an array; a read or a store in the body
+of a function literal that is an operand or a value
+(`map(k => a[k], 1..n)`: write a loop, or take `listFrom(a)`); a discharge
+(`IsMissing`, `Coalesce`, `AssertPresent`) of a value of a declared type that
+is a tuple cell; a list of arrays; an array in a `parallel for`;
+`interval-js`, and the `bigint` and `complex` modes (GLSL reads an input
+only, see "On GLSL" below). `runAsync()` of such
+code runs on the calling thread.
+
+The code is not `shippable`, and `load()` refuses it: it reads or writes
+values of the engine. The engine's own compilations (`Map`, the quadrature)
+interpret a function that reads or writes an array.
+
+A function declared before a global array that it writes
+(`function step() { board[k] = 1 }` above `let board = arrayFrom(…)`) is
+bound when the global is initialized by a call of `arrayFrom` or is declared
+with its type. A global given an array by another call
+(`let board = makeBoard(n)`) has no type when the function is checked: the
+calls of the function are then not bound in a function literal, and the
+code declines. Declare the type: `let board: array<integer<0..1>> = …`.
+
+Measured on the M5 Max (`scripts/repros/2026-11-26-array-compiled-store-cost.mts`,
+the box lock held, load average 2.8): 64,000 stores take 0.09 ms, of which
+the version increment is 0.02 ms.
+
+**On GLSL.** A fragment shader has no store to a cell, so an array is an
+input that the code reads: a name declared with an array type and no value,
+or a name of the option `inputs`. `At(A, i)` and `Length(A)` compile, and so
+does an array given to a user function as an argument (the function takes
+the sampler and the count as two parameters).
+
+```js
+ce.declare('A', 'array<integer<0..255>>');
+ce.declare('i', 'integer');
+compile(ce.box(['At', 'A', 'i']), { to: 'glsl' }).code;
+// float v2 = (i == floor(i) && i != 0.0 && abs(i) <= float(A_count) ? _gpu_ir_cell_u(A, i > 0.0 ? int(i) - 1 : A_count + int(i)) : uintBitsToFloat(0x7fc00000u));
+// return v2;
+```
+
+The host binds two uniforms for `A`:
+
+- a sampler named `A` (`freeSymbolTypes.A.lowered`): `highp usampler2D` for
+  `Uint8Array`, `Uint16Array` and `Uint32Array` cells and for a tuple cell of
+  four bytes, `highp isampler2D` for the signed ones, `highp sampler2D` for
+  `real` cells. The texture holds one cell in each texel, row by row from
+  texel (0, 0), read at level 0 with no filtering: the red channel for a cell
+  of one number (`R8UI`, `R16UI`, `R32UI`, `R8I`, `R16I`, `R32I`, `R32F`),
+  the four channels for a tuple cell (`RGBA8UI`), whose read is one fetch and
+  one index test and gives a `vec4`. The width is read in the shader
+  (`textureSize`), so the host chooses it; the host pads the last row, and
+  uploads 8-bit and 16-bit cells with `UNPACK_ALIGNMENT` 1 and `real` cells
+  converted to a `Float32Array`. It uploads again when `version` changed.
+- an `int` named `A_count` (`freeSymbolTypes.A.count`), the count of the
+  cells. Another input spelled `A` or `A_count` (by its name or by the first
+  name of its `vars` text) declines: with `vars: { x: 'A_count' }`,
+  `At(A, i) + x` gives "the input x, spelled A_count, which is the name of
+  the count of the array A, on glsl".
+
+With `storage: { A: 'sampler2D' }`, an array of `Uint8Array` cells (bytes,
+or the tuple of four bytes) is read from a normalized texture (`R8`,
+`RGBA8`): the cell is `floor(255 × channel + 0.5)`, which is exact. A
+framebuffer of `RGBA8` is read back as the bytes of the cells (`readPixels`
+with `RGBA`, `UNSIGNED_BYTE`); an `RGBA8UI` framebuffer is not: WebGL 2
+refuses that read (`INVALID_OPERATION`) and reads it only with
+`RGBA_INTEGER`, `UNSIGNED_INT`, as 32-bit words
+(`scripts/repros/2026-11-26-array-glsl-texel-read.mjs`, run one time on
+headless Chromium with SwiftShader). A pixel function whose result is a
+tuple of bytes is divided by 255 before it writes a normalized framebuffer.
+
+A cell of an integer type is a float on GLSL, exact within -16,777,216 to
+16,777,216: integer cells whose declared range is wider decline
+(`array<integer<0..4294967295>>`: "an array<integer<0..4294967295>> on glsl,
+where an integer is exact within -16777216 to 16777216 only"), so a pixel
+packed in one number does not compile and a tuple cell of four bytes does.
+A field of a tuple cell of a nominal type (`P[i].g` with
+`P: array<Pixel>`) is an element of the texel; the whole cell of a nominal
+type is a record, which GLSL declines.
+
+These decline on GLSL, each with a message that names it: a name whose value
+is an array, a read with a range or a list as the index, a store, `AddTo` of
+a cell, `Swap`, `ArrayFrom`, `ListFrom`, an array as a value (a result, an
+arm of an `If`, a local assigned in a loop), an array in a record, a `vars`
+entry for an array, another input spelled as the sampler or the count,
+`storage: 'sampler2D'` on cells that are not bytes, a function called with
+arrays in two kinds of texture, and the `complex` mode.
 
 ## Value kinds
 

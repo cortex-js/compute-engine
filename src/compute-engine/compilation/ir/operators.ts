@@ -425,6 +425,42 @@ export const OPERATORS: readonly OperatorRow[] = Object.freeze([
   row(undefined,      2,          [[['list', I], 'element', 'get']], { ...list, effect: 'effectful' }),
   row(undefined,      3,          [[['list', I, R], 'element', 'set'], [['list', I, B], 'element', 'set.bool']], { ...list, effect: 'effectful' }),
   row(undefined,      2,          [[['list', R], 'element', 'getat'], [['list', R], 'element', 'getatu']], { ...list, effect: 'effectful' }),
+  // A mutable array of machine cells (`lower-arrays.ts`, `README.md`,
+  // "Arrays"): the read of a cell at an index from 1 or from the end, NaN
+  // where it names no cell (`arr.get`); the store there, whose value is the
+  // value given, which increments the version and makes no other test
+  // (`arr.set`); of a tuple cell of four bytes, the byte `j` from 0 of a
+  // cell (`arr.byte`), the store of one byte (`arr.setbyte`) and the
+  // increment of the version of one store of a tuple (`arr.touch`), with
+  // `.r` (also of `arr.get` and `arr.set`) the index on the real lane,
+  // which the code tests for an integer;
+  // the count of the cells (`arr.len`); the exchange of the cells of two
+  // arrays (`arr.swap`, whose value is NaN, the `Nothing` that the code
+  // does not read); the array that a value of a name holds (`arr.ref` of
+  // the index `k` of `ArrayUse.refs`, pure: the reference never changes);
+  // and the constructions of the engine (`arr.from.*` of the index `k` of
+  // `ArrayUse.makers`). Every operation that reads or writes the storage or
+  // the count, and every construction, is effectful (decision C6): it keeps
+  // its place, its count and its order. The verifier reads the type of an
+  // array result, not these signatures. On GLSL a tuple cell is read whole,
+  // one texel of four channels (`arr.get4`, a list of four integers, or
+  // four NaN where the index names no cell).
+  row(undefined,      2,          [[['array', R], R, 'arr.get'], [['array', R], I, 'arr.get.int'], [['array', R], R, 'arr.get.r'], [['array', R], I, 'arr.get.int.r'], [['array', R], I, 'arr.get4']], { ...list, effect: 'effectful' }),
+  row(undefined,      3,          [[['array', R, R], R, 'arr.set'], [['array', R, I], I, 'arr.set.int'], [['array', R, R], R, 'arr.set.r'], [['array', R, I], I, 'arr.set.int.r']], { ...list, effect: 'effectful' }),
+  row(undefined,      3,          [[['array', R, I], I, 'arr.byte'], [['array', R, I], I, 'arr.byte.r']], { ...list, effect: 'effectful' }),
+  row(undefined,      4,          [[['array', R, I, I], I, 'arr.setbyte'], [['array', R, I, I], I, 'arr.setbyte.r']], { ...list, effect: 'effectful' }),
+  row(undefined,      1,          [[['array'], I, 'arr.touch'], [['array'], I, 'arr.len']], { ...list, effect: 'effectful' }),
+  row(undefined,      2,          [[['array', 'array'], R, 'arr.swap']], { ...list, effect: 'effectful' }),
+  row(undefined,      1,          [[[I], 'array', 'arr.ref']], list),
+  row(undefined,      2,          [[['list', I], 'array', 'arr.from.list'], [['array', I], 'array', 'arr.from.copy']], { ...list, effect: 'effectful' }),
+  row(undefined,      3,          [[[R, R, I], 'array', 'arr.from.fill'], [['record', R, I], 'array', 'arr.from.fillrec']], { ...list, effect: 'effectful' }),
+  // A variable of the engine of `Program.assigns` around a call of a
+  // function of the host (`hostCall()` of `lower.ts`): the write of the
+  // value of the variable of the index `j` to the engine before the call
+  // (`state.put`, whose value NaN is not read), and its read after it
+  // (`state.get`), on its lane. Both keep their place and order.
+  row(undefined,      2,          [[[I, R], R, 'state.put'], [[I, B], R, 'state.put.bool'], [[I, 'array'], R, 'state.put.arr']], { ...list, effect: 'effectful' }),
+  row(undefined,      1,          [[[I], R, 'state.get'], [[I], I, 'state.get.int'], [[I], B, 'state.get.bool'], [[I], 'array', 'state.get.arr']], { ...list, effect: 'effectful' }),
   // The discharges (`absent()` of `lower.ts`): the test of an absent
   // number (NaN) and, on JavaScript, of an absent boolean (`undefined`);
   // `AssertPresent` of the test and the value, which fails where the test
@@ -504,6 +540,11 @@ export const OPERATORS: readonly OperatorRow[] = Object.freeze([
   // The length of the rows of a value of a matrix type (`matrix<real>`),
   // whose rows have one length: that of its first row, 0 of no row.
   row(undefined,      1,          [[['rows'], I, 'rows.width']], list),
+  // A matrix of run-time size, a list of rank 2 of reals or integers whose
+  // two lengths are values (an input of a matrix type, `input()` of
+  // `lower.ts`), read as its rows: the same array of arrays, so that the
+  // readers of the lane `rows` read it (README, "Matrices").
+  row(undefined,      1,          [[['list'], 'rows', 'rows.of']], list),
   // Two lengths that an operation reads, which the lowering does not prove
   // equal (`lower-lists.ts`, `agree()`): of two flat lists of an
   // element-wise operation, of a call mapped over lists or of `Dot`, the

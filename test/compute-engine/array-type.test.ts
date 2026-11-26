@@ -344,25 +344,48 @@ describe('ARRAY TYPE — cell type and storage', () => {
     expect(storage('tuple<real, real>')).toEqual(expr);
   });
 
-  test('a declared cell type is read through its definition', () => {
+  test('a cell type is read through a transparent alias', () => {
     const ce = new ComputeEngine();
     const r = ce._typeResolver;
-    ce.declareType('Byte', 'integer<0..255>');
+    const byte4 = { storage: 'uint8', tuple: true };
+    ce.declareType('Byte', 'integer<0..255>', { alias: true });
     ce.declareType('Short', 'integer<-32768..32767>', { alias: true });
     ce.declareType('Pixel', 'tuple<r: Byte, g: Byte, b: Byte, a: Byte>');
     ce.declareType('Rgba', 'tuple<Byte, Byte, Byte, Byte>', { alias: true });
     ce.declareType('Rgb', 'tuple<Byte, Byte, Byte>');
     expect(storage('Byte', r)).toEqual({ storage: 'uint8', tuple: false });
     expect(storage('Short', r)).toEqual({ storage: 'int16', tuple: false });
-    expect(storage('Pixel', r)).toEqual({ storage: 'uint8', tuple: true });
-    expect(storage('Rgba', r)).toEqual({ storage: 'uint8', tuple: true });
+    expect(storage('Pixel', r)).toEqual(byte4);
+    expect(storage('Rgba', r)).toEqual(byte4);
     expect(storage('Rgb', r)).toEqual({ storage: 'expression', tuple: false });
     // Through the cell type of an array type.
     const cell = arrayCellType(t('array<Pixel>', r));
-    expect(cell && arrayStorageKind(cell)).toEqual({
-      storage: 'uint8',
-      tuple: true,
+    expect(cell && arrayStorageKind(cell)).toEqual(byte4);
+  });
+
+  test('a nominal cell type has expression cells, but for the tuple of four bytes', () => {
+    const ce = new ComputeEngine();
+    const r = ce._typeResolver;
+    const expr = { storage: 'expression', tuple: false };
+    ce.declareType('Byte', 'integer<0..255>');
+    ce.declareType('Real', 'real');
+    ce.declareType(
+      'Pixel',
+      'tuple<integer<0..255>, integer<0..255>, integer<0..255>, integer<0..255>>'
+    );
+    ce.declareType('BytePixel', 'tuple<Byte, Byte, Byte, Byte>');
+    ce.declareType('ByteTuple', 'tuple<Byte, Byte, Byte, Byte>', {
+      alias: true,
     });
+    expect(storage('Byte', r)).toEqual(expr);
+    expect(storage('Real', r)).toEqual(expr);
+    expect(storage('Pixel', r)).toEqual({ storage: 'uint8', tuple: true });
+    expect(storage('BytePixel', r)).toEqual(expr);
+    expect(storage('ByteTuple', r)).toEqual(expr);
+    // A nominal reference to an array type is still read for its cell type.
+    ce.declareType('Bytes', 'array<Byte>');
+    const cell = arrayCellType(t('Bytes', r));
+    expect(cell && arrayStorageKind(cell)).toEqual(expr);
   });
 });
 

@@ -1,3 +1,5 @@
+import type { MathJsonExpression } from '../math-json/types.js';
+
 /** @category Definitions */
 export type Hold = 'none' | 'all' | 'first' | 'rest' | 'last' | 'most';
 
@@ -220,7 +222,7 @@ export type DisplayDigits =
  *
  * @category Serialization
  */
-export type JsonSerializationOptions = {
+export type JsonSerializationOptions<T = unknown> = {
   /**
    * If true, serialization applies readability transforms.
    * Example: `["Power", "x", 2]` -> `["Square", "x"]`.
@@ -292,6 +294,45 @@ export type JsonSerializationOptions = {
    * keeps the value.
    */
   digits?: DisplayDigits;
+
+  /**
+   * A function called with each object and each mutable array that the
+   * serialization meets, at the top level and nested (in a tuple, a list, a
+   * dictionary, a field of an object or a cell of an array). When it
+   * returns a MathJSON expression, that expression is written in place of
+   * the value, and no field or cell of the value is read. When it returns
+   * `undefined`, the value is written in its default form: for an array,
+   * `["Object", ["List", …cells], "'array<T>'"]`.
+   *
+   * A host that sends a figure to another thread writes a reference of its
+   * own in place of the raster, and sends the storage beside it:
+   *
+   * ```ts
+   * const rasters: Uint8Array[] = [];
+   * const json = figure.toMathJson({
+   *   objects: (value) => {
+   *     if (!isMutableArray(value)) return undefined;
+   *     rasters.push(value.cells as Uint8Array);
+   *     return ['HostRaster', rasters.length - 1];
+   *   },
+   * });
+   * worker.postMessage({ json, rasters });
+   * ```
+   *
+   * The returned expression is written as given: `{ str: "raster:42" }` is
+   * a string, and `"raster:42"` a symbol.
+   *
+   * The function is called in the middle of the serialization. It returns
+   * MathJSON that it builds itself, and must not serialize, evaluate or box
+   * an expression of the engine: it may read `cells`, `count`, `cellType`
+   * and `version` of an array, and the type name of an object.
+   *
+   * `.json` and `.latex` call no function given here; `.latex` writes an
+   * array of more than 16 cells as its type and count.
+   *
+   * **Default**: `undefined`
+   */
+  objects?: (value: T) => MathJsonExpression | undefined;
 };
 
 /**

@@ -517,10 +517,14 @@ export type FreeSymbolType = {
    *   (`float[5]`; for a list of tuples of 2 to 4 real numbers an array of
    *   points, `vec2[3]`). A matrix of 2 to 4 columns is the array of its
    *   rows (`vec2[3]` for 3 rows of 2 numbers, `M[0]` its first row); no
-   *   `matN` is emitted.
+   *   `matN` is emitted. A mutable array (`array<T>`) is a sampler:
+   *   `highp usampler2D`, `highp isampler2D` or `highp sampler2D` (see
+   *   `count`).
    * - `javascript`: the runner value convention: `number`, `complex` (a
    *   `{ re, im }` object), `boolean`, `string`, `point` (an array of
-   *   numbers of a fixed width), `color`, `array` (a list), or `function`.
+   *   numbers of a fixed width), `color`, `array` (a list), `mutable-array`
+   *   (the engine's array of an `array<T>` input, a `BoxedArray`), or
+   *   `function`.
    * - `interval-js`: `interval` for a real number (a number or a
    *   `{ lo, hi }` interval), else as for `javascript`.
    *
@@ -530,6 +534,13 @@ export type FreeSymbolType = {
    * of `a` is `color | string | tuple`, but a shader reads a `vec3`.
    */
   lowered: string;
+
+  /**
+   * `glsl`, for an array input (`array<T>`), whose `lowered` is its sampler
+   * (`highp usampler2D`): the name of the `int` uniform of its count of
+   * cells (`A_count`), which the host binds beside the sampler.
+   */
+  count?: string;
 
   /**
    * `'declared'` when the symbol has an explicit declaration (`ce.declare`),
@@ -792,6 +803,10 @@ export type StoredEntryPlan = {
    * the host. Stored data cannot carry that function, so a runtime refuses to
    * load a plan that lists one. */
   kinds?: (string | number)[];
+  /** The code reads or writes a mutable array of the engine (`array<T>`),
+   * which only the `run()` of the compilation result gives it: a runtime
+   * refuses to load a plan that has the flag. */
+  arrays?: true;
   /** The symbols declared `boolean` (`vars` plans only). `broadcast()`
    * reads an empty array for one as an empty column. */
   booleans?: (string | number)[];
@@ -1303,6 +1318,19 @@ export type CompilationResult<
    * Absent when the code calls no function of the host.
    */
   hostCalls?: string[];
+
+  /**
+   * JavaScript only. Present when the code reads or writes a mutable array
+   * of the engine (`array<T>`): the names whose value is an array, which
+   * `run()` reads from the engine at each call (an assignment of the name
+   * between two calls needs no new compilation), in the order the code
+   * first reads them; empty when the code reaches its arrays otherwise (a
+   * parameter, a field of a value, `ArrayFrom`).
+   *
+   * Such a result is not `shippable`, `load()` refuses it, a batch throws,
+   * and the engine's own compilations interpret such a function.
+   */
+  arrays?: string[];
 
   /**
    * Operator heads in the expression that this target cannot lower — they have

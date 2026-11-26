@@ -26,6 +26,7 @@ list literal.
 | `lower-lists.ts`               | List sources (an input, a `Range`, a build), reductions, `Max` and `Min`, the list operators |                                          |
 | `lower-functions.ts`           | User functions by definition, signatures, the fixed point of their effects                   |                                          |
 | `lower-matrices.ts`            | The matrix operators ("Matrices"): builds of the elements, or a kernel of the runtime        |                                          |
+| `lower-arrays.ts`             | The mutable arrays ("Arrays"): the cells, the store, `Swap`, `ArrayFrom`, the names that hold one |                                          |
 | `lower-context.ts`             | The types the three lowering files share; `Decline`                                          |                                          |
 | `ir.ts`                        | Types, instructions, functions, the builder, the def-use index                               | Know a target                            |
 | `effects.ts`                   | The effect of an instruction and of a function; the eligibility queries; trace               |                                          |
@@ -947,12 +948,11 @@ the bigint and the interval modes and GLSL decline the input. The entry checks
 it as a list (a string or a typed array is refused), and a batch shares it
 between its cells.
 
-An input of a matrix type of no stated dimensions (`matrix`, `matrix<real>`,
+A value of a matrix type of no stated dimensions (`matrix`, `matrix<real>`,
 `matrix<integer>`; `isFreeMatrix()` of `lower-functions.ts`) is such an input
-too, in each place above (a positional parameter of a root function literal,
-a typed parameter of `Apply`, a parameter of a user function, an input that a
-user function reads, a variable of the engine that a root literal assigns),
-with one more fact: its rows have one length, the length of its first row,
+too at a typed parameter of `Apply`, a parameter of a user function, an input
+that a user function reads and a variable of the engine that a root literal
+assigns, with one more fact: its rows have one length, the length of its first row,
 the operation `rows.width` (`$0.length === 0 ? 0 : $0[0].length`), which the
 compiled code does not test (R5: a value with rows of different lengths is
 outside the type, and the engine refuses one as its value). It is made where
@@ -962,7 +962,21 @@ operation so that a later `b.op()` of the same operand is that value, as
 and is the value's `rowWidths`; its `rowCounts` is `rows.count`. So every
 reader of the lane reads it, a row read by `chunks()` has that length (a `Map`
 of each element keeps the fact), and the matrix operators read it
-("Matrices"). An argument at a parameter of a matrix type, of a user function
+("Matrices"). An input of the entry (a name read at the entry, a positional
+parameter of a root function literal: `input()` of `lower.ts`) is not a
+parameter of the lane: it is a list of rank 2 of reals or integers of the
+shape `[{v: r}, {v: c}]`, with two length parameters before it, its number of
+rows and the length of its first row ("Matrices", a matrix of run-time size).
+The readers of the lane read it as its rows, the operation `rows.of` (`$0`:
+the same array of arrays), whose `rowCounts` and `rowWidths` are `r` and `c`;
+that value is the binding of the name. Its two lengths are parameters, where
+the count of the other values of the lane is an operation made where it is
+read (`rows.count`), so two forms compile for it that decline for them: an
+`If` with no else whose list arm reads it (`If(n > 0, Map(r ↦ Sum(r), M))`,
+a list of NaN where the condition is false, as for an input of type
+`list<real>`), and a `Sum` whose term is a list made from it
+(`Sum(k · Map(r ↦ Sum(r), M), k, 1, 200)`). An argument at a parameter of a
+matrix type, of a user function
 or of `Apply`, must have rows of one length (`matrixRows()` of
 `lower-lists.ts`): a value of the lane with the fact is taken as it is, and a
 list of rank 2 of reals or integers (a matrix of stated size, a literal, a
@@ -2654,6 +2668,26 @@ list is the product; `Rank` of it is 2 and `Shape` the tuple of `rows.count`
 (or its `rowCounts`) and its `rowWidths`; `Diagonal` of it is the build of
 its `Min(rows, columns)` diagonal elements; `Determinant`, `Inverse` and
 `MatrixPower` of it are the kernels of its order (`rowsKernel()`, below).
+
+An input of the entry of a matrix type of no stated dimensions (a name read
+at the entry, a positional parameter of a root function literal: `input()` of
+`lower.ts`) is a list of rank 2 of the lane `real` or `integer` whose two
+lengths are values, the shape `[{v: r}, {v: c}]`. Two length parameters come
+before it, both `lengthOf`: `r`, the length of the input, and `c`, which is
+`widthOf` too, the length of its first row and 0 of no row (`Syntax.width`,
+`($0.length === 0 ? 0 : $0[0].length)` on JavaScript, a statement at the
+start of the entry when the body reads it, so that it is read once). Both are
+known `>= 0` (`inputLengths`). Its run-time form is the host's array of
+arrays, so the operation `rows.of` (`$0`) reads it as a value of the lane
+`rows` at no cost, with `r` and `c` as its `rowCounts` and `rowWidths`. That
+value is the binding of the name: every reader below, and every reader of
+"The rows lane", reads it, and a read of the name that no reader of the lane
+admits declines. The other values of a matrix type (a parameter of a user
+function or of `Apply`, an input that a user function reads, a variable of
+the engine that a root literal assigns, a build) are of the lane `rows`.
+`docs/plans/2026-11-25-matrix-of-run-time-size.md` describes the change that
+gives each of them this shape.
+
 Two lengths that must be equal (the inner lengths of
 `MatrixMultiply`, the numbers of rows and of columns of `Trace`) and that
 `same()` does not prove equal (one value, or equal constants) are compared
@@ -4037,6 +4071,90 @@ two types"); `admits()` refuses the lane there too.
   with no names stays an array. A record result has no batch: `broadcast()` and
   `broadcastAsync()` throw.
 
+## Arrays
+
+A mutable array of machine cells (`array<T>`, `docs/COMPILATION-MODEL.md`,
+"Arrays") is a value of the lane `array`, on JavaScript in the default mode,
+and read as an input on GLSL (`lower-arrays.ts`). Its IR type holds the cell: `IRType.array = { cell,
+type, lane, tuple? }`, the storage kind of `arrayStorageKind()`, the lane of a
+cell (`integer` or `real`) and, for a tuple cell, its tag and field names. An
+array has no length in its type: it is one shape whatever its count.
+
+The value is the engine's `BoxedArray`. The code reads its fields at each
+use: `_cells` (the typed array), `_count`, `_version`. So every operation of
+the lane is `effectful` (`arr.get`, `arr.set`, `arr.byte`, `arr.setbyte`,
+`arr.len`, `arr.touch`, `arr.swap`, `arr.from.*`; the forms `.int` for an
+integer cell and `.r` for an index on the real lane, which is tested for an
+integer): they keep their place, count and order, and no pass moves a read
+across a store, a `Swap` or a call of the host. `arr.ref`, the reference of
+an array that a value of the program holds, is pure.
+
+How an array reaches the code (`lower-arrays.ts`, `adapter.ts`):
+
+- a parameter of the root function literal: an entry parameter with a check
+  of the cell type (`arrayEntryCheck`);
+- a name whose value is an array: an input `_.name` that the wrapper of
+  `run()` reads in the engine at each call, from the definition of the name
+  at the compilation, and checks; the name is in the result's `arrays`, not
+  in `captures`;
+- a name whose value is an array and that the root function literal
+  assigns, itself or through a user function: a name of `Program.assigns`
+  (`Assigned.array`), not of `arrays`, which `run()` reads and writes back
+  (`assigningRun()`) and the code writes and reads around each call of the
+  host (`state.put.arr`, `state.get.arr`);
+- in a program that calls the host, itself or through a user function, a
+  name whose value is an array and that the program reads: a name of
+  `Program.assigns` with `Assigned.read`, reported in `arrays`, which the
+  code reads again after each call of the host (`state.get.arr`, no
+  `state.put`) and `run()` does not write back;
+- an array inside a value that a name holds (a named tuple): `_SYS.arrays.refs[k]`,
+  bound in `runtimeOf()` as `_SYS.hosts` is, with the name in `captures`;
+- `ArrayFrom`: a call of `_SYS.arrays.make[k]`, which evaluates the engine's
+  `ArrayFrom` with the binding of the node.
+
+A read is `+a._cells[i > 0 ? i - 1 : a._cells.length + i]`: outside the
+cells a typed array gives `undefined`, and the unary plus makes it `NaN`, the
+interpreter's value. A store is `(a._version++, a._cells[…] = v)`, with no
+range test. A tuple cell is four bytes at `4k` to `4k + 3`: the read of one
+field is one `arr.byte`, and the read of the cell is a record of its nominal
+type (or a tuple of the code for a type with no name). A unit that holds a
+store calls `arrayNote` (the store epoch of the engine and one state event)
+before each `call.host<k>` and in a `finally` of `run()`.
+
+The scan `callbackScan()` declines a read or a store in the body of a
+function literal that is an operand or a value. `absent()` declines a
+discharge of a record of a nominal type that is a tuple cell. The entry plan
+of such code has `arrays: true`, and `restoreEntryPlan()` refuses it.
+
+On GLSL (`LowerOptions.glsl`) an array is an input of the entry and is read
+only: `lower-arrays.ts` declines every other use (`readOnly()`,
+`heldValue()`), and integer cells whose range is outside ±2^24 (`exact()`).
+A cell of one number is `arr.get` or `arr.get.int` (`.r` for an index on the
+real lane, spelled alike), a tuple cell one `arr.get4` (a list of four
+integers, one texel; the verifier knows its type), an element of it an
+`elem` of that read, and the count `arr.len`. After the passes,
+`holdArrays()` (`index.ts`) gives each array input the texture of its cells
+in `IRType.storage` when it is not the default one (`isampler2D` for signed
+integer cells, `sampler2D` for the names of the option `storage`, bytes in a
+normalized texture) and, to a fixed point, to the parameters of the
+functions it is passed to; it refuses an array that is not a parameter, a
+yield, a read by another operation than an `arr.*`, and a parameter that two
+calls give two textures. The printer spells `<op>.<storage>` as for a list
+in storage: one helper per texture (`_gpu_ir_cell_f`, `_gpu_ir_cell_u`,
+`_gpu_ir_cell_i`, `_gpu_ir_cell_n`, `_gpu_ir_cell4_u`, `_gpu_ir_cell4_n`),
+with the index test of `at` against the uniform `$0_count`. An array
+parameter is declared as its sampler and its count
+(`highp usampler2D A, int A_count`), and a call passes both (`Syntax.call`
+takes the types of the arguments); `GlslResult.parameters` lists the
+sampler, then the count (`{ input: 'A', name: 'A_count', type: 'int',
+count: true }`), in the order of the parameters of `f`. `holdStorage()`
+leaves an array to `holdArrays()` on GLSL only; the JavaScript slice keeps
+its refusal of a `storage` hint on an array. `adapter-glsl.ts` reports
+`lowered` (the sampler: `highp usampler2D`, `highp isampler2D` or
+`highp sampler2D`) and `count` in `freeSymbolTypes`, and declines a constant
+index that is 0 or not an integer, another input spelled as the sampler or
+the count of an array, and a `vars` entry of an array.
+
 ## How to add
 
 - An operator: one row in `OPERATORS`; a spelling in `JS.ops` and `GLSL.ops` for
@@ -4178,7 +4296,24 @@ in `adapter.ts` (JavaScript), `adapter-glsl.ts` and `adapter-interval.ts`, and
   engine (`readsVariableIn()`, the interpreter's rule of listing, without
   the names that the program binds). A write in a loop frame (a `Sum`, a
   callback of `Map`), a call that maps over a list (`mapOver()`), a recursive
-  writer and a list name written by a function decline. A warning of a
+  writer and a list name written by a function decline. A name that holds an
+  array of machine cells is such a name too (`Assigned.array`): a positional
+  parameter of its array type, a local that an `Assign` binds to another
+  array of the same cells, whose reference the entry returns and `run()`
+  writes back. A call of a function of the host in such a literal
+  (`hostCall()`) reads and writes every name of `assigns`: before the
+  `call.host<k>`, one `state.put` of the index `j` and the value of each
+  name (`_SYS.state.put(j, v)`, `writeAssigned()` of `print-js.ts`, the
+  write of `run()`), and after it one `state.get` of each, on the lane of
+  the name (`_SYS.state.get(j)`, `readAssigned()`, the read of `run()`,
+  which throws its `TypeError`), which rebinds the name
+  (`Lowering.stateWrite()`). Both operations are effectful, so they keep
+  their place around the call. The `facts()` of the call count every name,
+  so a `Loop` carries them and the arms of an `If` give them; a user
+  function that calls the host, itself or through its calls
+  (`assignedNames()` records it as `host` of `stateOf()`), reads and writes
+  every name that is not a list. A list name, and a call in a loop frame (a
+  `Sum`, a callback of `Map`), decline. A warning of a
   random frame is in `warnings` (`kind: 'correctness'`). `profile` is `'ir'`.
 - **Stored code.** The result has the fields of stored code
   (`StoredJavaScript`): `preambleOnce` (and `preamble`, the same text) holds the

@@ -25,7 +25,7 @@ category.
 
 `(expression, any) scope -> any`
 
-Compound assignment: `AddTo(s, e)` is `Assign(s, Add(s, e))`, and `AddTo(At(L, i, …), e)` is `Assign(L, ReplaceAt(L, i, …, Add(At(L, i, …), e)))`, with each position evaluated once, before `e`. In the body of a `ParallelLoop`, it adds a contribution to an accumulator, a variable declared outside the loop.
+Compound assignment: `AddTo(s, e)` is `Assign(s, Add(s, e))`, and `AddTo(At(L, i, …), e)` is `Assign(L, ReplaceAt(L, i, …, Add(At(L, i, …), e)))`, with each position evaluated once, before `e`. When the base of the element is an array, the sum is stored in the cell. In the body of a `ParallelLoop`, it adds a contribution to an accumulator, a variable declared outside the loop.
 
 ### Alternatives
 

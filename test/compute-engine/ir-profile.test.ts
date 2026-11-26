@@ -784,6 +784,9 @@ describe('stored code', () => {
     expect(names.size).toBeGreaterThan(40);
     for (const path of names) {
       const [head, member] = path.split('.');
+      // `_SYS.state` is bound for one program by `runtimeOf()`, as
+      // `_SYS.hosts` and `_SYS.arrays` are: code that calls it is not stored.
+      if (head === 'state') continue;
       const value =
         member === undefined
           ? sys[head]

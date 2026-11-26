@@ -1,6 +1,15 @@
 # Mutable arrays (`array<T>`): implementation plan
 
-Status: ACTIVE. It implements
+Status: stages 1 to 5 are DONE and committed on main (2026-11-26), not
+released; stage 6 holds later items, each on a request by name. The commits:
+stage 1 `5fd35f08c05c5d50ddf84beb513d9e44b8affaf0`, 2a
+`46d756770bb07ab3997555af07ef6b6f1a2191b4`, 2b
+`d13f9c832b7713e8d4def65266d471f54a579efd`, 3
+`d15d09fadee9052ba232a616b90efa6a6f8f342b`, 2c
+`8fd1ae0e07cab026a698553005e846b151910563`, 4a and 4b
+`c3b0823fe95b92bd06c9c8cdbec7400d8cd478e7`, 4c
+`0e1ac95ddb268ab74d8b3578d6d63769eb297a16`, 5
+`2bb09b3f93b8059e4c7fc1e2a3bea76b75b9135c`. It implements
 `docs/plans/2026-11-25-mutable-arrays-spec.md` ("the spec"), which the user
 approved on 2026-11-25. Written by session `compute-engine-57` on 2026-11-25 at
 `30397d7e6c43bf3d4698e393e7725f8b554babd6`. The file and line references below
@@ -180,6 +189,9 @@ About 250 lines with tests.
 - `index.ts` and `types-engine.ts`: `ce.array()` (with its refusals),
   `ce.arrayAllocation` and `ce.arrayCreated`.
 - `serialize.ts` and `types-serialization.ts`: the option `objects`.
+- The option `objects` is the public form of the internal hook that item 2a
+  added for `.latex` (the JSON walk writes an array of more than 16 cells as
+  its type and count there).
 - `src/compute-engine.ts` and `src/core.ts`: the exports.
 
 Tests: acceptance cases 8 (the `noteStore()` part), 10 (without the
