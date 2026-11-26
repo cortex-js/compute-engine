@@ -1149,8 +1149,10 @@ export type OperatorDefinition = Partial<BaseDefinition> &
      * receives `List(2, 4)`, with the callback called for each element
      * before the handler. Compiled JavaScript passes the same `List`. An
      * endless collection, one whose count is not known, one of more than
-     * `ce.maxCollectionSize` elements, a set, a dictionary and a `Tabulate`
-     * whose callback has an effect are passed as they are. A handler that needs the collection as written (to read the
+     * `ce.maxCollectionSize` elements, a set, a dictionary and a view with
+     * an effect whose count is not known without a call that has an effect
+     * (`Tabulate(f, g())` where `f` and `g` have an effect) are passed as
+     * they are. A handler that needs the collection as written (to read the
      * bounds of a `Range`, or to read only some elements) declares the
      * function `lazy: true` and evaluates the operand itself.
      *

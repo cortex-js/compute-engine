@@ -2979,8 +2979,8 @@ would compute it there. An argument stays as it is in the interpreter when it is
 its count is not known (`1..oo`), when it has more than
 `ce.maxCollectionSize` elements (10,000 by default), when it is a set or a
 dictionary, when it is a view with an effect whose count has no bound
-without a call of its callback (`tabulate(i => tick(i), 3)`), and when the
-function is `lazy` (it receives its operands as written). A view nested in the
+without a call that has an effect (`tabulate(i => tick(i), tick(3))`), and
+when the function is `lazy` (it receives its operands as written). A view nested in the
 argument follows the rule of a list literal: a `Range` element stays a range.
 So the code takes a list that the interpreter can hold as a lazy collection
 only at the top of an argument, of scalars, and of a length known when the

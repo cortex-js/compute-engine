@@ -253,6 +253,17 @@
 
 ### Resolved Issues
 
+- **A list that holds a `Tabulate` of random numbers holds the numbers**
+  (CE-1809). A `Tabulate` whose function has an effect (a random draw, a
+  call of an impure function) stayed unevaluated as an element of a list or
+  a tuple: in Epsil, `[tabulate(i => random(), 3)]` gave
+  `[Tabulate(i ↦ Random(), 3)]` and now gives a list of three numbers, as
+  `[map(x => random(), [1, 2, 3])]` does. The function is called once for
+  each element, in order. A custom function that is not `lazy` now receives
+  the `List` of the elements of such an argument too. A `Tabulate` of more
+  than `ce.maxCollectionSize` elements stays as it is, and so does one
+  whose dimension has an effect.
+
 - **A loop whose variable has the name of a variable of its collection
   runs** (CE-1827). The collection of a clause of `Loop`, `Comprehension`,
   `ParallelLoop` and `ParallelComprehension` is read before the clause binds
