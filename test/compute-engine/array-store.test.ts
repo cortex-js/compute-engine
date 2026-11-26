@@ -281,7 +281,10 @@ const s = Screen(w: 2, px: [0, 0, 0, 0])
 s.px[2] = 9`);
     expect(errorCode(v)).toBe('immutable-value-assignment');
     const message = JSON.stringify(v.json);
-    expect(message).toContain('ReplaceAt');
+    // The two remedies, with no operator name: the message is shown in
+    // MathJSON and in Epsil, which spell `ReplaceAt` differently.
+    expect(message).toContain('Store a new value in the field or the cell');
+    expect(message).not.toContain('ReplaceAt');
     expect(message).toContain('array<integer>');
     expect(run('s.px').json).toEqual(['List', 0, 0, 0, 0]);
   });

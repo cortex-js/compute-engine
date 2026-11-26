@@ -2256,6 +2256,10 @@ function lazyViewCellError(
  * statement of this program; this check rejects most of these. A statement
  * whose operator canonicalization changes (`a - b` becomes `Add`) is
  * rejected too, and is then not reported.
+ *
+ * The element write `a[i] = v`, raw `Assign(a, ReplaceAt(a, i, v))`, has
+ * the canonical form `Assign(At(a, i), v)`, the store of a cell, when `a`
+ * can hold an array: its target name is the root of the `At`.
  */
 function isSameStatement(boxed: Expression, raw: MathJsonExpression): boolean {
   const name = symbol(raw);
@@ -2265,7 +2269,8 @@ function isSameStatement(boxed: Expression, raw: MathJsonExpression): boolean {
   if (head !== 'Assign' && head !== 'Declare') return true;
   const target = symbol(operand(raw, 1));
   if (target === null) return true;
-  const written = isFunction(boxed) ? boxed.op1 : undefined;
+  let written = isFunction(boxed) ? boxed.op1 : undefined;
+  if (head === 'Assign' && isFunction(written, 'At')) written = written.op1;
   return isSymbol(written) && written.symbol === target;
 }
 

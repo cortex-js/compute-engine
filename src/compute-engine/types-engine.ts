@@ -2005,8 +2005,8 @@ export interface IComputeEngine {
    * A result of `false`, an exception thrown by the function, and a failure
    * of the JavaScript allocation give the error `array-allocation-refused`.
    * It is a permission: the engine reports no release. It is not called for
-   * the storage of an array that the host gives. With no function, every
-   * allocation is permitted.
+   * the storage of an array that the host gives. With no function, the
+   * engine refuses a storage of more than 2 GiB (2^31 bytes) for one array.
    */
   arrayAllocation:
     | undefined

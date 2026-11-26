@@ -51,7 +51,8 @@
     index is that of a list: from 1, a negative index counts from the end,
     and a read out of range is `NaN`.
   - `a[i] = v` and `a[i] += v` store to a cell, also through a field
-    (`p.pixels[i] = v`) and through a list of arrays (`m[i][j] = v`). A store
+    (`p.pixels[i] = v`, and `p.pixels[i] += v`, which Epsil refused with
+    `add-to-target`) and through a list of arrays (`m[i][j] = v`). A store
     out of range is the error `out-of-range`, and a value outside the cell
     type is `incompatible-type`. A constant that holds an array accepts a
     store. A store has the effect `state`.
@@ -84,7 +85,8 @@
   - `ce.arrayAllocation`, a function `(count, bytesPerCell) => boolean`, is
     called before the engine allocates the cells of a new array; when it
     returns `false`, the construction is the error
-    `array-allocation-refused`. `ce.arrayCreated`, a function `(array) =>
+    `array-allocation-refused`. With no function, the engine refuses more
+    than 2 GiB for one array. `ce.arrayCreated`, a function `(array) =>
     void`, is called with each array that `ArrayFrom` made.
   - `toMathJson({ objects })` takes a function from an object or an array to
     the MathJSON written in its place: a host that sends a value to another

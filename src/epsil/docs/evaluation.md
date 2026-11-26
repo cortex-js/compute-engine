@@ -59,7 +59,10 @@ Epsil keeps apart two things many languages blur together:
   that changes. `let` introduces a binding you may reassign; `const` one you
   may not. See [Declarations](/epsil/declarations/).
 
-Everything below follows from those two sentences.
+Everything below follows from those two sentences. Two kinds of values are
+the exception, made to change in place: an object (a value of an
+`object{…}` type) and an array (see
+[Arrays](/epsil/evaluation/#arrays)).
 
 **There is no in-place modification.** An assignment to an element,
 `xs[2] = 9`, does not change the list: it builds a new list and rebinds the
@@ -356,6 +359,237 @@ v
 To get the elements with the value of `n` at the `let`, write the function
 inline, or make a list literal of the elements:
 `let v = [...map(scale, 1..3)]` gives `[1, 2, 3]` after `n = 10`.
+
+## Arrays: cells that change in place {#arrays}
+
+An **array** is the one collection whose elements change in place. It holds
+a fixed number of *cells*, and a store writes a cell of the array: it does
+not build a new array, and it does not rebind a name. Every name that holds
+the array sees the store, because an array has an identity, as an object
+does:
+
+```epsil
+let a = arrayFrom([1, 2, 3])
+let b = a
+a[1] = 7
+(b[1], a == b, a == arrayFrom(a))
+// ➔ (7, true, false)
+```
+
+The same statements with a list give `(1, false)` for `(ys[1], xs == ys)`:
+`xs[1] = 7` gives `xs` a new list, and `ys` keeps the old one. Use an array
+for a buffer that a loop writes many times (a raster, a table of a dynamic
+program, a sieve); use a list everywhere else.
+
+### Making an array
+
+`arrayFrom(xs)` makes a new array with the elements of the finite collection
+`xs`, and `arrayFrom(xs, "type")` gives the type of its cells. There is no
+array literal. Each evaluation makes a new array, also of the same source.
+
+```epsil
+arrayFrom(repeat(0, 64000), "integer<0..255>")
+// ➔ array<integer<0..255>> of 64000
+```
+
+The type of the cells chooses the storage:
+
+| Cell type                                          | Storage                          |
+| -------------------------------------------------- | -------------------------------- |
+| An integer type with a range, such as `integer<0..255>` | One machine integer of 1, 2 or 4 bytes for each cell |
+| `real`                                             | One machine number for each cell |
+| A tuple of four integers in `0..255` (a pixel)     | Four bytes for each cell         |
+| Any other type                                     | One value for each cell          |
+
+An integer cell holds its value exactly. A `real` cell holds the machine
+number of the value, so `a[1] = 1/3` reads back as `0.3333333333333333`,
+where a list keeps `1/3`; declare `array<rational>` or `array<number>` to keep
+exact values. Without the type, the cells take the element type that a
+variable initialized with `xs` takes: `arrayFrom([1, 2, 3])` is an
+`array<number>`, with one value for each cell. A program gets machine cells
+only where it names their type.
+
+A declared type does not give the cell type to the value:
+`let px: array<integer<0..255>> = arrayFrom(repeat(0, n))` is the error
+`incompatible-type`, because `arrayFrom(repeat(0, n))` is an `array<number>`.
+Name the type once with a type alias, and give it to `arrayFrom`:
+
+```epsil
+type alias Byte = integer<0..255>
+let px = arrayFrom(repeat(0, 4), "Byte")
+px[1] = 200
+px[2] += 55
+listFrom(px)
+// ➔ [200, 55, 0, 0]
+```
+
+A type alias is another name for the same type. A type declared with `type`
+is a new type whose values carry its name (`type Byte = integer<0..255>`
+makes `Byte(1)`, and `0` is not a `Byte`), so `arrayFrom(repeat(0, 4),
+"Byte")` is then `incompatible-type`. The one declared type with machine
+cells is a tuple of four bytes:
+
+```epsil
+type alias Byte = integer<0..255>
+type Pixel = tuple<r: Byte, g: Byte, b: Byte, a: Byte>
+let img = arrayFrom(repeat(Pixel(0, 0, 0, 255), 4), "Pixel")
+img[2] = Pixel(255, 128, 0, 255)
+(img[2].g, img[1].a)
+// ➔ (128, 255)
+```
+
+A tuple is a value, so `img[2].r = 9` is the error
+`immutable-value-assignment`: store a whole tuple in the cell.
+
+### Reading an array
+
+An array is read as a list is: `a[i]` from 1, `a[-1]` the last cell, a range
+or a list of indexes gives a list of those cells now, and `length(a)` is the
+number of cells. `listFrom(a)` is a list of the cells now: a later store
+does not change it.
+
+```epsil
+let a = arrayFrom([10, 20, 30, 40, 50], "integer")
+(a[1], a[-1], a[2..4], length(a), listFrom(a))
+// ➔ (10, 50, [20, 30, 40], 5, [10, 20, 30, 40, 50])
+```
+
+An index that is 0, not an integer or past the end reads `NaN` in a number
+cell, as for a list.
+
+### Storing in an array
+
+A store is an assignment to a cell, or a `+=` of a cell. The base of the
+cell can be any expression that gives an array: a name, a field of an
+object, an element of a list of arrays.
+
+```epsil
+type Screen = object{w: integer, pixels: array<integer<0..255>>}
+let s = Screen(w: 2, pixels: arrayFrom(repeat(0, 4), "integer<0..255>"))
+s.pixels[3] = 255
+s.pixels[4] += 7
+listFrom(s.pixels)
+// ➔ [0, 0, 255, 7]
+```
+
+```epsil
+let m = [arrayFrom([1, 2]), arrayFrom([3, 4])]
+m[2][1] = 30
+m[1][2] += 10
+[listFrom(m[1]), listFrom(m[2])]
+// ➔ [[1, 12], [30, 4]]
+```
+
+`m[2][1] = 30` stores in the array `m[2]`, and `m` is not rebound. A store
+does not change the binding, so a constant that holds an array accepts it:
+
+```epsil
+const a = arrayFrom([1, 2, 3])
+a[2] = 9
+listFrom(a)
+// ➔ [1, 9, 3]
+```
+
+`swap(a, b)` exchanges the cells of two arrays of one cell type, with no
+cell copied. Each array keeps its identity: every name that held `a` still
+holds `a`, with the cells and the count that `b` had.
+
+```epsil
+let a = arrayFrom([1, 2])
+let b = arrayFrom([3, 4, 5])
+let c = a
+swap(a, b)
+(listFrom(a), listFrom(b), listFrom(c), a == c)
+// ➔ ([3, 4, 5], [1, 2], [3, 4, 5], true)
+```
+
+### What an array is not
+
+An array is not a list and not a collection. The collection operators
+(`sum`, `map`, `filter`, `sort`, …) and arithmetic refuse it with
+`incompatible-type`; take a list of its cells first:
+
+```epsil
+let a = arrayFrom([1, 2, 3])
+sum(listFrom(a))
+// ➔ 6
+```
+
+`==` compares identity, not cells: two arrays with the same cells are not
+equal. A store is checked when it runs:
+
+- an index that is 0, not an integer or past the end is the error
+  `out-of-range` (`a[4] = 1` when `a` has three cells): a store never grows
+  the array;
+- a value that the cell type does not hold is the error `incompatible-type`
+  (`a[1] = 12` in an `array<integer<0..9>>`);
+- a store into an element of a value that is not an array is the error
+  `immutable-value-assignment`: `s.px[2] = 9` with `px` a list field of an
+  object. Store a new value in the field, `s.px = replaceAt(s.px, 2, 9)`, or
+  declare the field an array, `px: array<integer>`.
+
+### Example: the sieve of Eratosthenes
+
+```epsil
+function primes(n: integer) {
+  let composite = arrayFrom(repeat(0, n), "integer<0..1>")
+  let found = []
+  for k in 2..n {
+    if composite[k] == 0 {
+      found = [...found, k]
+      let j = k * k
+      while j <= n {
+        composite[j] = 1
+        j += k
+      }
+    }
+  }
+  found
+}
+primes(30)
+// ➔ [2, 3, 5, 7, 11, 13, 17, 19, 23, 29]
+```
+
+### Example: a step of the Game of Life
+
+The board is two arrays of the same size, one cell for each square, with
+the rows one after the other. `step()` writes each cell of `next` from the
+eight neighbors in `cur`, then exchanges the two arrays, so that `cur` holds
+the new board and `next` the old one, which the next step overwrites.
+
+```epsil
+let w = 5
+let h = 5
+let cur = arrayFrom(repeat(0, w * h), "integer<0..1>")
+let next = arrayFrom(repeat(0, w * h), "integer<0..1>")
+
+// The cell at column x and row y, from 0, with wrapped indexes.
+cell(x, y) = (y % h) * w + x % w + 1
+
+function step() {
+  for y in 0..(h - 1) {
+    for x in 0..(w - 1) {
+      let n = 0
+      for dy in -1..1 {
+        for dx in -1..1 {
+          if dx != 0 || dy != 0 { n += cur[cell(x + dx, y + dy)] }
+        }
+      }
+      let alive = cur[cell(x, y)]
+      next[cell(x, y)] = if n == 3 || (alive == 1 && n == 2) { 1 } else { 0 }
+    }
+  }
+  swap(cur, next)
+}
+
+rows() = [listFrom(cur[(y * w + 1)..(y * w + w)]) for y in 0..(h - 1)]
+
+// A blinker: three live cells in a row turn to a column.
+for x in 1..3 { cur[cell(x, 2)] = 1 }
+step()
+rows()
+// ➔ [[0, 0, 0, 0, 0], [0, 0, 1, 0, 0], [0, 0, 1, 0, 0], [0, 0, 1, 0, 0], [0, 0, 0, 0, 0]]
+```
 
 ## Errors are values
 

@@ -1058,14 +1058,21 @@ function arrayFromTypeOperand(
   };
 }
 
+/** The largest storage of one array that `ArrayFrom` allocates when the
+ * host gives no allocation function (`ce.arrayAllocation`): 2 GiB. */
+const DEFAULT_MAX_ARRAY_BYTES = 2 ** 31;
+
 /**
  * The permission to allocate the storage of an array of `count` cells of
  * `bytesPerCell` bytes each, asked once by `ArrayFrom` when the count is
  * known and before the storage is allocated: the allocation function of the
- * host, `ce.arrayAllocation` (spec section 9). With no function every
- * allocation is permitted, and the engine sets no limit of its own. A
- * `false` result and an exception thrown by the function refuse it, which
- * is the error `array-allocation-refused`.
+ * host, `ce.arrayAllocation` (spec section 9). With no function, a storage
+ * of more than `DEFAULT_MAX_ARRAY_BYTES` is refused: JavaScript accepts the
+ * allocation of a typed array far larger than the memory and fails when the
+ * cells are filled, which ends the process
+ * (`arrayFrom(repeat(0, 10^12), "real")`). A `false` result and an exception
+ * thrown by the function refuse it, which is the error
+ * `array-allocation-refused`.
  */
 function beforeArrayAllocation(
   ce: ComputeEngine,
@@ -1073,7 +1080,8 @@ function beforeArrayAllocation(
   bytesPerCell: number
 ): boolean {
   const permit = ce.arrayAllocation;
-  if (permit === undefined) return true;
+  if (permit === undefined)
+    return count * bytesPerCell <= DEFAULT_MAX_ARRAY_BYTES;
   try {
     return permit(count, bytesPerCell) !== false;
   } catch {
@@ -9835,8 +9843,8 @@ export function immutableCellAssignmentError(
   return ce.error([
     'immutable-value-assignment',
     `\`${typeToString(t)}\` is a value, and an element of it cannot be ` +
-      `stored. Store a new value in the field or the cell (with ` +
-      `\`ReplaceAt\`), or declare it an array (\`array<${typeToString(cell ?? 'any')}>\`)`,
+      `stored. Store a new value in the field or the cell, or declare it ` +
+      `an array (\`array<${typeToString(cell ?? 'any')}>\`)`,
   ]);
 }
 
@@ -23736,11 +23744,11 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     parameters: [
       {
         description: 'The first array.',
-        sample: 'ArrayFrom([1, 2])',
+        sample: 'arrayFrom([1, 2])',
       },
       {
         description: 'The second array, of the same cell type.',
-        sample: 'ArrayFrom([3, 4, 5])',
+        sample: 'arrayFrom([3, 4, 5])',
       },
     ],
     evaluate: ([a, b], { engine: ce }) => {

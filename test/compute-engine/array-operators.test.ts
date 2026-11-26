@@ -395,6 +395,32 @@ describe('A NAME TYPED AN ARRAY WITH NO VALUE', () => {
 });
 
 describe('THE ALLOCATION FUNCTION OF THE HOST', () => {
+  test('with no function, a storage of more than 2 GiB is refused', () => {
+    // 10^12 cells of 8 bytes: JavaScript would accept the allocation and
+    // end the process when the cells are filled.
+    const r = evaluate(['ArrayFrom', ['Repeat', 0, 1e12], { str: 'real' }]);
+    expect(r.operator).toBe('Error');
+    expect(JSON.stringify(r.json)).toContain('array-allocation-refused');
+    // 2 GiB of bytes is the limit: one more byte is refused.
+    const over = evaluate([
+      'ArrayFrom',
+      ['Repeat', 0, 2 ** 31 + 1],
+      { str: 'integer<0..255>' },
+    ]);
+    expect(JSON.stringify(over.json)).toContain('array-allocation-refused');
+  });
+
+  test('with a function, the host decides, above 2 GiB too', () => {
+    const calls: [number, number][] = [];
+    ce.arrayAllocation = (count, bytes) => {
+      calls.push([count, bytes]);
+      return false;
+    };
+    const r = evaluate(['ArrayFrom', ['Repeat', 0, 1e12], { str: 'real' }]);
+    expect(JSON.stringify(r.json)).toContain('array-allocation-refused');
+    expect(calls).toEqual([[1e12, 8]]);
+  });
+
   test('is called once with the count and the bytes of a cell', () => {
     const calls: [number, number][] = [];
     ce.arrayAllocation = (count, bytes) => {

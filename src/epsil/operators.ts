@@ -159,8 +159,9 @@ export const OPERATORS: OperatorDef[] = [
     relational: true,
   },
   // The compound assignment `t += e` → `["AddTo", t, e]`. Like `:=`, it
-  // assigns in every position. The target is a variable or a list element
-  // (`L[i] += e`); the parser reports any other target (`add-to-target`).
+  // assigns in every position. The target is a variable or an element of
+  // any base (`L[i] += e`, `p.pixels[i] += e`); the parser reports any other
+  // target (`add-to-target`).
   // Outside a `parallel for` loop it is `t = t + e`; inside one, it adds a
   // contribution to an accumulator (`docs/EPSIL-LANGUAGE-MODEL.md`). Before
   // this row, the lexer already read `+=` as one token that no operator

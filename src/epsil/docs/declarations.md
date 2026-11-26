@@ -501,8 +501,11 @@ L
 // ➔ [1, 12, 3]
 ```
 
-Any other target (a field `p.x`, a call, a string position) is the error
-`add-to-target`. `+=` is the only compound assignment. In the body of a
+The base of an element can be any expression that gives an
+[array](/epsil/evaluation/#arrays): `p.pixels[i] += e` and `f(x)[i] += e`
+add `e` to a cell of that array. Any other target (a field `p.x`, a call, a
+string position) is the error `add-to-target`. `+=` is the only compound
+assignment. In the body of a
 [`parallel for` loop](/epsil/control-flow/#parallel-loops), it adds a
 contribution to a variable declared outside the loop. The MathJSON form is
 `["AddTo", target, e]`.

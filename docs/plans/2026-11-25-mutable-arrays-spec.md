@@ -192,7 +192,10 @@ literal and no variadic constructor (Appendix B, "Construction").
   allocation function of the host (section 9) is called once. When it
   refuses or throws, and when JavaScript cannot allocate the storage, the
   construction is the error `array-allocation-refused`. With no allocation
-  function, the engine sets no limit of its own.
+  function, the engine refuses a storage of more than 2^31 bytes (2 GiB) for
+  one array: JavaScript accepts the allocation of a typed array far larger
+  than the memory and fails when the cells are filled, which ends the
+  process.
 
 A declaration with a type does not give the cell type to its initializer
 (decision C3): `let px: array<integer<0..255>> = arrayFrom(repeat(0, n))` is
@@ -959,7 +962,10 @@ The other documents:
 - `src/compute-engine/compilation/ir/README.md` and the header of
   `compilation/storage-hints.ts`: the array lane, the storage of an array
   input.
-- `src/math-json/OPERATORS.json`: `ArrayFrom`, `Swap`.
+- `src/math-json/OPERATORS.json` is generated
+  (`src/math-json/scripts/generate_OPERATORS.ts`): `ArrayFrom` and `Swap`
+  enter it when it is next generated. It was out of date for other operators
+  on 2026-11-26, so this work did not regenerate it.
 - `src/epsil/docs/` (the language reference, with the compound assignment to
   an index of a field, and the library reference) and the guides of
   `~/dev/cortexjs.io/docs/compute-engine/` that list the types, the

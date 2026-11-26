@@ -82,12 +82,15 @@ let double = x => 2x
 | `xs.index(v)` | `indexOf(xs, v)` |
 | `xs + ys`, `xs.append(v)` | `join(xs, ys)`, `append(xs, v)` — both return a **new** collection |
 | `xs[2] = 9` | `xs[2] = 9` — a rebinding, `xs = replaceAt(xs, 2, 9)`: another name that holds the old list keeps it |
+| `bytearray(n)`, `array.array("d", xs)` | `arrayFrom(repeat(0, n), "integer<0..255>")`, `arrayFrom(xs, "real")` — an array, whose cells `a[i] = v` changes in place |
 | `d.keys()`, `d.values()` | `keys(d)`, `values(d)` |
 | `dict(zip(ks, vs))` | `dictionaryFrom(zip(ks, vs))` |
 | `collections.Counter(xs)` | `tally(xs)` → a `(values, counts)` pair |
 
 Collections are **immutable values**. There is no in-place mutation: build a
-new collection and rebind the name. The values-are-immutable, bindings-are-not
+new collection and rebind the name. The one exception is an
+[array](/epsil/evaluation/#arrays), a buffer of cells that a store changes in
+place. The values-are-immutable, bindings-are-not
 model is worth reading once in full — see
 [Values and bindings](/epsil/evaluation/#values-and-bindings) — because it also
 explains why a closure sees a later reassignment and why a function cannot

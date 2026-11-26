@@ -19,6 +19,7 @@ import type {
   Type,
 } from '../common/type/types.js';
 import {
+  collectionElementType,
   isGroupedTypeText,
   isWildcardFunctionType,
   signatureArms,
@@ -27,7 +28,8 @@ import {
   stripMissingFromType,
   typeContainsMissing,
 } from '../common/type/utils.js';
-import { isSubtype } from '../common/type/subtype.js';
+import { isSubtype, provablyDisjoint } from '../common/type/subtype.js';
+import { INDEXED_COLLECTION_SHAPE_TYPE } from '../common/type/primitive.js';
 import { typesOverlap } from '../common/type/reduce.js';
 import { parseType } from '../common/type/parse.js';
 import { typeToString } from '../common/type/serialize.js';
@@ -775,7 +777,7 @@ function canonicalizationDiagnostics(
       (declaration) => !topLevel.has(declaration)
     );
     if (localConstants.length > 0) {
-      constantWrites = constantWritesOf(ce, ast, source, rawStatements);
+      constantWrites = constantWritesOf(ce, ast, source, rawStatements, program);
       for (const declaration of localConstants) {
         const range = statementRange(declaration, source);
         for (const group of declaredGroups(constantWrites.byName, declaration))
@@ -974,7 +976,7 @@ function canonicalizationDiagnostics(
         // constant too.
         if (isConstantDeclaration(statement)) {
           const range = statementRange(statement, source);
-          constantWrites ??= constantWritesOf(ce, ast, source, rawStatements);
+          constantWrites ??= constantWritesOf(ce, ast, source, rawStatements, program);
           // All statements are prepared already. Report their source sites
           // now, including bodies hoisted ahead of this declaration.
           for (const group of declaredGroups(constantWrites.byName, statement))
@@ -983,7 +985,8 @@ function canonicalizationDiagnostics(
                 constantWrites,
                 group,
                 range,
-                rawStatements.length
+                rawStatements.length,
+                constantValueType(boxed)
               )
             );
         }
@@ -2043,13 +2046,17 @@ type ConstantWrites = {
   /** The reports for the statements that the pass did not reach yet, by
    * the index of the statement. */
   pending: Map<number, ParsingDiagnostic[]>;
+  /** The source start of the name of each element write that is the store
+   * of a cell (`cellStoreSites()`), with the number of its positions. */
+  cellStores: Map<number, number>;
 };
 
 function constantWritesOf(
   ce: ComputeEngine,
   ast: MathJsonExpression,
   source: string,
-  statements: MathJsonExpression[]
+  statements: MathJsonExpression[],
+  program: ReturnType<ComputeEngine['box']>
 ): ConstantWrites {
   const byName = new Map<string, BindingGroup[]>();
   // Same rule as in `canonicalizationDiagnostics()`: a protocol member
@@ -2071,7 +2078,60 @@ function constantWritesOf(
     registered: new Set(),
     functionRanges: undefined,
     pending: new Map(),
+    cellStores: cellStoreSites(program),
   };
+}
+
+/**
+ * The source start of the root name of each store of a cell in the boxed
+ * program `program`: each `Assign(At(a, …), v)` whose `a` is a name. The
+ * canonical handler of `Assign` gives this form to the element write
+ * `a[i] = v` of a name whose type can be an array (an array, an untyped
+ * parameter, `any`, a union with an array), and keeps the form
+ * `Assign(a, ReplaceAt(a, i, v))` when the types prove a list
+ * (`elementPathMayMeetArray()` in `library/core.ts`). Such a store writes a
+ * cell of the array, not the binding, so it is not an assignment to a
+ * constant: `const a = arrayFrom([1, 2]); a[1] = 5` is valid.
+ */
+function cellStoreSites(
+  program: ReturnType<ComputeEngine['box']>
+): Map<number, number> {
+  const result = new Map<number, number>();
+  const stack = [program];
+  while (stack.length > 0) {
+    const node = stack.pop()!;
+    if (isFunction(node, 'Assign') && isFunction(node.op1, 'At')) {
+      const root = node.op1.op1;
+      const start = isSymbol(root) ? root.sourceOffsets?.[0] : undefined;
+      if (start !== undefined) result.set(start, node.op1.nops - 1);
+    }
+    // `ops` (functions) and `values` (dictionaries, the shape of a `let`
+    // initializer), read structurally as `indexBoxedErrors()` reads them.
+    const values = (node as { values?: readonly (typeof node)[] }).values;
+    if (Array.isArray(values)) stack.push(...values);
+    const ops = (node as { ops?: readonly (typeof node)[] }).ops;
+    if (ops !== undefined) stack.push(...ops);
+  }
+  return result;
+}
+
+/**
+ * Whether a store of a cell with `depth` positions can write an array when
+ * the constant that it writes has the type `type`: the rule of
+ * `elementPathMayMeetArray()` (`library/core.ts`), read with the type that
+ * the constant has once its declaration is canonicalized. A function body
+ * that is canonicalized before the declaration sees a constant with no type
+ * yet, and gives the form of a cell store to a write that this type rules
+ * out: `const c = range(1, 3)` and `c[1] = 5` in such a body.
+ */
+function cellStoreMayMeetArray(type: Type, depth: number): boolean {
+  let t: Type | undefined = type;
+  for (let level = 0; level < depth; level++) {
+    if (t === undefined || !provablyDisjoint(t, 'array')) return true;
+    if (!isSubtype(t, INDEXED_COLLECTION_SHAPE_TYPE)) return false;
+    if (level < depth - 1) t = collectionElementType(t);
+  }
+  return false;
 }
 
 /** The index of the top-level statement that holds the source range
@@ -2116,9 +2176,12 @@ function statementHolding(
  * leaf of a destructuring assignment (`(a, c) := (3, 4)`). An assignment to
  * a binding that shadows the constant (a `let c`, a parameter `c`, a loop
  * variable `c`) is in the group of that binding, and is not reported. An
- * indexed assignment (`c[1] = 2`) is not a `write` of `c`: it does not
- * replace the binding (the engine refuses an indexed assignment to any
- * binding, with another error).
+ * indexed assignment (`c[1] = 2`) is a `write` of `c` and is reported too,
+ * except when its canonical form is the store of a cell,
+ * `Assign(At(c, …), v)` (`cellStoreSites()`), which does not change the
+ * binding. When `type` is given, the type of the constant once its
+ * declaration is canonicalized, a store of a cell that this type rules out
+ * is reported (`cellStoreMayMeetArray()`).
  *
  * The walk resolves a write that comes before a `let` of the same name in
  * an enclosing block to the outer binding, but at run time the write
@@ -2146,7 +2209,8 @@ function registerConstant(
   writes: ConstantWrites,
   group: BindingGroup,
   declared: [number, number],
-  current: number
+  current: number,
+  type?: Type
 ): ParsingDiagnostic[] {
   if (writes.registered.has(group)) return [];
   writes.registered.add(group);
@@ -2172,6 +2236,14 @@ function registerConstant(
 
   const now: ParsingDiagnostic[] = [];
   for (const occurrence of occurrences) {
+    // A store of a cell of an array that the constant holds: the binding
+    // does not change.
+    const depth = writes.cellStores.get(occurrence.start);
+    if (
+      depth !== undefined &&
+      (type === undefined || cellStoreMayMeetArray(type, depth))
+    )
+      continue;
     const index = statementHolding(writes, occurrence.start, occurrence.end);
     if (index < 0) continue;
     const statement = writes.statements[index];
@@ -2447,6 +2519,17 @@ function assignmentWriting(
     return symbol(target) !== null && span?.[0] === offset;
   };
   return writes(operand(expr, 1)) ? expr : undefined;
+}
+
+/** The static type of the value of the `Declare` `boxed` of one name, or
+ * `undefined` when it has no value or is a destructuring declaration. */
+function constantValueType(
+  boxed: ReturnType<ComputeEngine['box']>
+): Type | undefined {
+  if (!isFunction(boxed, 'Declare') || !isSymbol(boxed.ops[0]))
+    return undefined;
+  const last = boxed.ops[boxed.ops.length - 1];
+  return isDictionary(last) ? last.get('value')?.type.type : undefined;
 }
 
 /** The name that `boxed` binds when it is a `const` declaration

@@ -396,6 +396,27 @@ argMin([3, 9, 2])
 // ➔ 3
 ```
 
+### arrayFrom
+
+MathJSON `ArrayFrom` · `(value, string?) state -> array`
+
+- argument 1 — A finite collection whose elements are the cells, or an array whose cells are copied. Sample: `[1, 2, 3]`.
+- argument 2 — The type of the cells, as a string. Sample: `"integer<0..255>"`.
+
+Make a new mutable array from the elements of a finite collection, or from the cells of an array, in order.
+
+The second operand is a string that names the type of the cells, such as `"integer<0..255>"`. Without it, the cell type is the element type that a variable initialized with the collection takes (`number` for a list of numbers, `any` for an empty list), or the cell type of an array.
+
+Each evaluation makes a new array. A source whose length is not finite or not known leaves the expression unevaluated.
+
+```epsil
+arrayFrom([1, 2, 3])
+```
+
+```epsil
+arrayFrom(repeat(0, 4), "integer<0..255>")
+```
+
 ### At
 
 `(value: any, index: (boolean | character | indexed_collection<any> | number | string)+) -> unknown`
@@ -1933,6 +1954,21 @@ Test whether the first collection is a superset (possibly equal) of the second.
 ```epsil
 supersetEqual({1, 2}, {1, 2})
 // ➔ true
+```
+
+### swap
+
+MathJSON `Swap` · `(array, array) state -> nothing`
+
+- argument 1 — The first array. Sample: `arrayFrom([1, 2])`.
+- argument 2 — The second array, of the same cell type. Sample: `arrayFrom([3, 4, 5])`.
+
+Exchange the cells and the counts of two arrays of one cell type, in constant time, with no cell copied.
+
+Neither array changes identity: every name, field and tuple that holds an array still holds it, with the cells of the other. The value is `nothing`.
+
+```epsil
+swap(arrayFrom([1, 2]), arrayFrom([3, 4, 5]))
 ```
 
 ### symmetricDifference
