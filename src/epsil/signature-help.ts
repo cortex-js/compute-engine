@@ -42,6 +42,7 @@ import { definitionSitesByOffset } from './definition-sites.js';
 import { definitionExamples, describeName } from './describe-name.js';
 import {
   definitionDocs,
+  mergeParameterDocs,
   paragraphsOf,
   splitDocComment,
   type KeyDoc,
@@ -300,13 +301,16 @@ export function epsilSignatureHelp(
 }
 
 /** Set the documentation of the parameters of `candidates` that `docs`
- * documents, by parameter name. */
+ * documents: by parameter name, or else by the position of the parameter
+ * in its signature (`positionalParameters`, a definition that documents
+ * its parameters with a list). */
 function attachDocs(
   candidates: Candidate[],
   docs: {
     description?: readonly string[] | string;
     parameters?:
       ReadonlyMap<string, ParameterDoc> | Record<string, ParameterDoc>;
+    positionalParameters?: readonly (ParameterDoc | null | undefined)[];
     examples?: readonly string[];
   }
 ): void {
@@ -332,11 +336,15 @@ function attachDocs(
       candidate.description = paragraphs;
     if (docs.examples !== undefined && docs.examples.length > 0)
       candidate.examples = [...docs.examples];
-    candidate.parameters = candidate.parameters.map((parameter) => {
-      const doc =
+    candidate.parameters = candidate.parameters.map((parameter, i) => {
+      // The documentation by name comes first; the entry at the position of
+      // the parameter fills the fields that it leaves out.
+      const doc = mergeParameterDocs(
         parameter.name === undefined
           ? undefined
-          : parameters.get(parameter.name);
+          : parameters.get(parameter.name),
+        docs.positionalParameters?.[i]
+      );
       if (doc === undefined) return parameter;
       return {
         ...parameter,

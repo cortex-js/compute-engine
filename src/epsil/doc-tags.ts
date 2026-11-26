@@ -170,25 +170,96 @@ export function paragraphsOf(text: string): string[] {
   return paragraphs;
 }
 
-/** The `parameters` field of a definition, in the form of the tags. */
+/** The `parameters` field of a definition, in the form of the tags,
+ * keyed by parameter name. A list (documentation by position) gives none:
+ * see `positionalDocsOf()`. */
 export function parameterDocsOf(
-  parameters: Readonly<Record<string, ParameterDocumentation>> | undefined
+  parameters: DefinitionParameters | undefined
 ): Map<string, ParameterDoc> {
   const result = new Map<string, ParameterDoc>();
-  if (parameters === undefined) return result;
+  if (parameters === undefined || isPositional(parameters)) return result;
   for (const [name, doc] of Object.entries(parameters)) {
-    if (typeof doc === 'string') {
-      result.set(name, { documentation: doc });
-      continue;
-    }
-    const entry: ParameterDoc = {};
-    if (doc.description) entry.documentation = doc.description;
-    if (doc.sample) entry.sample = doc.sample;
-    if (doc.keys !== undefined)
-      entry.keys = Object.entries(doc.keys).map(([key, k]) => keyDocOf(key, k));
-    result.set(name, entry);
+    const entry = parameterDocOf(doc);
+    if (entry !== undefined) result.set(name, entry);
   }
   return result;
+}
+
+/**
+ * The documentation of one parameter from two sources: `primary`, with
+ * `secondary` filling the fields that it leaves out (a key of `secondary`
+ * that `primary` documents fills that key the same way). A new object;
+ * `undefined` when both are.
+ */
+export function mergeParameterDocs(
+  primary: ParameterDoc | null | undefined,
+  secondary: ParameterDoc | null | undefined
+): ParameterDoc | undefined {
+  if (!primary && !secondary) return undefined;
+  if (!primary || !secondary) return copyDoc((primary ?? secondary)!);
+  const result = copyDoc(primary);
+  result.documentation ??= secondary.documentation;
+  result.sample ??= secondary.sample;
+  for (const key of secondary.keys ?? []) {
+    result.keys ??= [];
+    const existing = result.keys.find((k) => k.name === key.name);
+    if (existing === undefined) {
+      result.keys.push({ ...key });
+      continue;
+    }
+    existing.type ??= key.type;
+    existing.documentation ??= key.documentation;
+    existing.sample ??= key.sample;
+    existing.default ??= key.default;
+  }
+  return result;
+}
+
+function copyDoc(doc: ParameterDoc): ParameterDoc {
+  return {
+    ...doc,
+    ...(doc.keys === undefined
+      ? {}
+      : { keys: doc.keys.map((k) => ({ ...k })) }),
+  };
+}
+
+/** The `parameters` field of a definition that documents its parameters
+ * by position (a list), in the form of the tags: the entry `i` documents
+ * the parameter `i`, `undefined` for one that the list leaves
+ * undocumented. Empty for a field keyed by name. */
+export function positionalDocsOf(
+  parameters: DefinitionParameters | undefined
+): (ParameterDoc | undefined)[] {
+  if (parameters === undefined || !isPositional(parameters)) return [];
+  // `Array.from` reads a hole of a sparse list as `undefined`; a host
+  // without types may also write `null` to skip a position.
+  return Array.from(parameters, (doc: ParameterDocumentation | null) =>
+    doc === undefined || doc === null ? undefined : parameterDocOf(doc)
+  );
+}
+
+type DefinitionParameters =
+  | Readonly<Record<string, ParameterDocumentation>>
+  | ReadonlyArray<ParameterDocumentation>;
+
+function isPositional(
+  parameters: DefinitionParameters
+): parameters is ReadonlyArray<ParameterDocumentation> {
+  return Array.isArray(parameters);
+}
+
+/** One entry of a `parameters` field in the form of the tags, `undefined`
+ * when it documents nothing (an empty string). */
+function parameterDocOf(doc: ParameterDocumentation): ParameterDoc | undefined {
+  if (typeof doc === 'string')
+    return doc === '' ? undefined : { documentation: doc };
+  const entry: ParameterDoc = {};
+  if (doc.description) entry.documentation = doc.description;
+  if (doc.sample) entry.sample = doc.sample;
+  if (doc.keys !== undefined)
+    entry.keys = Object.entries(doc.keys).map(([key, k]) => keyDocOf(key, k));
+  return Object.keys(entry).length === 0 ? undefined : entry;
 }
 
 function keyDocOf(name: string, doc: OptionKeyDocumentation): KeyDoc {
@@ -215,13 +286,15 @@ function keyDocOf(name: string, doc: OptionKeyDocumentation): KeyDoc {
 export function definitionDocs(
   def: {
     description?: string | string[];
-    parameters?: Readonly<Record<string, ParameterDocumentation>>;
+    parameters?: DefinitionParameters;
     examples?: string | string[];
   },
   library = false
 ): {
   description?: string[];
   parameters: Map<string, ParameterDoc>;
+  /** The documentation by position (`positionalDocsOf()`). */
+  positional: (ParameterDoc | undefined)[];
   examples: string[];
 } {
   const paragraphs =
@@ -245,31 +318,13 @@ export function definitionDocs(
         ...(library ? [split.description] : paragraphsOf(split.description))
       );
     examples.push(...split.examples);
-    for (const [name, tags] of split.parameters) {
-      const entry = parameters.get(name);
-      if (entry === undefined) {
-        parameters.set(name, tags);
-        continue;
-      }
-      entry.documentation ??= tags.documentation;
-      entry.sample ??= tags.sample;
-      for (const key of tags.keys ?? []) {
-        entry.keys ??= [];
-        const existing = entry.keys.find((k) => k.name === key.name);
-        if (existing === undefined) {
-          entry.keys.push(key);
-          continue;
-        }
-        existing.type ??= key.type;
-        existing.documentation ??= key.documentation;
-        existing.sample ??= key.sample;
-        existing.default ??= key.default;
-      }
-    }
+    for (const [name, tags] of split.parameters)
+      parameters.set(name, mergeParameterDocs(parameters.get(name), tags)!);
   }
   return {
     ...(description.length === 0 ? {} : { description }),
     parameters,
+    positional: positionalDocsOf(def.parameters),
     examples,
   };
 }

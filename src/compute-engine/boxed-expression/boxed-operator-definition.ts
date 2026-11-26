@@ -440,7 +440,9 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
   /** The usage examples, each one line of Epsil source. A definition may
    * give a single string; it is stored as a one-element list. */
   examples?: string[];
-  parameters?: Readonly<Record<string, ParameterDocumentation>>;
+  parameters?:
+    | Readonly<Record<string, ParameterDocumentation>>
+    | ReadonlyArray<ParameterDocumentation>;
   url?: string;
   wikidata?: string;
 

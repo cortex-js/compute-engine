@@ -495,8 +495,11 @@ type ParameterDocumentation =
  * `boxed-expression/boxed-operator-definition.ts`. */
 interface BoxedOperatorDefinition
   extends BoxedBaseDefinition, OperatorDefinitionFlags {
-  /** The documentation of the parameters, keyed by parameter name. */
-  parameters?: Readonly<Record<string, ParameterDocumentation>>;
+  /** The documentation of the parameters, keyed by parameter name or by
+   * position. */
+  parameters?:
+    | Readonly<Record<string, ParameterDocumentation>>
+    | ReadonlyArray<ParameterDocumentation>;
   complexity: number;
   inferredSignature: boolean;
   /** History of writes to this definition's signature — see the mirror note

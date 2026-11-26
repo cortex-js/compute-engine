@@ -34,6 +34,11 @@ export interface DocEntry {
    * name: the `parameters` field of its definition and the tags of its
    * `///` comment. */
   parameters?: Record<string, ParameterDoc>;
+  /** The documentation of the parameters by position, for a definition
+   * whose `parameters` field is a list: the entry `i` documents the
+   * parameter `i` of each arm of the signature (`null` for one that it
+   * leaves undocumented). */
+  positionalParameters?: (ParameterDoc | null)[];
   /** The examples, each one line of Epsil source in the Epsil spelling
    * (`join([1, 2], [3, 4])`, which the definition writes
    * `Join([1, 2], [3, 4])`). */
@@ -220,6 +225,8 @@ function describeDefinition(
   if (docs.description !== undefined) entry.description = docs.description;
   if (docs.parameters.size > 0)
     entry.parameters = Object.fromEntries(docs.parameters);
+  if (docs.positional.some((doc) => doc !== undefined))
+    entry.positionalParameters = docs.positional.map((doc) => doc ?? null);
   if (docs.examples.length > 0)
     entry.examples = epsilExamples(engine, docs.examples);
   if (base.keywords && base.keywords.length > 0) entry.keywords = base.keywords;

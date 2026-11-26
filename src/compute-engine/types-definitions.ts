@@ -934,6 +934,15 @@ export type OperatorDefinition = Partial<BaseDefinition> &
      * services show it in the signature help and in the completion of a
      * named argument (`epsilSignatureHelp()`, `epsilCompletions()`).
      *
+     * A list documents the parameters by position instead, for a signature
+     * whose parameters have no name (`(complex | quantity) -> number`): the
+     * entry `i` documents the parameter `i` of each arm of the signature. An
+     * empty string leaves a parameter undocumented.
+     *
+     * ```js
+     * parameters: [{ description: 'The angle, in radians.', sample: 'pi / 4' }]
+     * ```
+     *
      * ```js
      * parameters: {
      *   count: { description: 'The number of elements to keep.', sample: '2' },
@@ -944,7 +953,9 @@ export type OperatorDefinition = Partial<BaseDefinition> &
      * }
      * ```
      */
-    parameters?: Readonly<Record<string, ParameterDocumentation>>;
+    parameters?:
+      | Readonly<Record<string, ParameterDocumentation>>
+      | ReadonlyArray<ParameterDocumentation>;
 
     /**
      * If `true`, the `signature` is a starting point to be refined, not a
@@ -3476,9 +3487,11 @@ export type LambdaDefinition = {
  */
 export interface BoxedOperatorDefinition
   extends BoxedBaseDefinition, OperatorDefinitionFlags {
-  /** The documentation of the parameters, keyed by parameter name
-   * (`OperatorDefinition.parameters`). */
-  parameters?: Readonly<Record<string, ParameterDocumentation>>;
+  /** The documentation of the parameters, keyed by parameter name or by
+   * position (`OperatorDefinition.parameters`). */
+  parameters?:
+    | Readonly<Record<string, ParameterDocumentation>>
+    | ReadonlyArray<ParameterDocumentation>;
 
   /** `true` when the operator creates a lexical scope: it was declared
    * `scoped: true`, or it is a binder, whose `operands` handler gives a

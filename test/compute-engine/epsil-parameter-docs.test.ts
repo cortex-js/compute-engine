@@ -285,12 +285,41 @@ describe('THE LIBRARY DOCUMENTATION', () => {
                 key.type === undefined ? undefined : parseType(key.type)
               );
       }
+      // A sample by position is of the type of that parameter in every arm
+      // that has it.
+      (entry?.positionalParameters ?? []).forEach((doc, i) => {
+        if (doc?.sample === undefined) return;
+        for (const arm of arms) {
+          if (typeof arm !== 'object' || arm.kind !== 'signature') continue;
+          const elements = [
+            ...(arm.args ?? []),
+            ...(arm.optArgs ?? []),
+            ...(arm.variadicArg === undefined ? [] : [arm.variadicArg]),
+          ];
+          const element =
+            elements[Math.min(i, elements.length - 1)] ?? undefined;
+          if (i >= elements.length && arm.variadicArg === undefined) continue;
+          check(`${id}(#${i})`, doc.sample, element?.type);
+        }
+      });
     }
     return broken;
   }
 
   test('every sample parses and is of the type of its parameter', () => {
     expect(brokenSamples(library, names)).toEqual([]);
+  });
+
+  test('the check finds a sample by position of the wrong type', () => {
+    const engine = new ComputeEngine();
+    engine.declare('Twice', {
+      signature: '(integer) -> integer',
+      evaluate: ([x]) => x.mul(2),
+      parameters: [{ sample: '"two"' }],
+    });
+    expect(brokenSamples(engine, ['Twice'])).toEqual([
+      'Twice(#0): "two" is not of the type of its parameter',
+    ]);
   });
 
   test('the check finds a sample of the wrong type', () => {
@@ -429,5 +458,184 @@ describe('AN EXAMPLE AND THE NAMES OF THE SOURCE: SCOPES', () => {
       'sin(Pi / 6)'
     );
     expect(help('let pi = 3\nstd::sin(▮')?.examples?.[0]).toBe('sin(Pi / 6)');
+  });
+});
+
+describe('DOCUMENTATION BY POSITION', () => {
+  const engine = new ComputeEngine();
+  engine.declare('Haversine', {
+    signature: '(real) -> real',
+    description: 'The haversine of an angle.',
+    evaluate: ([x]) => x,
+    parameters: [{ description: 'The angle, in radians.', sample: 'pi / 4' }],
+  });
+  engine.declare('Clamp3', {
+    signature:
+      '((real, real, real) -> real) & ((integer, integer, integer) -> integer)',
+    evaluate: ([x]) => x,
+    parameters: ['The value.', '', { description: 'The upper bound.' }],
+  });
+
+  test('a parameter with no name is documented at its position', () => {
+    const result = epsilSignatureHelp(engine, 'Haversine(', 10);
+    expect(result?.signatures[0].parameters[0]).toMatchObject({
+      type: 'real',
+      documentation: 'The angle, in radians.',
+      sample: 'pi / 4',
+    });
+    expect(describeName(engine, 'Haversine')?.positionalParameters).toEqual([
+      { documentation: 'The angle, in radians.', sample: 'pi / 4' },
+    ]);
+  });
+
+  test('each arm of an overload set, and an empty entry', () => {
+    const result = epsilSignatureHelp(engine, 'Clamp3(1, 2, ', 13);
+    for (const signature of result!.signatures)
+      expect(signature.parameters.map((p) => p.documentation)).toEqual([
+        'The value.',
+        undefined,
+        'The upper bound.',
+      ]);
+    expect(describeName(engine, 'Clamp3')?.positionalParameters).toEqual([
+      { documentation: 'The value.' },
+      null,
+      { documentation: 'The upper bound.' },
+    ]);
+  });
+
+  test('the parameter filled by the piped value keeps its documentation', () => {
+    const source = '1 |> Haversine(';
+    const p = epsilSignatureHelp(engine, source, source.length)?.signatures[0]
+      .parameters[0];
+    expect(p?.documentation).toBe('The angle, in radians.');
+  });
+});
+
+describe('ONE DOCUMENTATION FOR BOTH FORMS OF AN ARGUMENT', () => {
+  const engine = new ComputeEngine();
+  engine.declare('Pad', {
+    signature: '(xs: list<integer>, count: integer) -> list<integer>',
+    evaluate: ([x]) => x,
+    parameters: ['The list.', { description: 'How many.', sample: '2' }],
+  });
+
+  test('a positional and a named argument show the same documentation', () => {
+    for (const source of ['Pad([1], ', 'Pad([1], count: '])
+      expect(
+        epsilSignatureHelp(engine, source, source.length)?.signatures[0]
+          .parameters[1]
+      ).toMatchObject({ documentation: 'How many.', sample: '2' });
+  });
+
+  test('a documentation by position reaches the named-argument item', () => {
+    const item = epsilCompletions(engine, 'Pad([1], ', 9).items.find(
+      (i) => i.label === 'count'
+    );
+    expect(item).toMatchObject({ documentation: 'How many.', sample: '2' });
+  });
+});
+
+describe('DOCUMENTATION BY POSITION: REVIEW CASES', () => {
+  test('a tag fills what the list entry leaves out, field by field', () => {
+    const engine = new ComputeEngine();
+    engine.declare('Half', {
+      signature: '(x: real) -> real',
+      evaluate: ([x]) => x.div(2),
+      description: 'Half of a value.\n@sample x 2',
+      parameters: ['The value.'],
+    });
+    const p = epsilSignatureHelp(engine, 'Half(', 5)?.signatures[0]
+      .parameters[0];
+    expect(p).toMatchObject({ documentation: 'The value.', sample: '2' });
+    const item = epsilCompletions(engine, 'Half(', 5).items.find(
+      (i) => i.label === 'x'
+    );
+    expect(item).toMatchObject({ documentation: 'The value.', sample: '2' });
+  });
+
+  test('the keys of an options parameter with no name', () => {
+    const engine = new ComputeEngine();
+    engine.declare('Chart', {
+      signature: '(real, dictionary) -> nothing',
+      evaluate: () => engine.Nothing,
+      parameters: ['', { keys: { grid: 'Show the grid.', axes: '' } }],
+    });
+    const labels = epsilCompletions(engine, 'Chart(1, {', 10).items.map(
+      (i) => i.label
+    );
+    expect(labels).toEqual(['grid', 'axes']);
+  });
+
+  test('a hole or a null entry of the list skips a position', () => {
+    const engine = new ComputeEngine();
+    engine.declare('Pair', {
+      signature: '(real, real) -> real',
+      evaluate: ([x]) => x,
+      // eslint-disable-next-line no-sparse-arrays
+      parameters: [, 'The second.'] as never,
+    });
+    expect(describeName(engine, 'Pair')?.positionalParameters).toEqual([
+      null,
+      { documentation: 'The second.' },
+    ]);
+    engine.declare('Pair2', {
+      signature: '(real, real) -> real',
+      evaluate: ([x]) => x,
+      parameters: [null, 'The second.'] as never,
+    });
+    expect(
+      epsilSignatureHelp(engine, 'Pair2(1, ', 9)?.signatures[0].parameters[1]
+        .documentation
+    ).toBe('The second.');
+  });
+});
+
+describe('DOCUMENTATION BY POSITION: ARMS AND REST', () => {
+  test('each arm of an overload set reads its own position', () => {
+    const engine = new ComputeEngine();
+    engine.declare('Plot2', {
+      signature:
+        '((dictionary) -> nothing) & ((real, real, dictionary) -> nothing)',
+      evaluate: () => engine.Nothing,
+      parameters: [
+        { keys: { first: 'At position 0.' } },
+        '',
+        { keys: { third: 'At position 2.' } },
+      ],
+    });
+    const at = (source: string) =>
+      epsilCompletions(engine, source, source.length).items.map((i) => i.label);
+    expect(at('Plot2({')).toEqual(['first']);
+    expect(at('Plot2(1, 2, {')).toEqual(['third']);
+  });
+
+  test('every argument of a rest parameter has its documentation', () => {
+    const engine = new ComputeEngine();
+    engine.declare('Merge', {
+      signature: '(dictionary*) -> dictionary',
+      evaluate: ([x]) => x,
+      parameters: [{ keys: { a: 'The a.', b: 'The b.' } }],
+    });
+    const at = (source: string) =>
+      epsilCompletions(engine, source, source.length).items.map((i) => i.label);
+    expect(at('Merge({')).toEqual(['a', 'b']);
+    expect(at('Merge({a -> 1}, {')).toEqual(['a', 'b']);
+  });
+});
+
+describe('DOCUMENTATION BY POSITION: THE ARM OF A NAMED CALL', () => {
+  test('a named-argument item reads the arm that the written names select', () => {
+    const engine = new ComputeEngine();
+    engine.declare('Mode', {
+      signature:
+        '((value: real, count: integer) -> real) & ((count: integer, mode: string) -> real)',
+      evaluate: ([x]) => x,
+      parameters: ['At position 0.', 'At position 1.'],
+    });
+    const source = 'Mode(mode: "fast", ';
+    const item = epsilCompletions(engine, source, source.length).items.find(
+      (i) => i.label === 'count'
+    );
+    expect(item?.documentation).toBe('At position 0.');
   });
 });

@@ -856,8 +856,12 @@ function, or the `///` comment of a function of the source or of the engine,
 its tag lines left out. A parameter has its `documentation`, its `sample`,
 and for a parameter that takes a dictionary of options, its `keys`, each with
 a `name`, a `type`, a `documentation`, a `sample` and a `default`: from the
-`parameters` of a library definition or the tags of a `///` comment
-(see [Comments](/epsil/comments/)). A positional argument and a named
+`parameters` of a library definition, keyed by parameter name or, as a list,
+by position, or the tags of a `///` comment
+(see [Comments](/epsil/comments/)). The documentation belongs to the
+parameter: the argument at the offset finds it by position or by name, so
+`take(xs, ▮` and `take(xs, count: ▮` show the same text, and a list entry
+also reaches the named-argument item of completion (`count: `). A positional argument and a named
 argument resolve to the same parameter. The `examples` of the result are
 those of the callee. When the offset is in a dictionary literal written as
 the active argument, `activeKey` is the documented key whose name or value

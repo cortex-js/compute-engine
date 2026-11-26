@@ -35,8 +35,11 @@
   of a key typed `"light" | "dark"`, those strings first. A named-argument
   item (`count: `) has the `documentation` and the `sample` of its
   parameter. The documentation comes from the new `parameters` property of
-  an operator definition, or from tag lines in the `///` comment of a
-  function:
+  an operator definition, keyed by parameter name or, as a list, by
+  position (for a parameter with no name: `parameters: [{ description:
+  "The angle, in radians.", sample: "pi / 4" }]`), or from tag lines in the
+  `///` comment of a function. A positional and a named argument show the
+  documentation of the same parameter:
 
   ```epsil
   /// Draws a plot.

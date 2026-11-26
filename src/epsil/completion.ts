@@ -53,8 +53,10 @@ import { definitionSourceExamples, describeName } from './describe-name.js';
 import { epsilExamples } from './example-spelling.js';
 import {
   definitionDocs,
+  mergeParameterDocs,
   paragraphsOf,
   splitDocComment,
+  type KeyDoc,
   type ParameterDoc,
 } from './doc-tags.js';
 import { tokenize } from './lexer.js';
@@ -813,8 +815,28 @@ export function epsilCompletions(
       context,
       operator(path!.nodes[path!.nodes.length - 2])
     );
+    const arms =
+      namedCallee(context, operator(path!.nodes[path!.nodes.length - 2]))
+        ?.arms ?? [];
+    // The names that the call already writes: an arm that lacks one cannot
+    // be the arm that the call selects.
+    const labels = operands(path!.nodes[path!.nodes.length - 2])
+      .filter((arg) => operator(arg) === 'NamedArgument')
+      .map((arg) => stringValue(operand(arg, 1)))
+      .filter((label): label is string => label !== null);
+    const declares = (a: CalleeArm, n: string) =>
+      a.params.some((p) => p.name === n);
     named.names.forEach(({ name, type }, i) => {
-      const doc = docs.get(name);
+      // The parameter of that name in the first arm that has it and every
+      // name written in the call.
+      const arm =
+        arms.find(
+          (a) => declares(a, name) && labels.every((l) => declares(a, l))
+        ) ?? arms.find((a) => declares(a, name));
+      const doc =
+        arm === undefined
+          ? docs.byName.get(name)
+          : parameterDocAt(docs, arm, slotOfArgument(arm, 0, name));
       items.push({
         label: name,
         kind: 'variable',
@@ -3039,17 +3061,24 @@ function namedCallee(
  * `function` of the source (the first definition that documents a name
  * wins), or the `parameters` of the definition of a function of the engine
  * or of the library, with the tags of its `///` comment (`describeName()`).
- * Empty for a variable of the source.
+ * A `parameters` list documents the parameter at each position of each arm
+ * of the signature: `positional` holds it, and `parameterDocAt()` merges it
+ * with the documentation by name of the parameter at that position. Empty
+ * for a variable of the source.
  */
 function calleeParameterDocs(
   context: Context,
   head: string
-): Map<string, ParameterDoc> {
+): {
+  byName: Map<string, ParameterDoc>;
+  positional: readonly (ParameterDoc | null | undefined)[];
+} {
   const { ce } = context;
   const group = context.visible.get(head);
   const result = new Map<string, ParameterDoc>();
+  const none = { byName: result, positional: [] };
   if (group?.kind === 'function') {
-    if (context.ast === null) return result;
+    if (context.ast === null) return none;
     const sites = definitionSitesByOffset(context.ast);
     for (const o of group.occurrences) {
       if (o.role !== 'definition') continue;
@@ -3058,15 +3087,50 @@ function calleeParameterDocs(
       for (const [name, doc] of definitionDocs({ description }).parameters)
         if (!result.has(name)) result.set(name, doc);
     }
-    return result;
+    return none;
   }
-  if (group !== undefined) return result;
+  if (group !== undefined) return none;
   const name =
     ce.operatorInfo(head) !== undefined ? head : canonicalLibraryName(head);
   const entry = name === undefined ? undefined : describeName(ce, name);
   for (const [key, doc] of Object.entries(entry?.parameters ?? {}))
     result.set(key, doc);
-  return result;
+  // A definition that documents its parameters by position: the name of the
+  // parameter at that position in each arm of the signature, so that a named
+  // argument (`count: `) has the documentation of its parameter.
+  return { byName: result, positional: entry?.positionalParameters ?? [] };
+}
+
+/**
+ * The documentation of the parameter `slot` of a signature (`arms[a]`,
+ * `CalleeArm`): its documentation by name, with the entry at that position
+ * of a `parameters` list filling the fields that it leaves out. The slot
+ * past the parameters of an arm with a rest parameter is the rest
+ * parameter, which has no name in a `CalleeArm`.
+ */
+function parameterDocAt(
+  docs: ReturnType<typeof calleeParameterDocs>,
+  arm: CalleeArm,
+  slot: number
+): ParameterDoc | undefined {
+  const name = arm.params[slot]?.name;
+  return mergeParameterDocs(
+    name === undefined ? undefined : docs.byName.get(name),
+    docs.positional[slot]
+  );
+}
+
+/** The slot of a signature that an argument fills: the parameter of the
+ * named argument `label`, or else of the argument `index`, the rest
+ * parameter for an argument past the others. -1 when the arm has none. */
+function slotOfArgument(
+  arm: CalleeArm,
+  index: number,
+  label: string | undefined
+): number {
+  if (label !== undefined) return arm.params.findIndex((p) => p.name === label);
+  if (index < arm.params.length) return index;
+  return arm.rest ? arm.params.length : -1;
 }
 
 /**
@@ -3104,15 +3168,15 @@ function optionKeysAt(
   const previous = before[before.length - 1];
   if (previous?.type === 'OPERATOR' && previous.text === '|>') return undefined;
   const docs = calleeParameterDocs(context, call.head);
-  if (docs.size === 0) return undefined;
-  let parameter = call.label;
-  if (parameter === undefined) {
-    const callee = namedCallee(context, call.head);
-    parameter = callee?.arms
-      .map((arm) => arm.params[call.index]?.name)
-      .find((name) => name !== undefined);
+  // The parameter of the argument in each arm of the signature, in turn:
+  // the first that documents keys.
+  let keys: KeyDoc[] | undefined;
+  for (const arm of namedCallee(context, call.head)?.arms ?? []) {
+    const slot = slotOfArgument(arm, call.index, call.label);
+    if (slot < 0) continue;
+    keys = parameterDocAt(docs, arm, slot)?.keys;
+    if (keys !== undefined && keys.length > 0) break;
   }
-  const keys = parameter === undefined ? undefined : docs.get(parameter)?.keys;
   if (keys === undefined || keys.length === 0) return undefined;
   const { dictionary } = call;
   if (dictionary.position === 'key') {
