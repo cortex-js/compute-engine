@@ -1024,7 +1024,27 @@ function boxFunctionInternal(
     //
     // Complex
     //
-    if (name === 'Complex') {
+    // A call that names its arguments (`Complex(imaginary: 2, real: 1)`) is
+    // put in declaration order first: the fold reads its operands by
+    // position. When the names do not match the signature, the operands
+    // keep their carriers, the fold is skipped, and the generic route below
+    // reports the error.
+    if (name === 'Complex' && hasNamedArguments(ops)) {
+      const def = lookupApplicable(
+        name,
+        options.scope ?? ce.context.lexicalScope,
+        ce
+      );
+      if (def !== undefined && !isValueDef(def)) {
+        const normalized = normalizeNamedArguments(
+          ce,
+          splitNamedArguments(ops),
+          def.operator.signature.type
+        );
+        if (normalized.kind === 'ok') ops = normalized.ops;
+      }
+    }
+    if (name === 'Complex' && !hasNamedArguments(ops)) {
       if (ops.length === 1) {
         // If single argument, assume it's imaginary
         const imOp =

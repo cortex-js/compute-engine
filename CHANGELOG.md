@@ -273,6 +273,14 @@
 
 ### Resolved Issues
 
+- **A call of `Complex` that names its arguments gives the complex number**
+  (CE-1689). `Complex(imaginary: 2, real: 1)`, and `complex(real: 1,
+  imaginary: 2)` or `complex(1, imaginary: 2)` in Epsil, gave an
+  `argument-order-invalid` or `argument-names-unavailable` error. They now
+  give `1 + 2i`, as `Complex(1, 2)` does. A name that is not `real` or
+  `imaginary` is still an `argument-name-unknown` error. The Epsil
+  completion offers the names `real` and `imaginary` in a call of `complex`.
+
 - **The numeric value of a `Limit` with no direction is the two-sided
   limit** (CE-1852). `Limit(Abs(x)/x, 0).N()` gave `1`, the limit from
   above, and `Limit(Floor(x), 2).N()` gave `2`. Both now give `NaN`: the

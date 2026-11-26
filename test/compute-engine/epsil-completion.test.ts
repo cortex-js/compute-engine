@@ -1838,8 +1838,18 @@ describe('EPSIL COMPLETION: NAMED ARGUMENTS', () => {
     // cannot be filled.
     expect(names('map(▮')).toEqual([]);
     expect(names('map(x => x, ▮')).toEqual([]);
-    // A named call of `complex` is an error (CE-1689).
-    expect(names('complex(▮')).toEqual([]);
+  });
+
+  test('a call of `complex` offers the names of its parts', () => {
+    expect(codes('complex(real: 1, imaginary: 2)')).toEqual([]);
+    expect(codes('complex(1, imaginary: 2)')).toEqual([]);
+    expect(names('complex(▮')).toEqual([
+      ['real', 'real: ', 'number'],
+      ['imaginary', 'imaginary: ', 'number'],
+    ]);
+    expect(names('complex(1, ▮')).toEqual([
+      ['imaginary', 'imaginary: ', 'number'],
+    ]);
   });
 
   test('a signature with a required rest does not hide the names of another', () => {

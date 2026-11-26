@@ -3038,9 +3038,8 @@ function namedCallee(
     ce.operatorInfo(head) !== undefined ? head : canonicalLibraryName(head);
   // The normalization of named arguments leaves out `Apply`: its first
   // parameter is the callee, whose names a name matches
-  // (`boxed-expression/box.ts`). A named call of `Complex` is an error
-  // (CE-1689).
-  if (name === 'Apply' || name === 'Complex') return undefined;
+  // (`boxed-expression/box.ts`).
+  if (name === 'Apply') return undefined;
   const type =
     name === undefined ? undefined : ce.operatorInfo(name)?.signature?.type;
   if (name === undefined || typeof type !== 'object' || type.kind === 'union')
