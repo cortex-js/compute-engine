@@ -212,6 +212,8 @@ describe('BaseForm result type', () => {
     // Since the polytype migration the result is the bounded echo `T` with
     // `T: number` — the numeric contract lives in the bound.
     const sig = ce.lookupDefinition('BaseForm')!.operator!.signature.toString();
-    expect(sig).toBe('(T, (number | string)?) -> T where T: number');
+    expect(sig).toBe(
+      '(x: T, base: (number | string)?) -> T where T: number'
+    );
   });
 });

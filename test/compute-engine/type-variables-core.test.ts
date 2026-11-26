@@ -41,7 +41,7 @@ describe('TYPE VARIABLES / core — declared signatures', () => {
     // orders the members, and parenthesizes the union so the `?` cannot be
     // read as applying to `string` alone).
     expect(sig('BaseForm')).toBe(
-      '(T, (number | string)?) -> T where T: number'
+      '(x: T, base: (number | string)?) -> T where T: number'
     );
   });
 });

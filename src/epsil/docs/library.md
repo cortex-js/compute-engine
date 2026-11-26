@@ -59,7 +59,7 @@ The [Core reference](/epsil/reference/core/) has the full description and the ex
 | — | `AssertPresent` | `(any) -> unknown` | Assert that a value is present: return it unchanged, or an `expected-present` error when it is ABSENT (`missing`, `NaN`, or a point whose coordinates are all `NaN`). |
 | — | `Assign` | `(expression \| symbol, any) scope -> any` | Assign a value to a symbol or define a sequence. |
 | `assume` | `Assume` | `(any) scope -> string` | Record an assumption about a symbol. |
-| `baseForm` | `BaseForm` | `(T, (number \| string)?) -> T where T: number` | `baseForm(expr, base=10)` |
+| `baseForm` | `BaseForm` | `(x: T, base: (number \| string)?) -> T where T: number` | BaseForm(x, base): the number `x` unchanged, marked to be written in |
 | — | `Block` | `(unknown*) -> unknown` | Evaluate a sequence of expressions in a local scope, **sequentially**. |
 | — | `BuiltinFunction` | `(string \| symbol) -> symbol` | Return a built-in function symbol by name. |
 | `canonicalForm` | `CanonicalForm` | `(any, symbol*) -> any` | Return the canonical form of an expression |
@@ -77,14 +77,14 @@ The [Core reference](/epsil/reference/core/) has the full description and the ex
 | — | `DeclareType` | `(string \| symbol, type: string \| symbol \| type, attributes: dictionary<any>?) scope -> nothing` | Declare a type. |
 | — | `DefineFunction` | `(symbol, function, dictionary<any>?) scope -> nothing` | Define one clause of a (possibly multi-clause) function: `DefineFunction(f, Function(body, params…))`. |
 | — | `Delimiter` | `(any, string?) -> any` | Group expressions with explicit delimiters. |
-| `digitsFrom` | `DigitsFrom` | `(character \| string, (character \| integer \| string)?) -> integer` | Return an integer representation of the string `s` in base `base`. |
+| `digitsFrom` | `DigitsFrom` | `(s: character \| string, base: (character \| integer \| string)?) -> integer` | Return an integer representation of the string `s` in base `base`. |
 | `error` | `Error` | `(expression<ErrorCode> \| string, expression?) -> nothing` | Represent an error expression. |
 | — | `ErrorCode` | `(string, any*) -> error` | Structured error code with optional arguments. |
 | `evaluate` | `Evaluate` | `(any) -> unknown` | Evaluate an expression. |
-| `evaluateAt` | `EvaluateAt` | `(function, lower: expression, upper: expression) -> unknown` | Evaluate a function at one point or between two bounds. |
-| `findRoot` | `FindRoot` | `(any, any, dictionary?) -> dictionary` | FindRoot(equations, params): numerically find parameter values that |
+| `evaluateAt` | `EvaluateAt` | `(f: function, lower: expression, upper: expression?) -> unknown` | Evaluate a function at one point or between two bounds. |
+| `findRoot` | `FindRoot` | `(equations: any, params: any, options: dictionary?) -> dictionary` | FindRoot(equations, params): numerically find parameter values that |
 | — | `Function` | `(expression, (function \| symbol)*) -> function` | Function(body, param1, param2, …): a function literal. |
-| `geometricVector` | `GeometricVector` | `(any, any) -> expression` | Geometric vector (directed segment between two points) — opaque typed head. |
+| `geometricVector` | `GeometricVector` | `(start: any, end: any) -> expression` | Geometric vector (directed segment between two points) — opaque typed head. |
 | `graphemeClusters` | `GraphemeClusters` | `(character \| string) -> list<character>` | A collection of grapheme clusters from a string. |
 | `head` | `Head` | `(any) -> symbol` | Return the head of an expression, the name of the operator |
 | — | `Hold` | `(any) -> unknown` | Hold an expression, preventing it from being canonicalized or evaluated until `ReleaseHold` is applied to it |
@@ -93,7 +93,7 @@ The [Core reference](/epsil/reference/core/) has the full description and the ex
 | `identity` | `Identity` | `(T) -> T where T` | Return the argument unchanged |
 | — | `IndexedSequence` | `(any, symbol, any, any?) -> expression` | Indexed sequence `\{a_n\}_{n=1}^{\infty}` — inert head `IndexedSequence(term, index, lower, upper?)`; not evaluated. |
 | `input` | `Input` | `(prompt: string?) console -> nothing \| string` | Read one line of text from the host: the terminal in a command-line host, the `prompt()` dialog in a browser. |
-| `integerString` | `IntegerString` | `(integer, integer?, integer?) -> string` | `integerString(n, base=10, length)` return a string representation of the integer `n` in base `base`. |
+| `integerString` | `IntegerString` | `(n: integer, base: integer?, length: integer?) -> string` | `integerString(n, base=10, length)` return a string representation of the integer `n` in base `base`. |
 | — | `InvisibleOperator` | `function` | Implicit operator used for juxtapositions such as function application or multiplication. |
 | `isError` | `IsError` | `(any) -> boolean` | True if the expression is an `error` value, or a frozen expression embedding one (`"a" + 1`). |
 | `isMissing` | `IsMissing` | `(any) -> boolean` | True for `missing`, `NaN`, or a point whose coordinates are all `NaN`, regardless of provenance. |
@@ -106,13 +106,13 @@ The [Core reference](/epsil/reference/core/) has the full description and the ex
 | `nSolve` | `NSolve` | `(any, any*) -> list` | NSolve(equation, unknown): the solutions of an equation as floats. |
 | — | `NamedArgument` | `(string, any) -> nothing` | NamedArgument(name, value): one named argument of a call (Epsil |
 | `nothing` | `Nothing` | variable `nothing` | The value of an empty block or of a statement with no value; the sole member of the unit type. |
-| `numberFrom` | `NumberFrom` | `(character \| string, base: (character \| integer \| string)?) -> number` | NumberFrom(s): the number the string `s` denotes — optional surrounding whitespace, an optional sign, then ASCII digits with an optional "." fraction and an optional e/E exponent, or one of "oo", "+oo", "-oo", "NaN", "Indeterminate". |
+| `numberFrom` | `NumberFrom` | `(s: character \| string, base: (character \| integer \| string)?) -> number` | NumberFrom(s): the number the string `s` denotes — optional surrounding whitespace, an optional sign, then ASCII digits with an optional "." fraction and an optional e/E exponent, or one of "oo", "+oo", "-oo", "NaN", "Indeterminate". |
 | `numericApproximation` | `NumericApproximation` | `(any) -> unknown` | Numerically evaluate an expression, as the `.N()` method does (engine-internal). |
 | — | `Object` | `(any, string?) -> unknown` | Provenance head for the snapshot of a mutable object: `["Object", <record>, "'TypeName'"]`. |
 | — | `Optional` | `(any, any) -> nothing` | Optional(param, default): a parameter of a function literal with a |
 | — | `OverParen` | `(any+) -> expression` | Over-paren accent (`\overparen{BC}`) — opaque typed head; not evaluated. |
-| `padEnd` | `PadEnd` | `(character \| string, n: integer, pad: (character \| string)?) -> string` | PadEnd(s, n, pad=" "): `s` padded at the END to `n` characters by repeating `pad` (its final copy truncated on a character boundary). |
-| `padStart` | `PadStart` | `(character \| string, n: integer, pad: (character \| string)?) -> string` | PadStart(s, n, pad=" "): `s` padded at the START to `n` characters by repeating `pad` (its final copy truncated on a character boundary). |
+| `padEnd` | `PadEnd` | `(s: character \| string, n: integer, pad: (character \| string)?) -> string` | PadEnd(s, n, pad=" "): `s` padded at the END to `n` characters by repeating `pad` (its final copy truncated on a character boundary). |
+| `padStart` | `PadStart` | `(s: character \| string, n: integer, pad: (character \| string)?) -> string` | PadStart(s, n, pad=" "): `s` padded at the START to `n` characters by repeating `pad` (its final copy truncated on a character boundary). |
 | `parallel` | `Parallel` | `(any, any) -> expression` | Parallelism relation (`AB \parallel CD`) — opaque typed head; not evaluated. |
 | `parse` | `Parse` | `(string) any -> any` | Parse a LaTeX string and evaluate to a corresponding expression |
 | `perpendicular` | `Perpendicular` | `(any, any) -> expression` | Perpendicularity relation (`AB \perp CD`) — opaque typed head; not evaluated. |
@@ -120,13 +120,13 @@ The [Core reference](/epsil/reference/core/) has the full description and the ex
 | `polygon` | `Polygon` | `(any+) -> expression` | Polygon primitive — opaque typed head. |
 | `prime` | `Prime` | `(T, integer?) -> T where T` | Derivative or prime notation (`f'`, `f^{(n)}`) — opaque typed head until a derivative library handler runs. |
 | `print` | `Print` | `(any*) console -> nothing` | Print the operands to the host console, separated by spaces and followed by a newline. |
-| `program` | `Program` | `(unknown*) -> unknown` | Evaluate a program in the caller scope, continuing after statement errors. |
+| `program` | `Program` | `(unknown*) -> unknown` | Evaluate a program in the caller scope, continuing after statement errors, and return the value of its last statement. |
 | — | `ProtocolDefault` | constant `unknown` | Stands for the default value of a parameter in a call of a protocol member: the call receives the default that the selected requirement declares for that parameter. |
 | — | `ProtocolMember` | `(protocol: string, member: string, arguments: any*) -> unknown` | Invoke a protocol member on a value — the lowering of a QUALIFIED protocol call (`Comparable.compare(x, y)` in Epsil, whose parse, a `MemberCall` on the protocol name, canonicalizes to `apply(field(Comparable, "compare"), x, y)`). |
 | — | `ProtocolProperty` | `(protocol: string, property: string, receiver: any, value: any?) -> unknown` | Read (or write) a protocol PROPERTY through a NAMED protocol — the lowering of the qualified field form `person.(Nameable.name)` (protocols design P6, amending the D16 field grammar). |
 | `quadrilateral` | `Quadrilateral` | `(any+) -> expression` | Quadrilateral mark (`\square ABCD`) — opaque typed head; not evaluated. |
 | `random` | `Random` | `((collection<any> \| set<real>)?) random -> any` | Random(): non-deterministic real in [0, 1) |
-| `randomChoice` | `RandomChoice` | `((T, number) random -> T where T: string) & ((collection<any> \| set<real>, number) random -> list<any>)` | RandomChoice(domain, k): a list of k independent draws from `domain`, with replacement. |
+| `randomChoice` | `RandomChoice` | `((T, k: number) random -> T where T: string) & ((collection<any> \| set<real>, k: number) random -> list<any>)` | RandomChoice(domain, k): a list of k independent draws from `domain`, with replacement. |
 | `randomExpression` | `RandomExpression` | `() entropy -> expression` | Generate a random expression. |
 | — | `ReleaseHold` | `(any) -> unknown` | Release an expression held by `Hold` |
 | `replaceAll` | `ReplaceAll` | `(any, any+) -> any` | ReplaceAll(expr, rules): apply one or more replacement rules to `expr`, |
@@ -135,7 +135,7 @@ The [Core reference](/epsil/reference/core/) has the full description and the ex
 | `segment` | `Segment` | `(any+) -> expression` | Segment primitive — opaque typed head. |
 | — | `Sequence` | `function` | Ordered sequence of expressions. |
 | — | `Signature` | `(symbol) -> nothing \| string` | Return the signature string of an operator. |
-| `simplify` | `Simplify` | `(any, any?) -> expression` | Simplify(expr): simplify an expression. |
+| `simplify` | `Simplify` | `(any, assumptions: any?) -> expression` | Simplify(expr): simplify an expression. |
 | `solve` | `Solve` | `(any, any*) -> list` | Solve(equation, unknown): the list of solutions of an equation for the |
 | `sphere` | `Sphere` | `(any+) -> expression` | Sphere primitive — opaque typed head. |
 | — | `Spread` | `(any) -> unknown` | Spread(t): splice the elements of the tuple `t` into the enclosing |
@@ -159,7 +159,7 @@ The [Core reference](/epsil/reference/core/) has the full description and the ex
 | `trim` | `Trim` | `(character \| string, chars: (character \| collection<character \| string> \| string)?) -> string` | Trim(s): remove leading and trailing whitespace (the Unicode White_Space characters). |
 | `trimEnd` | `TrimEnd` | `(character \| string, chars: (character \| collection<character \| string> \| string)?) -> string` | TrimEnd(s): remove trailing whitespace (the Unicode White_Space characters). |
 | `trimStart` | `TrimStart` | `(character \| string, chars: (character \| collection<character \| string> \| string)?) -> string` | TrimStart(s): remove leading whitespace (the Unicode White_Space characters). |
-| `type` | `Type` | `(any) -> type` | The STATIC type of an expression, as a type value: `type(3)` is `TypeFrom("integer")`. |
+| `type` | `Type` | `(any) -> type` | The STATIC type of an expression, as a type value: `type("hi")` is `TypeFrom("string")`. |
 | `typeFrom` | `TypeFrom` | `(text: string) -> type` | A type expression as a first-class value, constructed from its text: `TypeFrom("list<integer>")`. |
 | — | `Typed` | `(any, string \| symbol) -> unknown` | Ascribe a type to an expression. |
 | — | `Unevaluated` | `(any) -> unknown` | Prevent an expression from being evaluated |
@@ -169,7 +169,7 @@ The [Core reference](/epsil/reference/core/) has the full description and the ex
 | — | `Wildcard` | `(symbol) -> symbol` | Single-expression pattern wildcard. |
 | — | `WildcardOptionalSequence` | `(symbol) -> symbol` | Pattern wildcard matching zero or more expressions. |
 | — | `WildcardSequence` | `(symbol) -> symbol` | Pattern wildcard matching one or more expressions. |
-| `withRandomSeed` | `WithRandomSeed` | `(real \| string, any) -> expression` | WithRandomSeed(seed, body): evaluate `body` with a random seed frame |
+| `withRandomSeed` | `WithRandomSeed` | `(seed: real \| string, body: any) -> expression` | WithRandomSeed(seed, body): evaluate `body` with a random seed frame |
 
 ## Control structures
 

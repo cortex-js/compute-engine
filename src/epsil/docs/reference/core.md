@@ -338,6 +338,8 @@ category.
 
 MathJSON `About` · `(any) -> dictionary<any>`
 
+- argument 1 — The expression to describe; it is not evaluated, so a name describes its definition. Sample: `pi`.
+
 Return information about an expression as a dictionary: its kind (symbol, constant, function, number, string, expression), its static type and, when applicable, its name, value, signature, clause listing, attributes (the algebraic flags and `lazy`), description, examples, keywords, wikidata and url.
 
 ```epsil
@@ -348,6 +350,8 @@ about(pi)
 ### angle
 
 MathJSON `Angle` · `(any+) -> number`
+
+- arguments 1, … — A point of the angle, in order; the vertex is the middle one of three. Sample: `A`.
 
 Angle mark / measure (`\angle ABC`, `\varangle XYZ`, `∠ABC`) — opaque typed head; not evaluated.
 
@@ -371,6 +375,9 @@ Annotated(x^2, {"color" -> "blue"})
 
 MathJSON `Apply` · `(name: any, arguments: any*) -> unknown`
 
+- `name` — The function: a name or a function literal; another expression is read as a function of its free variables. Sample: `sqrt`.
+- `arguments` — An argument; a function literal with scalar parameters maps over a list argument. Sample: `16`.
+
 Apply a function to a list of arguments
 
 ```epsil
@@ -382,23 +389,47 @@ apply(sqrt, 16)
 
 MathJSON `ApplyWhole` · `(name: any, arguments: any*) -> unknown`
 
+- `name` — The function: a name or a function literal. Sample: `x => (x, x)`.
+- `arguments` — An argument, bound whole: a list argument is not mapped over. Sample: `[1, 2]`.
+
 Apply a function to arguments, each bound whole (engine-internal).
+
+```epsil
+applyWhole(x => (x, x), [1, 2])
+// ➔ ([1,2], [1,2])
+```
 
 ### arbitraryConstant
 
 MathJSON `ArbitraryConstant` · `(integer) -> number`
 
+- argument 1 — The index `k` of the constant, a positive integer; the same index is the same value. Sample: `1`.
+
 ArbitraryConstant(k): an arbitrary number, the k-th of a result: a constant of integration, the free parameter of an identity. Inside one result, two calls with the same index are the same value, and two calls with different indexes are independent. It has no value.
+
+```epsil
+arbitraryConstant(1) - arbitraryConstant(1)
+// ➔ 0
+```
 
 ### arbitraryInteger
 
 MathJSON `ArbitraryInteger` · `(integer) -> integer`
 
+- argument 1 — The index `k` of the integer, a positive integer; the same index is the same value. Sample: `1`.
+
 ArbitraryInteger(k): an arbitrary integer, the k-th of a result: the parameter of a family of roots, of a diophantine or a congruence solution. Inside one result, two calls with the same index are the same value, and two calls with different indexes are independent. It has no value.
+
+```epsil
+solve(sin(x) == 0, x)
+// ➔ [pi * ArbitraryInteger(1)]
+```
 
 ### arc
 
 MathJSON `Arc` · `(any+) -> number`
+
+- arguments 1, … — A point of the arc, in order. Sample: `A`.
 
 Arc / wide-hat accent measure (`\widehat{ABC}`) — opaque typed head; not evaluated.
 
@@ -434,6 +465,8 @@ x
 
 MathJSON `Assume` · `(any) scope -> string`
 
+- argument 1 — The predicate to assume, such as an inequality or a membership; another expression gives "not-a-predicate". Sample: `x > 0`.
+
 Record an assumption about a symbol. Evaluates to the outcome as a string: "ok", "tautology", "contradiction", "not-a-predicate" or "internal-error".
 
 ```epsil
@@ -442,9 +475,17 @@ assume(x > 0)
 
 ### baseForm
 
-MathJSON `BaseForm` · `(T, (number | string)?) -> T where T: number`
+MathJSON `BaseForm` · `(x: T, base: (number | string)?) -> T where T: number`
 
-`baseForm(expr, base=10)`
+- `x` — The number. Sample: `255`.
+- `base` — The base in which the number is written, 10 by default; a symbol for a symbolic base. Sample: `16`.
+
+BaseForm(x, base): the number `x` unchanged, marked to be written in `base` (10 by default). In LaTeX, a numeral with a base subscript, `10111_2` or `161_b`, parses to it.
+
+```epsil
+baseForm(23, 2)
+// ➔ 23
+```
 
 ### Block
 
@@ -469,6 +510,9 @@ BuiltinFunction("Sqrt")(16)
 
 MathJSON `CanonicalForm` · `(any, symbol*) -> any`
 
+- argument 1 — The expression, as written; with no form, its full canonical form is returned. Sample: `1 + x`.
+- arguments 2, … — A canonical form to apply: "InvisibleOperator", "Number", "Multiply", "Add", "Power", "Divide", "Flatten" or "Order".
+
 Return the canonical form of an expression Can be used to sort arguments of an expression.
 
 Sorting arguments of commutative functions is a weak form of canonicalization that can be useful in some cases, for example to accept "x+1" and "1+x" while rejecting "x+1" and "2x-x+1"
@@ -481,6 +525,8 @@ canonicalForm(Hold(1 + x), "Order")
 ### caseFold
 
 MathJSON `CaseFold` · `(character | string) -> string`
+
+- argument 1 — The text to fold. Sample: `"Straße"`.
 
 CaseFold(s): a case-folded form of `s`, for case-insensitive comparison — `caseFold(a) == caseFold(b)` tests equality ignoring case. An approximation of Unicode full case folding.
 
@@ -498,6 +544,8 @@ caseFold("Hello") == caseFold("HELLO")
 
 MathJSON `CharacterFrom` · `(character | string) -> character`
 
+- argument 1 — The text of exactly one character (one grapheme cluster). Sample: `"é"`.
+
 CharacterFrom(s): the character `s` denotes. `s` must be exactly one user-perceived character (one grapheme cluster) after NFC normalization; an empty or multi-character string is an error.
 
 ```epsil
@@ -508,6 +556,8 @@ characterFrom("é")
 ### characters
 
 MathJSON `Characters` · `(character | string) -> list<character>`
+
+- argument 1 — The text to split; an empty string gives `[]`. Sample: `"héllo"`.
 
 Characters(s): split a string into a list of user-perceived characters (grapheme clusters). Synonym: GraphemeClusters. For stable integer decompositions see UnicodeScalars, Utf8 and Utf16. A non-string argument leaves the expression unevaluated.
 
@@ -537,6 +587,8 @@ Type annotation (`a : b`) — opaque typed head.
 
 MathJSON `Composition` · `(function*) -> function`
 
+- arguments 1, … — A step of the composition; the rightmost step is applied first, and no step gives the identity function. Sample: `sin`.
+
 The composition of functions, applied right to left: `composition(f, g, h)(x)` is `f(g(h(x)))`
 
 ```epsil
@@ -552,6 +604,9 @@ composition(f, g)(x)
 ### conforms
 
 MathJSON `Conforms` · `(subject: any, protocols: string+) -> boolean`
+
+- `subject` — The value whose type is tested, or a type value to test that type. Sample: `"abc"`.
+- `protocols` — The name of a protocol; an unknown name is an error. Sample: `"Copyable"`.
 
 True iff the subject conforms to EVERY named protocol. A `type` VALUE subject asks whether that type conforms (the branch is unambiguous because the `type` primitive itself declares no conformances); any other subject is evaluated once and its precise type is asked. This is the lowering of the Epsil `x is Hashable & Comparable` test. A valueless or unresolved subject stays symbolic; an unknown protocol name is an error; an Error-valued subject answers `False` (the `error` type declares no conformances). Conformance is monotone but late-bound: the answer reflects the registry at the moment of evaluation.
 
@@ -648,7 +703,10 @@ Delimiter(1 + 2)
 
 ### digitsFrom
 
-MathJSON `DigitsFrom` · `(character | string, (character | integer | string)?) -> integer`
+MathJSON `DigitsFrom` · `(s: character | string, base: (character | integer | string)?) -> integer`
+
+- `s` — The digits, with an optional sign; with a base, a digit not valid in it is an error; without one, the longest prefix of decimal digits is read (a 0x or 0b prefix is accepted), and text with none gives `NaN`. Sample: `"ff"`.
+- `base` — The base, from 2 to 36, 10 by default; a numeric string is read as a number. Sample: `16`.
 
 Return an integer representation of the string `s` in base `base`.
 
@@ -665,6 +723,9 @@ digitsFrom("1010", 2)
 ### error
 
 MathJSON `Error` · `(expression<ErrorCode> | string, expression?) -> nothing`
+
+- argument 1 — The nature of the error: a code string, or an `ErrorCode` expression with arguments. Sample: `"oops"`.
+- argument 2 — The context of the error, such as the expression where it occurs. Sample: `x + 1`.
 
 Represent an error expression.
 
@@ -688,6 +749,8 @@ Structured error code with optional arguments.
 
 MathJSON `Evaluate` · `(any) -> unknown`
 
+- argument 1 — The expression to evaluate. Sample: `x + x`.
+
 Evaluate an expression.
 
 ```epsil
@@ -697,7 +760,11 @@ evaluate(x + x)
 
 ### evaluateAt
 
-MathJSON `EvaluateAt` · `(function, lower: expression, upper: expression) -> unknown`
+MathJSON `EvaluateAt` · `(f: function, lower: expression, upper: expression?) -> unknown`
+
+- `f` — The function, or an expression of its free variables. Sample: `x => x^2`.
+- `lower` — The lower bound; without `upper`, the point at which `f` is evaluated. Sample: `1`.
+- `upper` — The upper bound: the result is `f(upper) - f(lower)`. Sample: `3`.
 
 Evaluate a function at one point or between two bounds.
 
@@ -708,7 +775,12 @@ evaluateAt(x => x^2, 1, 3)
 
 ### findRoot
 
-MathJSON `FindRoot` · `(any, any, dictionary?) -> dictionary`
+MathJSON `FindRoot` · `(equations: any, params: any, options: dictionary?) -> dictionary`
+
+- `equations` — An equation, a residual expression read as `= 0`, or a list of either. Sample: `x^2 - 2`.
+- `params` — The list of parameter specs: a symbol, `(a, a0)` with a start value, or `(a, a0, lo, hi)` with bounds. Sample: `[(x, 1)]`.
+- `options` — The options of the search; an unknown key is an error. Sample: `{global -> {x -> [0, 2]}}`.
+  - `global` (`dictionary<list<real>>`) — The parameters (at most two) to search over a range `[lo, hi]` or `[lo, hi, step]` for the lowest sum of squared residuals. Sample: `{x -> [0, 2]}`.
 
 FindRoot(equations, params): numerically find parameter values that zero the residuals. `equations` is an equation (`lhs == rhs`), a bare residual expression (read as `= 0`), or a list of either. `params` is a list of specs (a bare symbol, `(a, a0)`, or `(a, a0, lo, hi)` with box constraints), matching `findFit`. Returns a record &#123;parameters, converged, stationary, residualNorm, iterations&#125;.
 
@@ -743,7 +815,10 @@ A parameter is a symbol, `Typed(symbol, type)`, a rest parameter `Spread(symbol)
 
 ### geometricVector
 
-MathJSON `GeometricVector` · `(any, any) -> expression`
+MathJSON `GeometricVector` · `(start: any, end: any) -> expression`
+
+- `start` — The point the vector starts at. Sample: `A`.
+- `end` — The point the vector ends at. Sample: `B`.
 
 Geometric vector (directed segment between two points) — opaque typed head. Distinct from the column-vector `vector` operator.
 
@@ -756,6 +831,8 @@ geometricVector(A, B)
 
 MathJSON `GraphemeClusters` · `(character | string) -> list<character>`
 
+- argument 1 — The text to split; an empty string gives `[]`. Sample: `"héllo"`.
+
 A collection of grapheme clusters from a string. Synonym of Characters.
 
 ```epsil
@@ -766,6 +843,8 @@ graphemeClusters("héllo")
 ### head
 
 MathJSON `Head` · `(any) -> symbol`
+
+- argument 1 — The expression; a number gives its kind (`Integer`, `Real`, `Rational`, …), a symbol `Symbol`. Sample: `x^2`.
 
 Return the head of an expression, the name of the operator
 
@@ -811,6 +890,8 @@ Horizontal spacing annotation.
 
 MathJSON `Identity` · `(T) -> T where T`
 
+- argument 1 — The value to return. Sample: `x + 1`.
+
 Return the argument unchanged
 
 ```epsil
@@ -833,11 +914,21 @@ IndexedSequence(1/n, n, 1, oo)
 
 MathJSON `Input` · `(prompt: string?) console -> nothing | string`
 
+- `prompt` — The text displayed before the line is read. Sample: `"Your name? "`.
+
 Read one line of text from the host: the terminal in a command-line host, the `prompt()` dialog in a browser. The optional operand is a prompt string, displayed before reading. Evaluates to the line read, without the trailing newline; to `nothing` at end-of-input (or a canceled dialog). On a host with no interactive input, stays unevaluated. When the host denies console access, evaluates to a `capability-denied` error.
+
+```epsil
+input("Your name? ")
+```
 
 ### integerString
 
-MathJSON `IntegerString` · `(integer, integer?, integer?) -> string`
+MathJSON `IntegerString` · `(n: integer, base: integer?, length: integer?) -> string`
+
+- `n` — The integer; a negative one keeps its sign. Sample: `255`.
+- `base` — The base, from 2 to 36, 10 by default. Sample: `16`.
+- `length` — The number of digits: fewer digits are padded on the left with zeros, more are cut to the last ones. Sample: `8`.
 
 `integerString(n, base=10, length)`       return a string representation of the integer `n` in base `base`.       With `length`, the digits of |n| are padded on the left with zeros,       or cut to the last `length` digits.
 
@@ -871,6 +962,8 @@ InvisibleOperator(2, x)
 
 MathJSON `IsError` · `(any) -> boolean`
 
+- argument 1 — The expression to test; it is held, so an error in it is inspected, not propagated. Sample: `ln("a")`.
+
 True if the expression is an `error` value, or a frozen expression embedding one (`"a" + 1`). False otherwise. Total.
 
 ```epsil
@@ -886,6 +979,8 @@ isError(1 + 1)
 ### isMissing
 
 MathJSON `IsMissing` · `(any) -> boolean`
+
+- argument 1 — The value to test. Sample: `NaN`.
 
 True for `missing`, `NaN`, or a point whose coordinates are all `NaN`, regardless of provenance. `nothing` is not an absent datum.
 
@@ -978,6 +1073,9 @@ N(exp(100), [positiveInfinity, 20])
 
 MathJSON `NSolve` · `(any, any*) -> list`
 
+- argument 1 — The equation, an expression read as `= 0`, or a list of equations. Sample: `x^2 == 2`.
+- arguments 2, … — An unknown, a list of unknowns, or a domain spec as for `Solve`; by default, the free variable of the equation. Sample: `x`.
+
 NSolve(equation, unknown): the solutions of an equation as floats.
 
 It is Mathematica `nSolve`: it takes the same operands as `solve`, including domain specs and systems of equations, and gives the `N` of each solution of `solve`:
@@ -1019,7 +1117,10 @@ The value of an empty block or of a statement with no value; the sole member of 
 
 ### numberFrom
 
-MathJSON `NumberFrom` · `(character | string, base: (character | integer | string)?) -> number`
+MathJSON `NumberFrom` · `(s: character | string, base: (character | integer | string)?) -> number`
+
+- `s` — The numeral; text that is not a numeral is an error value. Sample: `"3.25"`.
+- `base` — The base, from 2 to 36; with a base, only an integer numeral is accepted. Sample: `16`.
 
 NumberFrom(s): the number the string `s` denotes — optional surrounding whitespace, an optional sign, then ASCII digits with an optional "." fraction and an optional e/E exponent, or one of "oo", "+oo", "-oo", "NaN", "Indeterminate". The integer part may be omitted before a fraction (".5" is 0.5); a trailing "." with no fraction digits ("5.") is not accepted. Any other text, including "", is an error value (never NaN).
 
@@ -1039,7 +1140,14 @@ numberFrom("ff", 16)
 
 MathJSON `NumericApproximation` · `(any) -> unknown`
 
+- argument 1 — The expression to approximate. Sample: `sqrt(2)`.
+
 Numerically evaluate an expression, as the `.N()` method does (engine-internal).
+
+```epsil
+numericApproximation(sqrt(2))
+// ➔ 1.4142135623730950488
+```
 
 ### Object
 
@@ -1075,7 +1183,11 @@ OverParen(B, C)
 
 ### padEnd
 
-MathJSON `PadEnd` · `(character | string, n: integer, pad: (character | string)?) -> string`
+MathJSON `PadEnd` · `(s: character | string, n: integer, pad: (character | string)?) -> string`
+
+- `s` — The text to pad. Sample: `"abc"`.
+- `n` — The length of the result, in characters, a non-negative integer; a shorter `s` is padded, a longer one returned unchanged. Sample: `6`.
+- `pad` — The padding, repeated and cut to fit, a space by default; it must not be empty. Sample: `"."`.
 
 PadEnd(s, n, pad=" "): `s` padded at the END to `n` characters by repeating `pad` (its final copy truncated on a character boundary). Returned unchanged when `s` already has `n` or more characters. `n` must be a non-negative integer; an empty `pad` is an error; a non-string `pad` leaves the expression unevaluated.
 
@@ -1086,7 +1198,11 @@ padEnd("abc", 6, ".")
 
 ### padStart
 
-MathJSON `PadStart` · `(character | string, n: integer, pad: (character | string)?) -> string`
+MathJSON `PadStart` · `(s: character | string, n: integer, pad: (character | string)?) -> string`
+
+- `s` — The text to pad. Sample: `"42"`.
+- `n` — The length of the result, in characters, a non-negative integer; a shorter `s` is padded, a longer one returned unchanged. Sample: `5`.
+- `pad` — The padding, repeated and cut to fit, a space by default; it must not be empty. Sample: `"0"`.
 
 PadStart(s, n, pad=" "): `s` padded at the START to `n` characters by repeating `pad` (its final copy truncated on a character boundary). Returned unchanged when `s` already has `n` or more characters. `n` must be a non-negative integer; an empty `pad` is an error; a non-string `pad` leaves the expression unevaluated.
 
@@ -1099,6 +1215,9 @@ padStart("42", 5, "0")
 
 MathJSON `Parallel` · `(any, any) -> expression`
 
+- argument 1 — A line or a segment. Sample: `l`.
+- argument 2 — The other line or segment. Sample: `m`.
+
 Parallelism relation (`AB \parallel CD`) — opaque typed head; not evaluated.
 
 ```epsil
@@ -1110,6 +1229,8 @@ parallel(l, m)
 
 MathJSON `Parse` · `(string) any -> any`
 
+- argument 1 — The LaTeX source; an empty string gives `Nothing`. Sample: `"x^2 + 1"`.
+
 Parse a LaTeX string and evaluate to a corresponding expression
 
 ```epsil
@@ -1119,6 +1240,9 @@ parse(#"\frac{\pi}{2}"#)
 ### perpendicular
 
 MathJSON `Perpendicular` · `(any, any) -> expression`
+
+- argument 1 — A line or a segment. Sample: `l`.
+- argument 2 — The other line or segment. Sample: `m`.
 
 Perpendicularity relation (`AB \perp CD`) — opaque typed head; not evaluated.
 
@@ -1147,6 +1271,8 @@ Pipe([3, 1, 2], sort)
 
 MathJSON `Polygon` · `(any+) -> expression`
 
+- arguments 1, … — A vertex of the polygon. Sample: `A`.
+
 Polygon primitive — opaque typed head.
 
 ```epsil
@@ -1157,6 +1283,9 @@ polygon(A, B, C, D)
 ### prime
 
 MathJSON `Prime` · `(T, integer?) -> T where T`
+
+- argument 1 — The primed expression, often a function. Sample: `f`.
+- argument 2 — The order of the derivative; by default, 1. Sample: `2`.
 
 Derivative or prime notation (`f'`, `f^{(n)}`) — opaque typed head until a derivative library handler runs.
 
@@ -1169,6 +1298,8 @@ prime(f)
 
 MathJSON `Print` · `(any*) console -> nothing`
 
+- arguments 1, … — A value to print; a string prints its content, without the quotes. Sample: `"Hello"`.
+
 Print the operands to the host console, separated by spaces and followed by a newline. String operands print their content (without quotes); other expressions print their text form. Evaluates to `nothing`. On a host without a console, prints nothing. When the host denies console access, evaluates to a `capability-denied` error.
 
 ```epsil
@@ -1179,7 +1310,14 @@ print("Hello", 42)
 
 MathJSON `Program` · `(unknown*) -> unknown`
 
-Evaluate a program in the caller scope, continuing after statement errors.
+- arguments 1, … — A statement; a statement that gives an error does not stop the program. Sample: `x + 1`.
+
+Evaluate a program in the caller scope, continuing after statement errors, and return the value of its last statement.
+
+```epsil
+program(error("boom"), 2 + 3)
+// ➔ 5
+```
 
 ### ProtocolDefault
 
@@ -1224,6 +1362,8 @@ x.(Signed.sign)
 
 MathJSON `Quadrilateral` · `(any+) -> expression`
 
+- arguments 1, … — A vertex of the quadrilateral. Sample: `A`.
+
 Quadrilateral mark (`\square ABCD`) — opaque typed head; not evaluated.
 
 ```epsil
@@ -1234,6 +1374,8 @@ quadrilateral(A, B, C, D)
 ### random
 
 MathJSON `Random` · `((collection<any> | set<real>)?) random -> any`
+
+- argument 1 — The domain: a real is drawn from an interval, an element from a range or a finite non-empty collection; by default, a real in [0, 1). Sample: `1..6`.
 
 Random(): non-deterministic real in [0, 1)
 
@@ -1251,7 +1393,10 @@ random(1..6)
 
 ### randomChoice
 
-MathJSON `RandomChoice` · `((T, number) random -> T where T: string) & ((collection<any> | set<real>, number) random -> list<any>)`
+MathJSON `RandomChoice` · `((T, k: number) random -> T where T: string) & ((collection<any> | set<real>, k: number) random -> list<any>)`
+
+- argument 1 — The domain to draw from, as for `Random`; a string gives a string of its characters. Sample: `["a", "b", "c"]`.
+- `k` — The number of draws, from 0 to 1,000,000; it may exceed the size of the domain. Sample: `5`.
 
 RandomChoice(domain, k): a list of k independent draws from `domain`, with replacement. `k` may exceed the size of the domain — that is what replacement means. Choosing from a string yields a string.
 
@@ -1283,6 +1428,9 @@ ReleaseHold(Hold(1 + 2))
 ### replaceAll
 
 MathJSON `ReplaceAll` · `(any, any+) -> any`
+
+- argument 1 — The expression in which to replace; it is evaluated after the replacement. Sample: `x^2 + x`.
+- arguments 2, … — A rule, or a list of rules; all the rules are applied at once, in a single pass. Sample: `Rule(x, 3)`.
 
 ReplaceAll(expr, rules): apply one or more replacement rules to `expr`, then evaluate the result (Mathematica `expr /. rules`).
 
@@ -1319,6 +1467,8 @@ isError(RuntimeError("oops"))
 
 MathJSON `Segment` · `(any+) -> expression`
 
+- arguments 1, … — An endpoint of the segment. Sample: `A`.
+
 Segment primitive — opaque typed head.
 
 ```epsil
@@ -1350,7 +1500,10 @@ Signature(stringRepeat)
 
 ### simplify
 
-MathJSON `Simplify` · `(any, any?) -> expression`
+MathJSON `Simplify` · `(any, assumptions: any?) -> expression`
+
+- argument 1 — The expression to simplify. Sample: `sin(x)^2 + cos(x)^2`.
+- `assumptions` — A boolean assumption, or a list of them, that holds during the simplification only. Sample: `x > 0`.
 
 Simplify(expr): simplify an expression.
 
@@ -1369,6 +1522,9 @@ simplify(sqrt(x^2), x > 0)
 ### solve
 
 MathJSON `Solve` · `(any, any*) -> list`
+
+- argument 1 — An equation, a bare expression read as `= 0`, or a list of equations. Sample: `x^2 - 1 == 0`.
+- arguments 2, … — The unknown, or a list of unknowns for a system; by default, the equation's single free variable. Sample: `x`.
 
 Solve(equation, unknown): the list of solutions of an equation for the unknown. The equation may be an `Equal` expression or a bare expression (read as `= 0`), e.g. `solve(x^2 - 1 == 0, x)` or `solve(x^2 - 1, x)`.
 
@@ -1391,6 +1547,8 @@ solve([x + y == 3, x - y == 1], [x, y])
 ### sphere
 
 MathJSON `Sphere` · `(any+) -> expression`
+
+- arguments 1, … — An element that defines the sphere, such as its center or its radius. Sample: `O`.
 
 Sphere primitive — opaque typed head.
 
@@ -1427,6 +1585,9 @@ String("x", 2)
 
 MathJSON `StringCompare` · `(character | string, character | string) -> integer`
 
+- argument 1 — The first string. Sample: `"apple"`.
+- argument 2 — The second string. Sample: `"banana"`.
+
 StringCompare(a, b): -1 when `a` sorts before `b`, 0 when they are equal, 1 when `a` sorts after `b`. The order compares Unicode scalar sequences code point by code point (NOT UTF-16 code units, which would sort astral characters below U+E000..U+FFFF).
 
 ```epsil
@@ -1437,6 +1598,9 @@ stringCompare("apple", "banana")
 ### stringFrom
 
 MathJSON `StringFrom` · `(any, format: string?) -> string`
+
+- argument 1 — The value to convert; with no format, an integer or a list of integers is read as Unicode scalar values. Sample: `65`.
+- `format` — The format: `"default"`, `"unicode-scalars"`, `"utf-8"` or `"utf-16"`. Sample: `"utf-8"`.
 
 StringFrom(value, format?): create a string from `value`. With no format, a number or a list of numbers is read as Unicode scalar values (`stringFrom(65)` is `"A"`), and any other value is printed (`stringFrom(True)` is `"True"`). The formats are `"default"` (print the value), `"unicode-scalars"`, `"utf-8"` and `"utf-16"`.
 
@@ -1454,6 +1618,9 @@ stringFrom([72, 105])
 
 MathJSON `StringJoin` · `(collection<character | string>, separator: (character | string)?) -> string`
 
+- argument 1 — The finite collection of strings or characters to join; an empty collection gives `""`. Sample: `["a", "b", "c"]`.
+- `separator` — The text placed between consecutive elements; by default, none. Sample: `"-"`.
+
 StringJoin(xs): join the elements of the finite collection `xs` (strings or characters) into a string.
 
 StringJoin(xs, sep): the same, with `sep` between consecutive elements. The inverse of StringSplit. An empty collection joins to "", a one-element collection to that element. A non-text element, or a non-finite collection, leaves the expression unevaluated. For variadic concatenation use Join(a, b, …) or string interpolation.
@@ -1467,6 +1634,9 @@ stringJoin(["a", "b", "c"], "-")
 
 MathJSON `StringRepeat` · `(character | string, n: integer) -> string`
 
+- argument 1 — The string to repeat. Sample: `"ab"`.
+- `n` — The number of copies, a non-negative integer; 0 gives `""`. Sample: `3`.
+
 StringRepeat(s, n): `n` copies of the string `s`, concatenated. StringRepeat(s, 0) is "". A negative or non-integer `n` is an error.
 
 ```epsil
@@ -1477,6 +1647,11 @@ stringRepeat("ab", 3)
 ### stringReplace
 
 MathJSON `StringReplace` · `((character | string, character | string, character | string, count: integer?) -> string) & ((character | string, regexp, character | string, count: integer?) -> string) & ((character | string, regexp, function, count: integer?) -> string)`
+
+- argument 1 — The string in which to replace. Sample: `"banana"`.
+- argument 2 — The text to find, which must not be empty, or a regular expression. Sample: `"a"`.
+- argument 3 — The replacement text, empty to delete, or, with a regular expression, a function of the match record that returns it. Sample: `"o"`.
+- `count` — The largest number of occurrences to replace, from the left, a positive integer; by default, all of them. Sample: `1`.
 
 StringReplace(s, target, replacement): replace every non-overlapping occurrence of `target` in `s`, scanning left to right over whole characters.
 
@@ -1499,6 +1674,9 @@ stringReplace("banana", "a", "o", 1)
 ### stringSplit
 
 MathJSON `StringSplit` · `((character | string, (character | string)?) -> list<string>) & ((character | string, regexp) -> list<string>)`
+
+- argument 1 — The string to split. Sample: `"a,b,c"`.
+- argument 2 — The separator string, with the empty parts kept, or a regular expression; an empty separator splits into characters, and by default the split is on runs of whitespace. Sample: `","`.
 
 StringSplit(s): split a string on runs of whitespace (the Unicode White_Space code points), dropping empty parts.
 
@@ -1553,6 +1731,8 @@ symbol("x", 2)
 
 MathJSON `Tail` · `(any) -> collection`
 
+- argument 1 — The expression whose operands are returned; an expression with no operands gives `Nothing`. Sample: `max(a, b, c)`.
+
 Return the tail of an expression, the operands of the expression
 
 ```epsil
@@ -1575,6 +1755,9 @@ Text("Total: ", 42)
 
 MathJSON `Timing` · `(value, repeat: integer?) -> tuple<number, value>`
 
+- argument 1 — The expression to evaluate and time. Sample: `2 + 2`.
+- `repeat` — The number of evaluations; a count below 3 counts as 3, and the fastest and the slowest are dropped from the mean. Sample: `10`.
+
 `timing(expr)` evaluates `expr` and returns a pair: the time the evaluation took, in microseconds, then the value; read them as `timing(expr)[1]` and `timing(expr)[2]`. `timing(expr, n)` evaluates `expr` n times (at least 3), drops the fastest and the slowest run, and returns the mean time of the others
 
 ```epsil
@@ -1585,6 +1768,9 @@ timing(2 + 2)[2]
 ### to
 
 MathJSON `To` · `(any, any) -> nothing`
+
+- argument 1 — The left side of the arrow. Sample: `x`.
+- argument 2 — The right side of the arrow. Sample: `3`.
 
 Action arrow / mapping (`a \to b`) — opaque typed head.
 
@@ -1597,6 +1783,8 @@ replaceAll(x^2 + x, to(x, 3))
 
 MathJSON `ToLowerCase` · `(character | string) -> string`
 
+- argument 1 — The string to convert. Sample: `"Hello World"`.
+
 ToLowerCase(s): the string `s` mapped to lower case using the Unicode default (locale-independent) mappings.
 
 ```epsil
@@ -1607,6 +1795,8 @@ toLowerCase("Hello World")
 ### toUpperCase
 
 MathJSON `ToUpperCase` · `(character | string) -> string`
+
+- argument 1 — The string to convert. Sample: `"straße"`.
 
 ToUpperCase(s): the string `s` mapped to upper case using the Unicode default (locale-independent) mappings. The character count can change ("ß" uppercases to "SS").
 
@@ -1619,6 +1809,8 @@ toUpperCase("straße")
 
 MathJSON `Triangle` · `(any+) -> expression`
 
+- arguments 1, … — A vertex of the triangle. Sample: `A`.
+
 Triangle primitive — opaque typed head.
 
 ```epsil
@@ -1629,6 +1821,9 @@ triangle(A, B, C)
 ### trim
 
 MathJSON `Trim` · `(character | string, chars: (character | collection<character | string> | string)?) -> string`
+
+- argument 1 — The string to trim. Sample: `"  hi  "`.
+- `chars` — The characters to remove at both ends, as a character, a string or a collection of them; by default, whitespace. Sample: `"-"`.
 
 Trim(s): remove leading and trailing whitespace (the Unicode White_Space characters).
 
@@ -1648,6 +1843,9 @@ trim("--hi--", "-")
 
 MathJSON `TrimEnd` · `(character | string, chars: (character | collection<character | string> | string)?) -> string`
 
+- argument 1 — The string to trim. Sample: `"  hi  "`.
+- `chars` — The characters to remove at the end, as a character, a string or a collection of them; by default, whitespace. Sample: `"-"`.
+
 TrimEnd(s): remove trailing whitespace (the Unicode White_Space characters).
 
 TrimEnd(s, chars): remove trailing characters that belong to `chars` — a SET of characters, as for Trim.
@@ -1660,6 +1858,9 @@ trimEnd("hi!!", "!")
 ### trimStart
 
 MathJSON `TrimStart` · `(character | string, chars: (character | collection<character | string> | string)?) -> string`
+
+- argument 1 — The string to trim. Sample: `"  hi  "`.
+- `chars` — The characters to remove at the start, as a character, a string or a collection of them; by default, whitespace. Sample: `"-"`.
 
 TrimStart(s): remove leading whitespace (the Unicode White_Space characters).
 
@@ -1674,7 +1875,9 @@ trimStart("007", "0")
 
 MathJSON `Type` · `(any) -> type`
 
-The STATIC type of an expression, as a type value: `type(3)` is `TypeFrom("integer")`. The observer does not evaluate its operand, except a name with no declared type, which gives the widened type of the value it holds. Recover the text with `stringFrom(type(x))`; in a string interpolation a type value renders as its text directly. BREAKING (2026-08-19, ruling R3 of `docs/TYPE-SYSTEM.md`): the result used to be a STRING, and `type(x) == "some text"` is now always `False` — use `x is T`, `Subtype(type(x), u)`, or compare `stringFrom` text.
+- argument 1 — The expression whose static type is returned; it is not evaluated. Sample: `[1, 2, 3]`.
+
+The STATIC type of an expression, as a type value: `type("hi")` is `TypeFrom("string")`. The observer does not evaluate its operand, except a name with no declared type, which gives the widened type of the value it holds. Recover the text with `stringFrom(type(x))`; in a string interpolation a type value renders as its text directly. BREAKING (2026-08-19, ruling R3 of `docs/TYPE-SYSTEM.md`): the result used to be a STRING, and `type(x) == "some text"` is now always `False` — use `x is T`, `Subtype(type(x), u)`, or compare `stringFrom` text.
 
 ```epsil
 type("hi")
@@ -1689,6 +1892,8 @@ type([1, 2, 3])
 ### typeFrom
 
 MathJSON `TypeFrom` · `(text: string) -> type`
+
+- `text` — The text of the type; an unknown type name is an error. Sample: `"list<integer>"`.
 
 A type expression as a first-class value, constructed from its text: `TypeFrom("list<integer>")`. The value SETTLES at construction — the text is parsed, reduced, and stored back as its canonical form — so two values built from equivalent spellings (`"integer|real"`, `"real|integer"`) are the same value. `==` between two type values is mutual subtyping (it also equates an alias with its body); `==` between a type value and anything else, a string included, is `False`. Construction never touches the type registry: a forward reference (`type X`) or an unknown name is an error, not a registration.
 
@@ -1718,6 +1923,8 @@ Prevent an expression from being evaluated
 
 MathJSON `UnicodeScalars` · `(character | string) -> list<integer>`
 
+- argument 1 — The string to decompose. Sample: `"A😀"`.
+
 A collection of Unicode scalars from a string, same as UTF-32
 
 ```epsil
@@ -1729,6 +1936,8 @@ unicodeScalars("A😀")
 
 MathJSON `Utf16` · `(character | string) -> list<integer>`
 
+- argument 1 — The string to encode. Sample: `"A😀"`.
+
 A collection of UTF-16 code units from a string.
 
 ```epsil
@@ -1739,6 +1948,8 @@ utf16("A😀")
 ### utf8
 
 MathJSON `Utf8` · `(character | string) -> list<integer>`
+
+- argument 1 — The string to encode. Sample: `"A€"`.
 
 A collection of UTF-8 code units from a string.
 
@@ -1782,7 +1993,10 @@ WildcardSequence(x)
 
 ### withRandomSeed
 
-MathJSON `WithRandomSeed` · `(real | string, any) -> expression`
+MathJSON `WithRandomSeed` · `(seed: real | string, body: any) -> expression`
+
+- `seed` — The seed: a finite real or a string; the same seed gives the same draws. Sample: `42`.
+- `body` — The expression to evaluate, held until the seed frame exists. Sample: `random(1..6)`.
 
 WithRandomSeed(seed, body): evaluate `body` with a random seed frame seeded by `seed` (a finite real or a string). The block replays identically, while repeated draws WITHIN the frame differ (the n-th draw is hash(seed, n)).
 

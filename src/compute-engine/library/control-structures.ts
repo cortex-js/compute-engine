@@ -398,7 +398,15 @@ export const BLOCK_DEFINITION: OperatorDefinition = {
 export const PROGRAM_DEFINITION: OperatorDefinition = {
   ...BLOCK_DEFINITION,
   description:
-    'Evaluate a program in the caller scope, continuing after statement errors.',
+    'Evaluate a program in the caller scope, continuing after statement errors, and return the value of its last statement.',
+  parameters: [
+    {
+      description:
+        'A statement; a statement that gives an error does not stop the program.',
+      sample: 'x + 1',
+    },
+  ],
+  examples: ['Program(Error("boom"), 2 + 3)'],
   inspectsErrors: true,
   scoped: false,
   canonical: canonicalProgram,

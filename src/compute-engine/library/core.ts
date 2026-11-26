@@ -6083,6 +6083,18 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       operands: everyOperand(OPAQUE_ROLE),
       complexity: 500,
       signature: '((string|expression<ErrorCode>), expression?) -> nothing',
+      parameters: [
+        {
+          description:
+            'The nature of the error: a code string, or an `ErrorCode` expression with arguments.',
+          sample: '"oops"',
+        },
+        {
+          description:
+            'The context of the error, such as the expression where it occurs.',
+          sample: 'x + 1',
+        },
+      ],
       examples: ['[1, RuntimeError("zero")]'],
       // To make a canonical expression, don't canonicalize the args
       canonical: (args, { engine: ce }) => ce._fn('Error', args),
@@ -6154,6 +6166,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         '`NaN`, regardless of provenance. `Nothing` is not an absent datum.',
       complexity: 500,
       signature: '(any) -> boolean',
+      parameters: [{ description: 'The value to test.', sample: 'NaN' }],
       examples: ['[IsMissing(Missing), IsMissing(NaN), IsMissing(0)]'],
       // `Nothing` is an input to this test, not an omitted argument.
       canonical: (args, { engine: ce }) => {
@@ -6684,6 +6697,13 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       // absence marker such as `Missing`. (The bare `dictionary` admits the
       // same values since 0.160.0, but leaves the value type open.)
       signature: '(any) -> dictionary<any>',
+      parameters: [
+        {
+          description:
+            'The expression to describe; it is not evaluated, so a name describes its definition.',
+          sample: 'pi',
+        },
+      ],
       examples: ['About(Pi)'],
       evaluate: ([x], { engine: ce }) => {
         // Entries are collected in display order, then assembled into a
@@ -6862,6 +6882,13 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       description: 'Return the head of an expression, the name of the operator',
       lazy: true,
       signature: '(any) -> symbol',
+      parameters: [
+        {
+          description:
+            'The expression; a number gives its kind (`Integer`, `Real`, `Rational`, …), a symbol `Symbol`.',
+          sample: 'x^2',
+        },
+      ],
       examples: ['Head(x^2)'],
       canonical: (args, { engine: ce }) => {
         // **IMPORTANT** Head should work on non-canonical expressions
@@ -6887,6 +6914,13 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         'Return the tail of an expression, the operands of the expression',
       lazy: true,
       signature: '(any) -> collection',
+      parameters: [
+        {
+          description:
+            'The expression whose operands are returned; an expression with no operands gives `Nothing`.',
+          sample: 'max(a, b, c)',
+        },
+      ],
       examples: ['[Tail(Max(a, b, c))]'],
       canonical: (args, { engine: ce }) => {
         if (args.length !== 1) return null;
@@ -7004,6 +7038,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
     Identity: {
       description: 'Return the argument unchanged',
       signature: '(T) -> T where T',
+      parameters: [{ description: 'The value to return.', sample: 'x + 1' }],
       examples: ['Identity(x + 1)'],
       evaluate: ([x]) => x,
     },
@@ -7021,6 +7056,13 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       // `type` handler), and an application of it carries them.
       invokes: false,
       signature: '(function*) -> function',
+      parameters: [
+        {
+          description:
+            'A step of the composition; the rightmost step is applied first, and no step gives the identity function.',
+          sample: 'sin',
+        },
+      ],
       // The type is that of the rightmost step's parameters and the leftmost
       // step's result, when each step's signature is known. An application
       // of the composition applies every step, so its effects are the union
@@ -7229,6 +7271,18 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       // term, the juxtaposition `w_1(4)`: a call when `w_1` is a function or
       // has no definition, a product when it has a value (`subscriptedTerm()`).
       signature: '(name:any, arguments:any*) -> unknown',
+      parameters: [
+        {
+          description:
+            'The function: a name or a function literal; another expression is read as a function of its free variables.',
+          sample: 'sqrt',
+        },
+        {
+          description:
+            'An argument; a function literal with scalar parameters maps over a list argument.',
+          sample: '16',
+        },
+      ],
       examples: ['Apply(Sqrt, 16)'],
       // An ANONYMOUS application instantiates its callee's `where` clause here
       // (generic-function-literals design §2.5). This is the one application
@@ -7460,6 +7514,18 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         'Apply a function to arguments, each bound whole (engine-internal).',
       inspectsErrors: true,
       signature: '(name:any, arguments:any*) -> unknown',
+      parameters: [
+        {
+          description: 'The function: a name or a function literal.',
+          sample: 'x => (x, x)',
+        },
+        {
+          description:
+            'An argument, bound whole: a list argument is not mapped over.',
+          sample: '[1, 2]',
+        },
+      ],
+      examples: ['ApplyWhole(x => (x, x), [1, 2])'],
       type: ([fn], { engine }) =>
         BoxedType.forResult(
           (fn && functionResult(fn.type)) ?? 'unknown',
@@ -8381,6 +8447,13 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       // "internal-error") are not valid symbol names, so a symbol result
       // rendered as an invalid-symbol Error for exactly the failure cases.
       signature: '(any) scope -> string',
+      parameters: [
+        {
+          description:
+            'The predicate to assume, such as an inequality or a membership; another expression gives "not-a-predicate".',
+          sample: 'x > 0',
+        },
+      ],
       examples: ['Assume(x > 0)'],
       evaluate: (ops, { engine: ce }) => ce.string(ce.assume(ops[0])),
     },
@@ -8919,7 +8992,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
     Type: {
       description:
         'The STATIC type of an expression, as a type value: ' +
-        '`Type(3)` is `TypeFrom("integer")`. The observer does not ' +
+        '`Type("hi")` is `TypeFrom("string")`. The observer does not ' +
         'evaluate its operand, except a name with no declared type, which ' +
         'gives the widened type of the value it holds. Recover the text with `StringFrom(Type(x))`; ' +
         'in a string interpolation a type value renders as its text ' +
@@ -8935,6 +9008,13 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       // `("a" + 1) |> Type`, `Apply(Type, …)`.
       inspectsErrors: true,
       signature: '(any) -> type',
+      parameters: [
+        {
+          description:
+            'The expression whose static type is returned; it is not evaluated.',
+          sample: '[1, 2, 3]',
+        },
+      ],
       examples: ['Type("hi")', 'Type([1, 2, 3])'],
       // `inspectsErrors` deliberately lets a well-formed `Type(Error(...))`
       // observe the operand instead of propagating it. It also lets the
@@ -9012,6 +9092,13 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       // evaluation is what settles it. A literal operand settles at
       // canonicalization instead, surfacing a typo at the author's line.
       signature: '(text: string) -> type',
+      parameters: {
+        text: {
+          description:
+            'The text of the type; an unknown type name is an error.',
+          sample: '"list<integer>"',
+        },
+      },
       examples: ['TypeFrom("integer | real") == TypeFrom("real")'],
       invokes: false,
       canonical: (ops, { engine: ce }) => {
@@ -9231,6 +9318,17 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       lazy: true,
       inspectsErrors: true,
       signature: '(subject: any, protocols: string+) -> boolean',
+      parameters: [
+        {
+          description:
+            'The value whose type is tested, or a type value to test that type.',
+          sample: '"abc"',
+        },
+        {
+          description: 'The name of a protocol; an unknown name is an error.',
+          sample: '"Copyable"',
+        },
+      ],
       examples: [
         'protocol Copyable {}\ntype string is Copyable\nConforms("abc", "Copyable")',
       ],
@@ -9323,6 +9421,13 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       // (`pure: true`) even though they evaluate their held operand. `IsError`
       // mirrors that verbatim rather than inventing a third rule.
       signature: '(any) -> boolean',
+      parameters: [
+        {
+          description:
+            'The expression to test; it is held, so an error in it is inspected, not propagated.',
+          sample: 'ln("a")',
+        },
+      ],
       examples: ['IsError(Ln("a"))', 'IsError(1 + 1)'],
       canonical: (ops, { engine: ce }) => {
         // Arity is enforced HERE, not by the signature: `inspectsErrors` makes
@@ -9365,6 +9470,9 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       description: 'Evaluate an expression.',
       lazy: true,
       signature: '(any) -> unknown',
+      parameters: [
+        { description: 'The expression to evaluate.', sample: 'x + x' },
+      ],
       examples: ['Evaluate(x + x)'],
       type: ([x], context) =>
         BoxedType.forResult(x.type, context.engine._typeResolver),
@@ -9407,7 +9515,22 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
     EvaluateAt: {
       description: 'Evaluate a function at one point or between two bounds.',
       lazy: true,
-      signature: '(function, lower:expression, upper:expression) -> unknown',
+      signature: '(f: function, lower: expression, upper: expression?) -> unknown',
+      parameters: {
+        f: {
+          description: 'The function, or an expression of its free variables.',
+          sample: 'x => x^2',
+        },
+        lower: {
+          description:
+            'The lower bound; without `upper`, the point at which `f` is evaluated.',
+          sample: '1',
+        },
+        upper: {
+          description: 'The upper bound: the result is `f(upper) - f(lower)`.',
+          sample: '3',
+        },
+      },
       examples: ['EvaluateAt(x => x^2, 1, 3)'],
       type: ([x], context) =>
         BoxedType.forResult(
@@ -9802,7 +9925,18 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       // the handler evaluates the operand (which bubbles on its own terms) and
       // simplifies the result — no throw, no assert.
       inspectsErrors: true,
-      signature: '(any, any?) -> expression',
+      signature: '(any, assumptions: any?) -> expression',
+      parameters: [
+        {
+          description: 'The expression to simplify.',
+          sample: 'sin(x)^2 + cos(x)^2',
+        },
+        {
+          description:
+            'A boolean assumption, or a list of them, that holds during the simplification only.',
+          sample: 'x > 0',
+        },
+      ],
       examples: ['Simplify(Sin(x)^2 + Cos(x)^2)', 'Simplify(Sqrt(x^2), x > 0)'],
       // Simplification is type-preserving in the handler's view: report the
       // operand's own type. The operand is held (raw), so its descriptor
@@ -9956,7 +10090,19 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       discharges: { 1: ['random'] },
       // Hold the body: it must NOT evaluate before the frame exists.
       lazy: true,
-      signature: '(real | string, any) -> expression',
+      signature: '(seed: real | string, body: any) -> expression',
+      parameters: {
+        seed: {
+          description:
+            'The seed: a finite real or a string; the same seed gives the same draws.',
+          sample: '42',
+        },
+        body: {
+          description:
+            'The expression to evaluate, held until the seed frame exists.',
+          sample: 'random(1..6)',
+        },
+      },
       examples: [
         'WithRandomSeed(42, [Random(1..6), Random(1..6), Random(1..6)])',
       ],
@@ -10032,6 +10178,14 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       ],
       broadcastable: false,
       signature: '(integer) -> number',
+      parameters: [
+        {
+          description:
+            'The index `k` of the constant, a positive integer; the same index is the same value.',
+          sample: '1',
+        },
+      ],
+      examples: ['ArbitraryConstant(1) - ArbitraryConstant(1)'],
       canonical: (ops, { engine }) =>
         canonicalArbitrary(engine, 'ArbitraryConstant', ops),
     },
@@ -10046,6 +10200,14 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       ],
       broadcastable: false,
       signature: '(integer) -> integer',
+      parameters: [
+        {
+          description:
+            'The index `k` of the integer, a positive integer; the same index is the same value.',
+          sample: '1',
+        },
+      ],
+      examples: ['Solve(Sin(x) == 0, x)'],
       canonical: (ops, { engine }) =>
         canonicalArbitrary(engine, 'ArbitraryInteger', ops),
     },
@@ -10070,6 +10232,18 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       // specs may be omitted entirely (the unknown is then inferred from the
       // equation). See `boxed-expression/solve-domain.ts`.
       signature: '(any, any*) -> list',
+      parameters: [
+        {
+          description:
+            'An equation, a bare expression read as `= 0`, or a list of equations.',
+          sample: 'x^2 - 1 == 0',
+        },
+        {
+          description:
+            "The unknown, or a list of unknowns for a system; by default, the equation's single free variable.",
+          sample: 'x',
+        },
+      ],
       examples: [
         'Solve(x^2 - 1 == 0, x)',
         'Solve([x + y == 3, x - y == 1], [x, y])',
@@ -10117,7 +10291,32 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       // parameter symbol may carry a seeded value that must not be substituted
       // before solving.
       lazy: true,
-      signature: '(any, any, dictionary?) -> dictionary',
+      signature:
+        '(equations: any, params: any, options: dictionary?) -> dictionary',
+      parameters: {
+        equations: {
+          description:
+            'An equation, a residual expression read as `= 0`, or a list of either.',
+          sample: 'x^2 - 2',
+        },
+        params: {
+          description:
+            'The list of parameter specs: a symbol, `(a, a0)` with a start value, or `(a, a0, lo, hi)` with bounds.',
+          sample: '[(x, 1)]',
+        },
+        options: {
+          description: 'The options of the search; an unknown key is an error.',
+          sample: '{global -> {x -> [0, 2]}}',
+          keys: {
+            global: {
+              type: 'dictionary<list<real>>',
+              description:
+                'The parameters (at most two) to search over a range `[lo, hi]` or `[lo, hi, step]` for the lowest sum of squared residuals.',
+              sample: '{x -> [0, 2]}',
+            },
+          },
+        },
+      },
       examples: ['FindRoot(x^2 - 2, [(x, 1)])'],
       // The record of the result, with one field per parameter of the
       // second operand (`fitRecordType`).
@@ -10150,6 +10349,18 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       // collapse to a boolean before solving.
       lazy: true,
       signature: '(any, any*) -> list',
+      parameters: [
+        {
+          description:
+            'The equation, an expression read as `= 0`, or a list of equations.',
+          sample: 'x^2 == 2',
+        },
+        {
+          description:
+            'An unknown, a list of unknowns, or a domain spec as for `Solve`; by default, the free variable of the equation.',
+          sample: 'x',
+        },
+      ],
       examples: ['NSolve(x^2 == 2, x)'],
       // The operands are those of `Solve`, so they are canonicalized by the
       // same function. `canonicalSolve()` builds a `Solve` expression, and only
@@ -10189,6 +10400,18 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       lazy: true,
       keywords: ['substitute', 'substitution'],
       signature: '(any, any+) -> any',
+      parameters: [
+        {
+          description:
+            'The expression in which to replace; it is evaluated after the replacement.',
+          sample: 'x^2 + x',
+        },
+        {
+          description:
+            'A rule, or a list of rules; all the rules are applied at once, in a single pass.',
+          sample: 'Rule(x, 3)',
+        },
+      ],
       examples: ['ReplaceAll(x^2 + x, Rule(x, 3))'],
       canonical: (ops, { engine: ce }) => {
         if (ops.length < 2) return ce._fn('ReplaceAll', checkArity(ce, ops, 2));
@@ -10272,6 +10495,17 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       complexity: 8200,
       lazy: true,
       signature: '(any, symbol*) -> any',
+      parameters: [
+        {
+          description:
+            'The expression, as written; with no form, its full canonical form is returned.',
+          sample: '1 + x',
+        },
+        {
+          description:
+            'A canonical form to apply: "InvisibleOperator", "Number", "Multiply", "Add", "Power", "Divide", "Flatten" or "Order".',
+        },
+      ],
       examples: ['CanonicalForm(Hold(1 + x), "Order")'],
       // Do not canonicalize the arguments, we want to preserve
       // the original form before modifying it
@@ -10395,6 +10629,10 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         'Numerically evaluate an expression, as the `.N()` method does (engine-internal).',
       lazy: true,
       signature: '(any) -> unknown',
+      parameters: [
+        { description: 'The expression to approximate.', sample: 'sqrt(2)' },
+      ],
+      examples: ['NumericApproximation(Sqrt(2))'],
       type: ([x], context) =>
         BoxedType.forResult(
           numericApproximationType(x.type),
@@ -10430,6 +10668,13 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       // effect set: it consumes draws from the ambient seeded stream, hence
       // impure (the derived `pure`/`drawsRandom` getters read it).
       signature: '((collection<any> | set<real>)?) random -> any',
+      parameters: [
+        {
+          description:
+            'The domain: a real is drawn from an interval, an element from a range or a finite non-empty collection; by default, a real in [0, 1).',
+          sample: '1..6',
+        },
+      ],
       examples: ['Random()', 'Random(1..6)'],
       type: ([domain], context) => {
         if (domain === undefined)
@@ -10557,7 +10802,19 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       // returns a list. A bounded variable with no call-site binding does not.
       // Same spelling as `RandomSample` (`library/statistics.ts`).
       signature:
-        '((T, number) random -> T where T: string) & ((collection<any> | set<real>, number) random -> list<any>)',
+        '((T, k: number) random -> T where T: string) & ((collection<any> | set<real>, k: number) random -> list<any>)',
+      parameters: [
+        {
+          description:
+            'The domain to draw from, as for `Random`; a string gives a string of its characters.',
+          sample: '["a", "b", "c"]',
+        },
+        {
+          description:
+            'The number of draws, from 0 to 1,000,000; it may exceed the size of the domain.',
+          sample: '5',
+        },
+      ],
       examples: ['RandomChoice(["a", "b", "c"], 5)'],
       type: ([domain, k], context) =>
         BoxedType.forResult(
@@ -11062,6 +11319,17 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       // `tuple<time: …, result: …>` promised a `.result` field access that
       // failed with `incompatible-type`.
       signature: '(value, repeat: integer?) -> tuple<number, value>',
+      parameters: [
+        {
+          description: 'The expression to evaluate and time.',
+          sample: '2 + 2',
+        },
+        {
+          description:
+            'The number of evaluations; a count below 3 counts as 3, and the fastest and the slowest are dropped from the mean.',
+          sample: '10',
+        },
+      ],
       examples: ['Timing(2 + 2)[2]'],
       // `lazy` so the handler receives the RAW operand: `Timing` must time
       // the evaluation itself. As a non-lazy operator the driver evaluated
@@ -11168,6 +11436,12 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       // `x := 5`) that the operand does not show, so the effects are `any`:
       // a memo does not keep a result that holds `Parse`.
       signature: '(string) any -> any',
+      parameters: [
+        {
+          description: 'The LaTeX source; an empty string gives `Nothing`.',
+          sample: '"x^2 + 1"',
+        },
+      ],
       examples: ['Parse(#"\\frac{\\pi}{2}"#)'],
       // The value is the evaluated parsed expression, as for a symbol that
       // holds it: `Parse("1 + x")` with `x := 2` gives 3. An operator that
@@ -11284,6 +11558,18 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       // `StringJoin(Characters(s))` and `StringJoin(s)` must type-check.
       signature:
         '(collection<string | character>, separator: (string | character)?) -> string',
+      parameters: [
+        {
+          description:
+            'The finite collection of strings or characters to join; an empty collection gives `""`.',
+          sample: '["a", "b", "c"]',
+        },
+        {
+          description:
+            'The text placed between consecutive elements; by default, none.',
+          sample: '"-"',
+        },
+      ],
       examples: ['StringJoin(["a", "b", "c"], "-")'],
       evaluate: ([xs, separator], { engine }) => {
         if (xs === undefined) return undefined;
@@ -11327,6 +11613,13 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       // A character operand is accepted too, as for every string operator, and
       // is its own result.
       signature: '(string | character) -> character',
+      parameters: [
+        {
+          description:
+            'The text of exactly one character (one grapheme cluster).',
+          sample: '"é"',
+        },
+      ],
       examples: ['CharacterFrom("é")'],
       canonical: (ops, { engine: ce }) => {
         const xs = flatten(ops);
@@ -11385,6 +11678,12 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
           'A non-string argument leaves the expression unevaluated.',
       ],
       signature: '(string | character) -> list<character>',
+      parameters: [
+        {
+          description: 'The text to split; an empty string gives `[]`.',
+          sample: '"héllo"',
+        },
+      ],
       examples: ['Characters("héllo")'],
       // The evaluate guard (`textOf`) is a complete precondition, exposed
       // for the enumerability facet — see `canEnumerate` (types-definitions).
@@ -11432,6 +11731,14 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       signature:
         '((string | character, (string | character)?) -> list<string>) & ' +
         '((string | character, regexp) -> list<string>)',
+      parameters: [
+        { description: 'The string to split.', sample: '"a,b,c"' },
+        {
+          description:
+            'The separator string, with the empty parts kept, or a regular expression; an empty separator splits into characters, and by default the split is on runs of whitespace.',
+          sample: '","',
+        },
+      ],
       examples: [
         'StringSplit("a,b,c", ",")',
         'StringSplit("  one two  three ")',
@@ -11531,6 +11838,27 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         '((string | character, string | character, string | character, count: integer?) -> string) & ' +
         '((string | character, regexp, string | character, count: integer?) -> string) & ' +
         '((string | character, regexp, function, count: integer?) -> string)',
+      parameters: [
+        {
+          description: 'The string in which to replace.',
+          sample: '"banana"',
+        },
+        {
+          description:
+            'The text to find, which must not be empty, or a regular expression.',
+          sample: '"a"',
+        },
+        {
+          description:
+            'The replacement text, empty to delete, or, with a regular expression, a function of the match record that returns it.',
+          sample: '"o"',
+        },
+        {
+          description:
+            'The largest number of occurrences to replace, from the left, a positive integer; by default, all of them.',
+          sample: '1',
+        },
+      ],
       examples: [
         'StringReplace("banana", "a", "o")',
         'StringReplace("banana", "a", "o", 1)',
@@ -11604,6 +11932,14 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       ],
       signature:
         '(string | character, chars: (string | character | collection<string | character>)?) -> string',
+      parameters: [
+        { description: 'The string to trim.', sample: '"  hi  "' },
+        {
+          description:
+            'The characters to remove at both ends, as a character, a string or a collection of them; by default, whitespace.',
+          sample: '"-"',
+        },
+      ],
       examples: ['Trim("  hi  ")', 'Trim("--hi--", "-")'],
       evaluate: ([s, chars], { engine }) => {
         const text = textOf(s);
@@ -11624,6 +11960,14 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       ],
       signature:
         '(string | character, chars: (string | character | collection<string | character>)?) -> string',
+      parameters: [
+        { description: 'The string to trim.', sample: '"  hi  "' },
+        {
+          description:
+            'The characters to remove at the start, as a character, a string or a collection of them; by default, whitespace.',
+          sample: '"-"',
+        },
+      ],
       examples: ['TrimStart("007", "0")'],
       evaluate: ([s, chars], { engine }) => {
         const text = textOf(s);
@@ -11644,6 +11988,14 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       ],
       signature:
         '(string | character, chars: (string | character | collection<string | character>)?) -> string',
+      parameters: [
+        { description: 'The string to trim.', sample: '"  hi  "' },
+        {
+          description:
+            'The characters to remove at the end, as a character, a string or a collection of them; by default, whitespace.',
+          sample: '"-"',
+        },
+      ],
       examples: ['TrimEnd("hi!!", "!")'],
       evaluate: ([s, chars], { engine }) => {
         const text = textOf(s);
@@ -11667,6 +12019,14 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
           'error.',
       ],
       signature: '(string | character, n: integer) -> string',
+      parameters: [
+        { description: 'The string to repeat.', sample: '"ab"' },
+        {
+          description:
+            'The number of copies, a non-negative integer; 0 gives `""`.',
+          sample: '3',
+        },
+      ],
       examples: ['StringRepeat("ab", 3)'],
       evaluate: ([s, n], { engine: ce }) => {
         const text = textOf(s);
@@ -11697,7 +12057,20 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
           'unevaluated.',
       ],
       signature:
-        '(string | character, n: integer, pad: (string | character)?) -> string',
+        '(s: string | character, n: integer, pad: (string | character)?) -> string',
+      parameters: {
+        s: { description: 'The text to pad.', sample: '"42"' },
+        n: {
+          description:
+            'The length of the result, in characters, a non-negative integer; a shorter `s` is padded, a longer one returned unchanged.',
+          sample: '5',
+        },
+        pad: {
+          description:
+            'The padding, repeated and cut to fit, a space by default; it must not be empty.',
+          sample: '"0"',
+        },
+      },
       examples: ['PadStart("42", 5, "0")'],
       evaluate: ([s, n, pad], { engine: ce }) => {
         const text = textOf(s);
@@ -11729,7 +12102,20 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
           'unevaluated.',
       ],
       signature:
-        '(string | character, n: integer, pad: (string | character)?) -> string',
+        '(s: string | character, n: integer, pad: (string | character)?) -> string',
+      parameters: {
+        s: { description: 'The text to pad.', sample: '"abc"' },
+        n: {
+          description:
+            'The length of the result, in characters, a non-negative integer; a shorter `s` is padded, a longer one returned unchanged.',
+          sample: '6',
+        },
+        pad: {
+          description:
+            'The padding, repeated and cut to fit, a space by default; it must not be empty.',
+          sample: '"."',
+        },
+      },
       examples: ['PadEnd("abc", 6, ".")'],
       evaluate: ([s, n, pad], { engine: ce }) => {
         const text = textOf(s);
@@ -11766,6 +12152,12 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
           'count can change ("ß" uppercases to "SS").',
       ],
       signature: '(string | character) -> string',
+      parameters: [
+        {
+          description: 'The string to convert.',
+          sample: '"straße"',
+        },
+      ],
       examples: ['ToUpperCase("straße")'],
       evaluate: ([s], { engine }) => {
         const text = textOf(s);
@@ -11780,6 +12172,12 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
           'Unicode default (locale-independent) mappings.',
       ],
       signature: '(string | character) -> string',
+      parameters: [
+        {
+          description: 'The string to convert.',
+          sample: '"Hello World"',
+        },
+      ],
       examples: ['ToLowerCase("Hello World")'],
       evaluate: ([s], { engine }) => {
         const text = textOf(s);
@@ -11812,6 +12210,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
           'ignoring case. An approximation of Unicode full case folding.',
       ],
       signature: '(string | character) -> string',
+      parameters: [{ description: 'The text to fold.', sample: '"Straße"' }],
       examples: [
         'CaseFold("Straße")',
         'CaseFold("Hello") == CaseFold("HELLO")',
@@ -11844,6 +12243,10 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
           'units, which would sort astral characters below U+E000..U+FFFF).',
       ],
       signature: '(string | character, string | character) -> integer',
+      parameters: [
+        { description: 'The first string.', sample: '"apple"' },
+        { description: 'The second string.', sample: '"banana"' },
+      ],
       examples: ['StringCompare("apple", "banana")'],
       evaluate: ([a, b], { engine }) => {
         if (
@@ -11865,6 +12268,18 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         '(`StringFrom(True)` is `"True"`). The formats are `"default"` ' +
         '(print the value), `"unicode-scalars"`, `"utf-8"` and `"utf-16"`.',
       signature: '(any, format:string?) -> string',
+      parameters: [
+        {
+          description:
+            'The value to convert; with no format, an integer or a list of integers is read as Unicode scalar values.',
+          sample: '65',
+        },
+        {
+          description:
+            'The format: `"default"`, `"unicode-scalars"`, `"utf-8"` or `"utf-16"`.',
+          sample: '"utf-8"',
+        },
+      ],
       examples: ['StringFrom(65)', 'StringFrom([72, 105])'],
       evaluate: ([value, format], { engine }) => {
         if (value === undefined) return engine.string('');
@@ -11976,6 +12391,12 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
     Utf8: {
       description: 'A collection of UTF-8 code units from a string.',
       signature: '(string | character) -> list<integer>',
+      parameters: [
+        {
+          description: 'The string to encode.',
+          sample: '"A€"',
+        },
+      ],
       examples: ['Utf8("A€")'],
       // The evaluate guard (`isText`) is a complete precondition, exposed
       // for the enumerability facet — see `canEnumerate` (types-definitions).
@@ -12001,6 +12422,12 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
     Utf16: {
       description: 'A collection of UTF-16 code units from a string.',
       signature: '(string | character) -> list<integer>',
+      parameters: [
+        {
+          description: 'The string to encode.',
+          sample: '"A😀"',
+        },
+      ],
       examples: ['Utf16("A😀")'],
       // The evaluate guard (`textOf`) is a complete precondition, exposed
       // for the enumerability facet — see `canEnumerate` (types-definitions).
@@ -12026,6 +12453,12 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       description:
         'A collection of Unicode scalars from a string, same as UTF-32',
       signature: '(string | character) -> list<integer>',
+      parameters: [
+        {
+          description: 'The string to decompose.',
+          sample: '"A😀"',
+        },
+      ],
       examples: ['UnicodeScalars("A😀")'],
       // The evaluate guard (`isText`) is a complete precondition, exposed
       // for the enumerability facet — see `canEnumerate` (types-definitions).
@@ -12047,6 +12480,12 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       description:
         'A collection of grapheme clusters from a string. Synonym of Characters.',
       signature: '(string | character) -> list<character>',
+      parameters: [
+        {
+          description: 'The text to split; an empty string gives `[]`.',
+          sample: '"héllo"',
+        },
+      ],
       examples: ['GraphemeClusters("héllo")'],
       // The evaluate guard (`textOf`) is a complete precondition, exposed
       // for the enumerability facet — see `canEnumerate` (types-definitions).
@@ -12063,9 +12502,22 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
     },
 
     BaseForm: {
-      description: '`BaseForm(expr, base=10)`',
+      description: [
+        'BaseForm(x, base): the number `x` unchanged, marked to be written in',
+        '`base` (10 by default). In LaTeX, a numeral with a base subscript,',
+        '`10111_2` or `161_b`, parses to it.',
+      ],
       complexity: 9000,
-      signature: '(T, (string|number)?) -> T where T: number',
+      signature: '(x: T, base: (string|number)?) -> T where T: number',
+      parameters: {
+        x: { description: 'The number.', sample: '255' },
+        base: {
+          description:
+            'The base in which the number is written, 10 by default; a symbol for a symbolic base.',
+          sample: '16',
+        },
+      },
+      examples: ['BaseForm(23, 2)'],
       evaluate: ([x]) => x,
     },
 
@@ -12075,7 +12527,20 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       // @todo could accept "roman"... as base
       // @todo could accept optional third parameter as the (padded) length of the output
 
-      signature: '(string | character, (string|character|integer)?) -> integer',
+      signature:
+        '(s: string | character, base: (string|character|integer)?) -> integer',
+      parameters: {
+        s: {
+          description:
+            'The digits, with an optional sign; with a base, a digit not valid in it is an error; without one, the longest prefix of decimal digits is read (a 0x or 0b prefix is accepted), and text with none gives `NaN`.',
+          sample: '"ff"',
+        },
+        base: {
+          description:
+            'The base, from 2 to 36, 10 by default; a numeric string is read as a number.',
+          sample: '16',
+        },
+      },
       examples: ['DigitsFrom("ff", 16)', 'DigitsFrom("1010", 2)'],
 
       evaluate: (ops, { engine }) => {
@@ -12177,7 +12642,19 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
           'only integer numerals are accepted.',
       ],
       signature:
-        '(string | character, base: (string|character|integer)?) -> number',
+        '(s: string | character, base: (string|character|integer)?) -> number',
+      parameters: {
+        s: {
+          description:
+            'The numeral; text that is not a numeral is an error value.',
+          sample: '"3.25"',
+        },
+        base: {
+          description:
+            'The base, from 2 to 36; with a base, only an integer numeral is accepted.',
+          sample: '16',
+        },
+      },
       examples: ['NumberFrom("3.25")', 'NumberFrom("ff", 16)'],
       evaluate: ([s, baseArg], { engine: ce }) => {
         const source = textOf(s);
@@ -12247,7 +12724,22 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       // @todo could accept `0xcafe`, `0b01010` or `(deadbeef)_16` as string formats
       // @todo could accept "roman"... as base
       broadcastable: true,
-      signature: '(integer, integer?, integer?) -> string',
+      signature: '(n: integer, base: integer?, length: integer?) -> string',
+      parameters: {
+        n: {
+          description: 'The integer; a negative one keeps its sign.',
+          sample: '255',
+        },
+        base: {
+          description: 'The base, from 2 to 36, 10 by default.',
+          sample: '16',
+        },
+        length: {
+          description:
+            'The number of digits: fewer digits are padded on the left with zeros, more are cut to the last ones.',
+          sample: '8',
+        },
+      },
       examples: [
         'IntegerString(255, 16)',
         'IntegerString(10, 2)',
@@ -12352,6 +12844,13 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         'nothing. When the host denies console access, evaluates to a ' +
         '`capability-denied` error.',
       signature: '(any*) console -> nothing',
+      parameters: [
+        {
+          description:
+            'A value to print; a string prints its content, without the quotes.',
+          sample: '"Hello"',
+        },
+      ],
       examples: ['Print("Hello", 42)'],
       evaluate: (ops, { engine: ce, effects }) => {
         const console_ = effects.console;
@@ -12377,6 +12876,13 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         'no interactive input, stays unevaluated. When the host denies ' +
         'console access, evaluates to a `capability-denied` error.',
       signature: '(prompt: string?) console -> string | nothing',
+      parameters: {
+        prompt: {
+          description: 'The text displayed before the line is read.',
+          sample: '"Your name? "',
+        },
+      },
+      examples: ['Input("Your name? ")'],
       evaluate: (ops, { engine: ce, effects }) => {
         const console_ = effects.console;
         if (console_ === null) return capabilityDenied(ce, 'console');
@@ -12401,27 +12907,56 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
     Triangle: {
       description: 'Triangle primitive — opaque typed head.',
       signature: '(any+) -> expression',
+      parameters: [
+        {
+          description: 'A vertex of the triangle.',
+          sample: 'A',
+        },
+      ],
       examples: ['Triangle(A, B, C)'],
     },
     GeometricVector: {
       description:
         'Geometric vector (directed segment between two points) — opaque typed head. Distinct from the column-vector `Vector` operator.',
-      signature: '(any, any) -> expression',
+      signature: '(start: any, end: any) -> expression',
+      parameters: {
+        start: { description: 'The point the vector starts at.', sample: 'A' },
+        end: { description: 'The point the vector ends at.', sample: 'B' },
+      },
       examples: ['GeometricVector(A, B)'],
     },
     Sphere: {
       description: 'Sphere primitive — opaque typed head.',
       signature: '(any+) -> expression',
+      parameters: [
+        {
+          description:
+            'An element that defines the sphere, such as its center or its radius.',
+          sample: 'O',
+        },
+      ],
       examples: ['Sphere(O, r)'],
     },
     Segment: {
       description: 'Segment primitive — opaque typed head.',
       signature: '(any+) -> expression',
+      parameters: [
+        {
+          description: 'An endpoint of the segment.',
+          sample: 'A',
+        },
+      ],
       examples: ['Segment(A, B)'],
     },
     Polygon: {
       description: 'Polygon primitive — opaque typed head.',
       signature: '(any+) -> expression',
+      parameters: [
+        {
+          description: 'A vertex of the polygon.',
+          sample: 'A',
+        },
+      ],
       examples: ['Polygon(A, B, C, D)'],
     },
 
@@ -12434,6 +12969,13 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       description:
         'Angle mark / measure (`\\angle ABC`, `\\varangle XYZ`, `∠ABC`) — opaque typed head; not evaluated.',
       signature: '(any+) -> number',
+      parameters: [
+        {
+          description:
+            'A point of the angle, in order; the vertex is the middle one of three.',
+          sample: 'A',
+        },
+      ],
       examples: ['Angle(A, B, C)'],
     },
     IndexedSequence: {
@@ -12454,18 +12996,32 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       description:
         'Quadrilateral mark (`\\square ABCD`) — opaque typed head; not evaluated.',
       signature: '(any+) -> expression',
+      parameters: [
+        {
+          description: 'A vertex of the quadrilateral.',
+          sample: 'A',
+        },
+      ],
       examples: ['Quadrilateral(A, B, C, D)'],
     },
     Perpendicular: {
       description:
         'Perpendicularity relation (`AB \\perp CD`) — opaque typed head; not evaluated.',
       signature: '(any, any) -> expression',
+      parameters: [
+        { description: 'A line or a segment.', sample: 'l' },
+        { description: 'The other line or segment.', sample: 'm' },
+      ],
       examples: ['Perpendicular(l, m)'],
     },
     Parallel: {
       description:
         'Parallelism relation (`AB \\parallel CD`) — opaque typed head; not evaluated.',
       signature: '(any, any) -> expression',
+      parameters: [
+        { description: 'A line or a segment.', sample: 'l' },
+        { description: 'The other line or segment.', sample: 'm' },
+      ],
       examples: ['Parallel(l, m)'],
     },
     Arc: {
@@ -12474,6 +13030,9 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       description:
         'Arc / wide-hat accent measure (`\\widehat{ABC}`) — opaque typed head; not evaluated.',
       signature: '(any+) -> number',
+      parameters: [
+        { description: 'A point of the arc, in order.', sample: 'A' },
+      ],
       examples: ['Arc(A, B, C)'],
     },
     OverParen: {
@@ -12485,6 +13044,10 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
     To: {
       description: 'Action arrow / mapping (`a \\to b`) — opaque typed head.',
       signature: '(any, any) -> nothing',
+      parameters: [
+        { description: 'The left side of the arrow.', sample: 'x' },
+        { description: 'The right side of the arrow.', sample: '3' },
+      ],
       examples: ['ReplaceAll(x^2 + x, To(x, 3))'],
     },
     Colon: {
@@ -12498,6 +13061,16 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       // `a'` on a number-valued symbol is another value (so `\sin a'`
       // type-checks), `f'` on a function is a function. Mirror the type.
       signature: '(T, integer?) -> T where T',
+      parameters: [
+        {
+          description: 'The primed expression, often a function.',
+          sample: 'f',
+        },
+        {
+          description: 'The order of the derivative; by default, 1.',
+          sample: '2',
+        },
+      ],
       examples: ['Prime(f)'],
     },
   },
