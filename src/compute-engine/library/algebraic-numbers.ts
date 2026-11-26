@@ -870,7 +870,26 @@ export const ALGEBRAIC_NUMBERS_LIBRARY: SymbolDefinitions = {
       'Example: PolynomialRoot(x² + x + 1, x, 1) → (−1 − i√3)/2',
     // The polynomial is kept as written, its variable is bound, the index is a value.
     operands: () => [{ kind: 'held' }, { kind: 'clause' }, { kind: 'value' }],
-    signature: '(any, any, integer?) -> number',
+    signature: '(polynomial: any, variable: any, index: integer?) -> number',
+    parameters: {
+      polynomial: {
+        description: 'The polynomial, with rational coefficients.',
+        sample: 'x^3 - x - 1',
+      },
+      variable: {
+        description: 'The variable of the polynomial, bound by the call.',
+        sample: 'x',
+      },
+      index: {
+        description:
+          'Which root, from 1 to the degree; without it, the abstract root of an irreducible polynomial.',
+        sample: '1',
+      },
+    },
+    examples: [
+      'PolynomialRoot(x^2 - 2, x, 2)  // sqrt(2)',
+      'N(PolynomialRoot(x^3 - x - 1, x, 1))  // 1.324717957244746',
+    ],
     evaluate: (
       ops: readonly Expression[],
       { engine: ce, expression, numericApproximation, precision }: Options
@@ -927,7 +946,22 @@ export const ALGEBRAIC_NUMBERS_LIBRARY: SymbolDefinitions = {
   MinimalPolynomial: {
     description:
       'The minimal polynomial of the algebraic number a in x: primitive over ℤ, positive leading coefficient.',
-    signature: '(number, any) -> expression',
+    signature: '(a: number, variable: any) -> expression',
+    parameters: {
+      a: {
+        description:
+          'The algebraic number, a polynomial in one generator (a radical of a rational, `i`, the golden ratio or a `PolynomialRoot`); another value stays unevaluated.',
+        sample: 'sqrt(2)',
+      },
+      variable: {
+        description: 'The variable of the polynomial.',
+        sample: 'x',
+      },
+    },
+    examples: [
+      'MinimalPolynomial(Sqrt(2), x)  // x^2 - 2',
+      'MinimalPolynomial(1 + Root(2, 3), x)  // x^3 - 3x^2 + 3x - 3',
+    ],
     operands: held(2),
     evaluate: (ops: readonly Expression[], { engine: ce }: Options) => {
       const result = withinBudget(() => {
@@ -941,7 +975,18 @@ export const ALGEBRAIC_NUMBERS_LIBRARY: SymbolDefinitions = {
   IsAlgebraicInteger: {
     description:
       'Whether a is an algebraic integer: a root of a monic polynomial over ℤ.',
+    examples: [
+      'IsAlgebraicInteger((1 + Sqrt(5)) / 2)  // "True"',
+      'IsAlgebraicInteger(Sqrt(2) / 2)  // "False"',
+    ],
     signature: '(number) -> boolean',
+    parameters: [
+      {
+        description:
+          'The algebraic number, a polynomial in one generator (a radical of a rational, `i`, the golden ratio or a `PolynomialRoot`); another value stays unevaluated.',
+        sample: '(1 + sqrt(5)) / 2',
+      },
+    ],
     operands: held(1),
     evaluate: ofNumber((r, ce) =>
       isIntegral(r.field.K, r.x, ce._deadlineFrame) ? 'True' : 'False'
@@ -951,7 +996,18 @@ export const ALGEBRAIC_NUMBERS_LIBRARY: SymbolDefinitions = {
   AlgebraicNumberNorm: {
     description:
       'The norm of a over ℚ in the field ℚ(a): (−1)ᵈ times its minimal polynomial’s constant term over its leading one.',
+    examples: [
+      'AlgebraicNumberNorm(1 + Sqrt(2))  // -1',
+      'AlgebraicNumberNorm(3 + Sqrt(2))  // 7',
+    ],
     signature: '(number) -> number',
+    parameters: [
+      {
+        description:
+          'The algebraic number, a polynomial in one generator (a radical of a rational, `i`, the golden ratio or a `PolynomialRoot`); another value stays unevaluated.',
+        sample: '1 + sqrt(2)',
+      },
+    ],
     operands: held(1),
     evaluate: ofNumber((r, ce) => {
       const m = minimalOf(r, ce);
@@ -963,7 +1019,18 @@ export const ALGEBRAIC_NUMBERS_LIBRARY: SymbolDefinitions = {
   AlgebraicNumberTrace: {
     description:
       'The trace of a over ℚ in the field ℚ(a): minus its minimal polynomial’s second coefficient over its leading one.',
+    examples: [
+      'AlgebraicNumberTrace(1 + Sqrt(2))  // 2',
+      'AlgebraicNumberTrace(1 + Sqrt(3) / 2)  // 2',
+    ],
     signature: '(number) -> number',
+    parameters: [
+      {
+        description:
+          'The algebraic number, a polynomial in one generator (a radical of a rational, `i`, the golden ratio or a `PolynomialRoot`); another value stays unevaluated.',
+        sample: '1 + sqrt(2)',
+      },
+    ],
     operands: held(1),
     evaluate: ofNumber((r, ce) => {
       const m = minimalOf(r, ce);
@@ -975,6 +1042,17 @@ export const ALGEBRAIC_NUMBERS_LIBRARY: SymbolDefinitions = {
   NumberFieldDiscriminant: {
     description: 'The discriminant of the field ℚ(a): of its ring of integers.',
     signature: '(number) -> integer',
+    parameters: [
+      {
+        description:
+          'The algebraic number that generates the field, a polynomial in one generator (a radical of a rational, `i`, the golden ratio or a `PolynomialRoot`); another value stays unevaluated.',
+        sample: 'sqrt(2)',
+      },
+    ],
+    examples: [
+      'NumberFieldDiscriminant(Sqrt(2))  // 8',
+      'NumberFieldDiscriminant(Sqrt(5))  // 5',
+    ],
     operands: held(1),
     evaluate: ofNumber((r, ce) => {
       const { f } = subfieldOf(r, ce);
@@ -996,6 +1074,14 @@ export const ALGEBRAIC_NUMBERS_LIBRARY: SymbolDefinitions = {
     description:
       'A ℤ-basis of the ring of integers of ℚ(a), written on the powers of the generator read (the radical or root a is written in), as Wolfram writes it.',
     signature: '(number) -> list<number>',
+    parameters: [
+      {
+        description:
+          'The algebraic number that generates the field, a polynomial in one generator (a radical of a rational, `i`, the golden ratio or a `PolynomialRoot`); another value stays unevaluated.',
+        sample: 'sqrt(2)',
+      },
+    ],
+    examples: ['NumberFieldIntegralBasis(Sqrt(5))  // [1, 1/2 + sqrt(5)/2]'],
     operands: held(1),
     evaluate: ofNumber((r, ce) => {
       const basis = integralBasis(ce, r, subfieldOf(r, ce));
@@ -1007,6 +1093,14 @@ export const ALGEBRAIC_NUMBERS_LIBRARY: SymbolDefinitions = {
     description:
       'The signature (r₁, r₂) of ℚ(a): its real embeddings and its pairs of complex ones.',
     signature: '(number) -> list<integer>',
+    parameters: [
+      {
+        description:
+          'The algebraic number that generates the field, a polynomial in one generator (a radical of a rational, `i`, the golden ratio or a `PolynomialRoot`); another value stays unevaluated.',
+        sample: 'sqrt(2)',
+      },
+    ],
+    examples: ['NumberFieldSignature(Root(2, 3))  // [1, 1]'],
     operands: held(1),
     evaluate: ofNumber((r, ce) => {
       const { f } = subfieldOf(r, ce);

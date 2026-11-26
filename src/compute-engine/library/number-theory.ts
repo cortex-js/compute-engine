@@ -568,9 +568,9 @@ const POWER_MOD_OPERAND_TYPES: Type[] = [
   parseType('integer | list<integer>'),
 ];
 const POWER_MOD_SIGNATURE =
-  '(rational | list<rational>, rational | list<rational>, integer | list<integer>) -> integer | list<integer>';
+  '(base: rational | list<rational>, exponent: rational | list<rational>, modulus: integer | list<integer>) -> integer | list<integer>';
 const POWER_MOD_SIGNATURE_LIST =
-  '(rational | list<rational>, rational | list<rational>, integer | list<integer>) -> list<integer> | list<list<integer>>';
+  '(base: rational | list<rational>, exponent: rational | list<rational>, modulus: integer | list<integer>) -> list<integer> | list<list<integer>>';
 
 /** Does one of the operands of a `PowerMod` call hold a list? */
 function powerModHasList(...ops: (OperandDescriptor | undefined)[]): boolean {
@@ -625,6 +625,13 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
       description:
         'Return the prime factorization of an integer `n` as a list of `[prime, exponent]` tuples, ordered by ascending prime. For a negative `n`, a leading `[-1, 1]` tuple carries the sign. A rational `p/q` is factored as `p` and `q`, the exponents of the primes of `q` being negative.',
       signature: '(rational) -> list<tuple<integer, integer>>',
+      parameters: [
+        {
+          description:
+            'The integer or rational to factor; 0 and ±1 give `[(0, 1)]`, `[(1, 1)]` and `[(-1, 1)]`.',
+          sample: '360',
+        },
+      ],
       broadcastable: true,
       examples: [
         'FactorInteger(360)  // [(2, 3), (3, 2), (5, 1)]',
@@ -718,6 +725,16 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
       // divides every element), so there is no `False` to give and the
       // question itself is out of domain.
       signature: '(integer, integer) -> boolean',
+      parameters: [
+        {
+          description: 'The divisor; 0 divides only 0.',
+          sample: '3',
+        },
+        {
+          description: 'The integer to test for divisibility.',
+          sample: '12',
+        },
+      ],
       broadcastable: true,
       examples: ['Divides(3, 12)  // "True"'],
       evaluate: ([aOp, bOp], { engine: ce }) => {
@@ -747,6 +764,12 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
       // canonicalization, so the two spellings must agree or the stricter one
       // would silently decide both.
       signature: '(integer, integer) -> boolean',
+      // By position, as `Divides`, whose parameters have no names.
+      parameters: [
+        { description: 'The divisor `a`; 0 divides only 0.', sample: '3' },
+        { description: 'The integer `b` to divide.', sample: '10' },
+      ],
+      examples: ['NotDivides(3, 10)  // True'],
       broadcastable: true,
       canonical: (ops, { engine }) => engine.expr(['Not', ['Divides', ...ops]]),
     },
@@ -757,6 +780,13 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
       signature: '(integer) -> list<integer>',
       broadcastable: true,
       examples: ['Divisors(12)  // [1, 2, 3, 4, 6, 12]'],
+      parameters: [
+        {
+          description:
+            'The integer whose divisors are listed; its sign is ignored, and 0 stays unevaluated.',
+          sample: '12',
+        },
+      ],
       // Complete precondition (the evaluate guard on the ground operand) —
       // see `canEnumerate` (types-definitions.ts).
       canEnumerate: (expr) =>
@@ -807,6 +837,13 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
       description:
         'Return the nth prime number (1-based): `NthPrime(1)` is 2, `NthPrime(2)` is 3, …',
       signature: '(integer) -> integer',
+      parameters: [
+        {
+          description:
+            'The rank of the prime, from 1; it stays unevaluated below 1.',
+          sample: '10',
+        },
+      ],
       broadcastable: true,
       examples: ['NthPrime(10)  // 29'],
       evaluate: floatResultIfFloatOperand(([n], { engine: ce }) => {
@@ -842,7 +879,19 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
       description:
         'Return the smallest prime greater than `n`. With a second argument `k`, return the kth prime after `n` (`k < 0` returns the |k|th prime before `n`). A non-integer real or rational `n` is allowed: `NextPrime(7/2)` is 5.',
       // `n` is a real, not an integer: a non-integer `n` has a next prime too.
-      signature: '(real, integer?) -> integer',
+      signature: '(n: real, k: integer?) -> integer',
+      parameters: {
+        n: {
+          description:
+            'The starting point, which is not counted even when it is prime.',
+          sample: '10',
+        },
+        k: {
+          description:
+            'Which prime after `n` to return, 1 by default; a negative `k` counts the primes before `n`, and 0 stays unevaluated.',
+          sample: '2',
+        },
+      },
       broadcastable: true,
       examples: [
         'NextPrime(10)  // 11',
@@ -902,6 +951,13 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
       signature: '(integer) -> list<integer>',
       broadcastable: true,
       examples: ['PrimeFactors(360)  // [2, 3, 5]'],
+      parameters: [
+        {
+          description:
+            'The integer to factor. Its sign is ignored; it stays unevaluated at 0.',
+          sample: '360',
+        },
+      ],
       // Complete precondition — see `Divisors`.
       canEnumerate: (expr) =>
         isFunction(expr)
@@ -928,6 +984,13 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
       signature: '(integer) -> integer',
       broadcastable: true,
       examples: ['PrimeNu(360)  // 3'],
+      parameters: [
+        {
+          description:
+            'The integer whose distinct prime factors are counted. Its sign is ignored; it stays unevaluated at 0.',
+          sample: '360',
+        },
+      ],
       evaluate: floatResultIfFloatOperand(([n], { engine: ce }) => {
         const k = toBigint(n);
         if (k === null) return undefined;
@@ -944,6 +1007,13 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
       signature: '(integer) -> integer',
       broadcastable: true,
       examples: ['PrimeOmega(360)  // 6'],
+      parameters: [
+        {
+          description:
+            'The integer whose prime factors are counted. Its sign is ignored; it stays unevaluated at 0.',
+          sample: '360',
+        },
+      ],
       evaluate: floatResultIfFloatOperand(([n], { engine: ce }) => {
         const k = toBigint(n);
         if (k === null) return undefined;
@@ -963,6 +1033,13 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
       signature: '(integer) -> integer',
       broadcastable: true,
       examples: ['MoebiusMu(30)  // -1'],
+      parameters: [
+        {
+          description:
+            'The argument of μ. Its sign is ignored; it stays unevaluated at 0.',
+          sample: '30',
+        },
+      ],
       evaluate: floatResultIfFloatOperand(([n], { engine: ce }) => {
         const k = toBigint(n);
         if (k === null) return undefined;
@@ -979,6 +1056,13 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
       description:
         'Return `"True"` if `n` is square-free (not divisible by any perfect square > 1). The sign of `n` is ignored. A rational is square-free when its numerator and denominator are.',
       signature: '(rational) -> boolean',
+      parameters: [
+        {
+          description:
+            'The integer or rational to test; its sign is ignored, and 0 is not square-free.',
+          sample: '30',
+        },
+      ],
       broadcastable: true,
       examples: [
         'IsSquareFree(30)  // "True"',
@@ -1008,6 +1092,13 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
       signature: '(integer) -> integer',
       broadcastable: true,
       examples: ['Radical(360)  // 30'],
+      parameters: [
+        {
+          description:
+            'The integer whose radical is returned. Its sign is ignored; it stays unevaluated at 0.',
+          sample: '360',
+        },
+      ],
       evaluate: floatResultIfFloatOperand(([n], { engine: ce }) => {
         const k = toBigint(n);
         if (k === null) return undefined;
@@ -1025,6 +1116,22 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
       description:
         'Return `a^b mod m` (modular exponentiation). A negative `b` uses the modular inverse of `a`; the result is undefined when that inverse does not exist (i.e. when `a` and `m` are not coprime). The result is in the range [0, m). A rational base `p/q` is `p` times the modular inverse of `q`, so `PowerMod(1/2, 2, 7)` is 2. A rational exponent `s/r` gives the least `x` with `x^r ≡ a^s (mod m)`, the first entry of `PowerModList(a, s/r, m)`. It is undefined when there is none, when `m` cannot be factored, or when there are too many roots to list and none of them is less than 100000. A list operand threads: `PowerMod([2, 3], 2, 7)` is `[4, 2]`.',
       signature: POWER_MOD_SIGNATURE,
+      parameters: {
+        base: {
+          description:
+            'The base `a`; a rational `p/q` is `p` times the modular inverse of `q`.',
+          sample: '2',
+        },
+        exponent: {
+          description:
+            'The exponent `b`; a negative one uses the inverse of the base, and a rational `s/r` asks for an `r`-th root of `a^s`.',
+          sample: '10',
+        },
+        modulus: {
+          description: 'The modulus `m`, at least 1; the result is in [0, m).',
+          sample: '1000',
+        },
+      },
       type: ([a, b, m], context) =>
         BoxedType.forResult(
           powerModHasList(a, b, m) ? 'list<integer>' : 'integer',
@@ -1100,6 +1207,22 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
       description:
         'Return the sorted list of every `x` in [0, m) with `x^r ≡ a^s (mod m)`, for the exponent `s/r`. An integer exponent gives the single value `a^s mod m`, a negative one using the modular inverse of `a`. A rational base is read as `p` times the inverse of `q`. A list operand threads: `PowerModList([2, 3], 2, 7)` is `[[4], [2]]`. The list is empty when `a^s` is not an `r`-th power mod `m`. Undefined for a modulus `m < 1`, when the inverse of `a` does not exist, or when `m` cannot be factored or there are too many roots to list.',
       signature: POWER_MOD_SIGNATURE_LIST,
+      parameters: {
+        base: {
+          description:
+            'The base `a`; a rational `p/q` is `p` times the modular inverse of `q`.',
+          sample: '3',
+        },
+        exponent: {
+          description:
+            'The exponent `s/r`: the result lists the `x` with `x^r` congruent to `a^s`; an integer exponent gives one value.',
+          sample: '1/2',
+        },
+        modulus: {
+          description: 'The modulus `m`, at least 1; the roots are in [0, m).',
+          sample: '11',
+        },
+      },
       type: ([a, s, m], context) =>
         BoxedType.forResult(
           powerModHasList(a, s, m) ? 'list<list<integer>>' : 'list<integer>',
@@ -1155,7 +1278,19 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
     ModularInverse: {
       description:
         'Return the modular multiplicative inverse of `a` modulo `m`: the integer `x` with `a·x ≡ 1 (mod m)`. The sign of `x` follows the sign of `m` (the same floored-division convention as `Mod`). Undefined when `a` and `m` are not coprime.',
-      signature: '(integer, integer) -> integer',
+      signature: '(a: integer, modulus: integer) -> integer',
+      parameters: {
+        a: {
+          description:
+            'The integer to invert; it must be coprime to the modulus.',
+          sample: '3',
+        },
+        modulus: {
+          description:
+            'The modulus `m`, not 0; a negative modulus gives a result in (m, 0].',
+          sample: '7',
+        },
+      },
       broadcastable: true,
       examples: ['ModularInverse(3, 7)  // 5', 'ModularInverse(3, -7)  // -2'],
       evaluate: floatResultIfFloatOperand(([aOp, mOp], { engine: ce }) => {
@@ -1173,6 +1308,23 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
       description:
         'Return the extended GCD of `a` and `b` as a tuple `(g, x, y)` where `g = gcd(a, b)` is non-negative and `a·x + b·y = g` (Bézout coefficients). With more operands, `ExtendedGCD(a₁, …, aₙ)` is the tuple `(g, x₁, …, xₙ)` with `g = gcd(a₁, …, aₙ)` and `Σ aᵢ·xᵢ = g`.',
       signature: '(integer, integer, integer*) -> tuple',
+      parameters: [
+        {
+          description:
+            'The first integer; its Bézout coefficient is the second entry of the result.',
+          sample: '12',
+        },
+        {
+          description:
+            'The second integer; its Bézout coefficient is the third entry of the result.',
+          sample: '18',
+        },
+        {
+          description:
+            'A further integer; its Bézout coefficient follows those of the integers before it.',
+          sample: '27',
+        },
+      ],
       // `(g, x₁, …, xₙ)`: one entry more than there are operands.
       type: (ops, context) =>
         BoxedType.forResult(
@@ -1225,6 +1377,13 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
       signature: '(integer) -> integer',
       broadcastable: true,
       examples: ['IntegerSqrt(17)  // 4'],
+      parameters: [
+        {
+          description:
+            'The integer whose square root is rounded down; a negative one stays unevaluated.',
+          sample: '17',
+        },
+      ],
       evaluate: floatResultIfFloatOperand(([n], { engine: ce }) => {
         const k = toBigint(n);
         if (k === null || k < 0n) return undefined;
@@ -1234,8 +1393,25 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
 
     ChineseRemainder: {
       description:
-        'Solve a system of simultaneous congruences: return the smallest non-negative integer `x` such that `x ≡ residues[i] (mod moduli[i])` for every `i`. With a third argument `d`, return the smallest solution `x ≥ d`. Undefined if the system is inconsistent or the two lists differ in length.',
-      signature: '(collection<any>, collection<any>, integer?) -> integer',
+        'Solve a system of simultaneous congruences: return the smallest non-negative integer `x` such that `x ≡ residues[i] (mod moduli[i])` for every `i`. With a third argument `lower`, return the smallest solution `x ≥ lower`. Undefined if the system is inconsistent or the two lists differ in length.',
+      signature:
+        '(residues: collection<any>, moduli: collection<any>, lower: integer?) -> integer',
+      parameters: {
+        residues: {
+          description: 'The integer residues, one for each modulus.',
+          sample: '[2, 3, 2]',
+        },
+        moduli: {
+          description:
+            'The integer moduli, as many as residues; they need not be coprime, and an inconsistent system stays unevaluated.',
+          sample: '[3, 5, 7]',
+        },
+        lower: {
+          description:
+            'The least value of the solution; without it the solution is the smallest non-negative one.',
+          sample: '100',
+        },
+      },
       examples: [
         'ChineseRemainder([2, 3, 2], [3, 5, 7])  // 23',
         'ChineseRemainder([2, 3, 2], [3, 5, 7], 100)  // 128',
@@ -1282,6 +1458,13 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
       signature: '(integer) -> integer',
       broadcastable: true,
       examples: ['CarmichaelLambda(15)  // 4'],
+      parameters: [
+        {
+          description:
+            'The modulus, at least 1; a smaller one stays unevaluated.',
+          sample: '15',
+        },
+      ],
       evaluate: floatResultIfFloatOperand(([n], { engine: ce }) => {
         const k = toBigint(n);
         if (k === null || k < 1n) return undefined;
@@ -1295,6 +1478,12 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
       signature: '(integer) -> integer',
       broadcastable: true,
       examples: ['LucasL(10)  // 123'],
+      parameters: [
+        {
+          description: 'The index of the Lucas number, which may be negative.',
+          sample: '10',
+        },
+      ],
       evaluate: floatResultIfFloatOperand(([n], { engine: ce }) => {
         const k = toBigint(n);
         if (k === null) return undefined;
@@ -1322,6 +1511,13 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
       description:
         '`Lucas` is an alias for `LucasL`, which is the preferred name. Returns the nth Lucas number.',
       signature: '(integer) -> integer',
+      parameters: [
+        {
+          description: 'The index of the Lucas number, which may be negative.',
+          sample: '10',
+        },
+      ],
+      examples: ['Lucas(10)  // 123'],
       broadcastable: true,
       // `ce.function()` validates the operands against the `LucasL`
       // signature, so the alias fails where `LucasL` fails. `_fn()` skipped
@@ -1333,6 +1529,13 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
       description:
         'Return the nth Catalan number `C(n) = (2n)! / ((n+1)! · n!)`: 1, 1, 2, 5, 14, 42, … Defined for `n ≥ 0`. A positive rational `n` is taken through the Gamma function, `C(n) = Γ(2n+1) / (Γ(n+1) Γ(n+2))`: `CatalanNumber(1/2)` is `8/(3π)`.',
       signature: '(real) -> number',
+      parameters: [
+        {
+          description:
+            'The index, an integer at least 0 or a positive rational; a negative value stays unevaluated.',
+          sample: '5',
+        },
+      ],
       type: ([n], context) =>
         BoxedType.forResult(
           n !== undefined && isSubtype(broadcastOperandType(n), 'integer')
@@ -1391,6 +1594,13 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
       signature: '(integer) -> boolean',
       broadcastable: true,
       examples: ['IsPerfectPower(64)  // "True"'],
+      parameters: [
+        {
+          description:
+            'The integer to test; 0 and ±1 are not perfect powers, and a negative one is a perfect power when it is an odd power.',
+          sample: '64',
+        },
+      ],
       evaluate: ([n], { engine: ce }) => {
         const k = toBigint(n);
         if (k === null) return undefined;
@@ -1404,7 +1614,7 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
 
     ContinuedFraction: {
       description:
-        'Return the continued-fraction expansion of `x` as a list of integer terms `[a0, a1, …]`. An exact rational is expanded fully. An exact quadratic irrational (`Sqrt(2)`) is expanded to its periodic form `[a0, …, [period]]` (`[1, [2]]`), or to the optional `n` terms. Another exact real (`ExponentialE`) is expanded to `n` terms (default 20), each computed at a precision that vouches for it. An inexact value is expanded as its best rational approximation at working precision (see `Rationalize`), truncated to `n` terms (default 20).',
+        'Return the continued-fraction expansion of `x` as a list of integer terms `[a0, a1, …]`. An exact rational is expanded fully. An exact quadratic irrational (`Sqrt(2)`) is expanded to its periodic form `[a0, …, [period]]` (`[1, [2]]`), or to the optional `count` terms. Another exact real (`ExponentialE`) is expanded to `count` terms (default 20), each computed at a precision that vouches for it. An inexact value is expanded as its best rational approximation at working precision (see `Rationalize`), truncated to `count` terms (default 20).',
       // The value is a FINITE real: the expansion needs the order of the
       // real line and an infinity has no expansion, so every infinity and
       // every non-real number is off-carrier — an `incompatible-type`
@@ -1418,7 +1628,18 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
       // to the handler. Ruling recorded in
       // `docs/plans/2026-08-30-error-model-implementation.md`, Phase F
       // batch 10.
-      signature: '(real, integer?) -> list<integer | list<integer>>',
+      signature: '(x: real, count: integer?) -> list<integer | list<integer>>',
+      parameters: {
+        x: {
+          description: 'The finite real number to expand.',
+          sample: 'sqrt(2)',
+        },
+        count: {
+          description:
+            'The largest number of terms, at least 1; a periodic expansion is then written out term by term.',
+          sample: '5',
+        },
+      },
       broadcastable: true,
       nanBehavior: ['reject', 'reject'],
       requires: ([, n]) => {
@@ -1529,6 +1750,13 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
       description:
         'Reconstruct the value of a continued fraction given its list of integer terms `[a0, a1, …]`. A last element that is a list is the repeating period, `[1, [2]]`: the quadratic irrational `Sqrt(2)`.',
       signature: '(collection<any>) -> number',
+      parameters: [
+        {
+          description:
+            'The integer terms, from the integer part on; a last element that is a list is the period, and an empty list stays unevaluated.',
+          sample: '[1, [2]]',
+        },
+      ],
       examples: [
         'FromContinuedFraction([2, 3, 1, 4])  // 43/19',
         'FromContinuedFraction([1, [2]])  // Sqrt(2)',
@@ -1560,7 +1788,24 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
     IntegerDigits: {
       description:
         'Return the digits of `n` in the given `base` (default 10), most-significant first. The sign of `n` is ignored. With a third argument `length`, the result is zero-padded on the left (or truncated to its least-significant digits) to that length.',
-      signature: '(integer, integer?, integer?) -> list<integer>',
+      signature:
+        '(n: integer, base: integer?, length: integer?) -> list<integer>',
+      parameters: {
+        n: {
+          description:
+            'The integer whose digits are listed; its sign is ignored.',
+          sample: '255',
+        },
+        base: {
+          description: 'The base, at least 2; 10 by default.',
+          sample: '16',
+        },
+        length: {
+          description:
+            'The length of the result, at least 0: zeros pad it on the left, or its most-significant digits are dropped.',
+          sample: '8',
+        },
+      },
       broadcastable: true,
       examples: ['IntegerDigits(255, 16)  // [15, 15]'],
       // Complete precondition, mirroring every decline in the evaluate
@@ -1635,7 +1880,28 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
       description:
         'Count digits of `n` in the given `base` (default 10); the sign of `n` is ignored. With a third argument `digit`, return how many times that digit occurs. Otherwise return a list `[count of 1, count of 2, …, count of base-1, count of 0]`. With a fourth argument `length`, the digits are first zero-padded on the left (or cut to their last `length`), so `DigitCount(5, 2, 0, 8)` is 6.',
       signature:
-        '(integer, integer?, integer?, integer?) -> integer | list<integer>',
+        '(n: integer, base: integer?, digit: integer?, length: integer?) -> integer | list<integer>',
+      parameters: {
+        n: {
+          description:
+            'The integer whose digits are counted; its sign is ignored.',
+          sample: '122',
+        },
+        base: {
+          description: 'The base, at least 2; 10 by default.',
+          sample: '10',
+        },
+        digit: {
+          description:
+            'The digit to count, from 0 to `base - 1`; without it the result lists the count of every digit.',
+          sample: '2',
+        },
+        length: {
+          description:
+            'The number of digits counted, at least 0: zeros pad the digits on the left, or their most-significant ones are dropped.',
+          sample: '8',
+        },
+      },
       broadcastable: true,
       // One count, or the list of the counts of every digit.
       type: ([, , digit], context) =>
@@ -1700,6 +1966,15 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
         'Return a random prime. `RandomPrime(n)` draws a prime in [2, n]; `RandomPrime(m, n)` draws a prime in [m, n]. Undefined if the range contains no prime.',
       // Draws from the ambient seeded stream: the `random` label.
       signature: '(integer, integer?) random -> integer',
+      // By position: the meaning of the first argument depends on the count.
+      parameters: [
+        {
+          description:
+            'Alone, the upper bound `n` of the range; with a second argument, its lower bound `m` (a lower bound below 2 is read as 2).',
+          sample: '100',
+        },
+        { description: 'The upper bound `n` of the range.', sample: '200' },
+      ],
       examples: ['RandomPrime(100)  // e.g. 47'],
       evaluate: floatResultIfFloatOperand(([aOp, bOp], { engine: ce }) => {
         let lo: bigint | null;
@@ -1737,6 +2012,13 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
       signature: '(real) -> integer',
       broadcastable: true,
       examples: ['PrimePi(10)  // 4'],
+      parameters: [
+        {
+          description:
+            'The upper bound, which need not be an integer; below 2 the count is 0.',
+          sample: '10',
+        },
+      ],
       evaluate: floatResultIfFloatOperand(([n], { engine: ce }) => {
         const x = n?.re;
         if (x === undefined || !Number.isFinite(x)) return undefined;
@@ -1766,6 +2048,13 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
       description:
         'Return the nth Bernoulli number Bₙ as an exact rational, using the convention B₁ = -1/2. Odd `n > 1` give 0.',
       signature: '(integer) -> rational',
+      parameters: [
+        {
+          description:
+            'The index, at least 0; a negative one stays unevaluated.',
+          sample: '2',
+        },
+      ],
       broadcastable: true,
       examples: ['BernoulliB(2)  // 1/6'],
       evaluate: floatResultIfFloatOperand(
@@ -1793,7 +2082,19 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
     EulerE: {
       description:
         'Return the nth Euler number Eₙ (1, 0, -1, 0, 5, 0, -61, …) for `EulerE(n)`, or the Euler polynomial Eₙ(x) for `EulerE(n, x)`. Odd-index Euler numbers are 0. Eₙ = 2ⁿ·Eₙ(1/2). A negative or non-integer `n` stays symbolic.',
-      signature: '(integer, number?) -> number',
+      signature: '(n: integer, x: number?) -> number',
+      parameters: {
+        n: {
+          description:
+            'The index, at least 0; a negative one stays unevaluated.',
+          sample: '4',
+        },
+        x: {
+          description:
+            'The point at which the Euler polynomial is evaluated, a number or a symbol; without it the result is the Euler number.',
+          sample: '1/2',
+        },
+      },
       // An integer without the polynomial argument.
       type: ([, x], context) =>
         BoxedType.forResult(
@@ -1857,7 +2158,18 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
     FromDigits: {
       description:
         'Reconstruct a number from its digits (most-significant first) in the given `base` (default 10). The inverse of `IntegerDigits`. Digits outside `[0, base)` are combined positionally, and the base may be any number or symbol: `FromDigits([1, 1, 0], -2)` is 2 and `FromDigits([a, b, c], x)` is `a x^2 + b x + c`.',
-      signature: '(collection<any>, number?) -> number',
+      signature: '(digits: collection<any>, base: number?) -> number',
+      parameters: {
+        digits: {
+          description:
+            'The digits, most-significant first; an empty list gives 0.',
+          sample: '[1, 2, 3, 4]',
+        },
+        base: {
+          description: 'The base, 10 by default; any number or symbol.',
+          sample: '2',
+        },
+      },
       type: ([digitsOp, baseOp], context) =>
         BoxedType.forResult(
           fromDigitsIsInteger(digitsOp, baseOp) ? 'integer' : 'number',
@@ -1909,8 +2221,24 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
 
     DigitSum: {
       description:
-        'Return the sum of the digits of `n` in the given `base` (default 10). The sign of `n` is ignored. With a third argument `k`, sum only the first `k` digits (most-significant first), or the last `|k|` when `k` is negative; `k` past the digit count sums them all.',
-      signature: '(integer, integer?, integer?) -> integer',
+        'Return the sum of the digits of `n` in the given `base` (default 10). The sign of `n` is ignored. With a third argument `count`, sum only the first `count` digits (most-significant first), or the last `|count|` when `count` is negative; a `count` past the digit count sums them all.',
+      signature: '(n: integer, base: integer?, count: integer?) -> integer',
+      parameters: {
+        n: {
+          description:
+            'The integer whose digits are summed; its sign is ignored.',
+          sample: '1234',
+        },
+        base: {
+          description: 'The base, at least 2; 10 by default.',
+          sample: '10',
+        },
+        count: {
+          description:
+            'The number of digits summed, the first ones, or the last ones when it is negative.',
+          sample: '2',
+        },
+      },
       broadcastable: true,
       examples: ['DigitSum(1234)  // 10', 'DigitSum(1234, 10, 2)  // 3'],
       evaluate: floatResultIfFloatOperand(
@@ -1953,7 +2281,19 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
     DivisorSigma: {
       description:
         'The divisor function σ_k(n) = Σ_{d | n} dᵏ over the positive divisors of `n`. σ₀ counts divisors, σ₁ sums them. A negative `k` sums reciprocal powers, a rational: `DivisorSigma(-1, 12)` is 7/3. The sign of `n` is ignored, as for `Divisors` and `PrimeOmega`; `DivisorSigma(k, 0)` is undefined.',
-      signature: '(integer, integer) -> rational',
+      signature: '(k: integer, n: integer) -> rational',
+      parameters: {
+        k: {
+          description:
+            'The power of each divisor; 0 counts the divisors, and a negative one sums reciprocal powers.',
+          sample: '2',
+        },
+        n: {
+          description:
+            'The integer whose positive divisors are summed; its sign is ignored, and 0 stays unevaluated.',
+          sample: '6',
+        },
+      },
       // An integer for `k ≥ 0`, a rational below.
       type: ([k], context) =>
         BoxedType.forResult(
@@ -2000,7 +2340,18 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
     JacobiSymbol: {
       description:
         'The Jacobi symbol (a/n) for an odd `n > 0`. Returns -1, 0, or 1. Undefined when `n` is even or non-positive.',
-      signature: '(integer, integer) -> integer',
+      signature: '(a: integer, n: integer) -> integer',
+      parameters: {
+        a: {
+          description: 'The integer on top of the symbol.',
+          sample: '5',
+        },
+        n: {
+          description:
+            'The odd positive integer at the bottom of the symbol; another one stays unevaluated.',
+          sample: '21',
+        },
+      },
       broadcastable: true,
       examples: ['JacobiSymbol(5, 21)  // 1'],
       evaluate: floatResultIfFloatOperand(([aOp, nOp], { engine: ce }) => {
@@ -2015,7 +2366,19 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
     LegendreSymbol: {
       description:
         'The Legendre symbol (a/p) for an odd prime `p`. Returns -1, 0, or 1. Undefined when `p` is not an odd prime.',
-      signature: '(integer, integer) -> integer',
+      signature: '(a: integer, p: integer) -> integer',
+      parameters: {
+        a: {
+          description:
+            'The integer on top of the symbol; 0 when `p` divides it.',
+          sample: '3',
+        },
+        p: {
+          description:
+            'The odd prime at the bottom of the symbol; another integer stays unevaluated.',
+          sample: '7',
+        },
+      },
       broadcastable: true,
       examples: ['LegendreSymbol(3, 7)  // -1'],
       evaluate: floatResultIfFloatOperand(([aOp, pOp], { engine: ce }) => {
@@ -2030,7 +2393,24 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
     MultiplicativeOrder: {
       description:
         'The multiplicative order of `a` modulo `n`: the smallest `k > 0` such that `a^k ≡ 1 (mod n)`. Undefined unless `a` and `n` are coprime. With a list of residues, `MultiplicativeOrder(a, n, [r1, r2, …])` is the smallest `k > 0` such that `a^k ≡ r_i (mod n)` for some `i` (a discrete logarithm), and is undefined when no `r_i` is a power of `a`. The sign of `n` is ignored. Undefined for `n = 0`.',
-      signature: '(integer, integer, list<integer>?) -> integer',
+      signature:
+        '(a: integer, modulus: integer, residues: list<integer>?) -> integer',
+      parameters: {
+        a: {
+          description: 'The base whose powers are taken.',
+          sample: '2',
+        },
+        modulus: {
+          description:
+            'The modulus; its sign is ignored, and 0 stays unevaluated.',
+          sample: '7',
+        },
+        residues: {
+          description:
+            'The target residues: the result is the least `k > 0` with `a^k` congruent to one of them; by default, 1.',
+          sample: '[3, 11]',
+        },
+      },
       examples: [
         'MultiplicativeOrder(2, 7)  // 3',
         'MultiplicativeOrder(5, 7, [3, 11])  // 2',
@@ -2085,6 +2465,13 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
       signature: '(integer) -> integer',
       broadcastable: true,
       examples: ['PrimitiveRoot(7)  // 3'],
+      parameters: [
+        {
+          description:
+            'The modulus. Its sign is ignored; it stays unevaluated at 0.',
+          sample: '7',
+        },
+      ],
       evaluate: floatResultIfFloatOperand(([nOp], { engine: ce }) => {
         const n0 = toBigint(nOp);
         if (n0 === null || n0 === 0n) return undefined;
@@ -2122,6 +2509,13 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
       description:
         'The sorted list of all primitive roots modulo `n`: the generators of the multiplicative group of integers mod `n`. The list is empty when there is none (unless `n` is 1, 2, 4, pᵏ, or 2pᵏ for an odd prime p), and for `n = 0`. `PrimitiveRootList(1)` is `[0]`, as `PrimitiveRoot(1)` is 0. The sign of `n` is ignored. Undefined when `n` cannot be factored or there are too many roots to list.',
       signature: '(integer) -> list<integer>',
+      parameters: [
+        {
+          description:
+            'The modulus. Its sign is ignored; 0 gives the empty list.',
+          sample: '7',
+        },
+      ],
       broadcastable: true,
       examples: [
         'PrimitiveRootList(7)  // [3, 5]',
@@ -2142,7 +2536,18 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
     RationalReconstruction: {
       description:
         "The rational `p/q` with `p ≡ a·q (mod m)` and `|p|, q ≤ ⌊√((m − 1)/2)⌋`, the unique such fraction in lowest terms when it exists (Wang's algorithm). Undefined for `m < 1` or when there is none.",
-      signature: '(integer, integer) -> rational',
+      signature: '(a: integer, modulus: integer) -> rational',
+      parameters: {
+        a: {
+          description: 'The residue to reconstruct.',
+          sample: '6',
+        },
+        modulus: {
+          description:
+            'The modulus `m`, at least 1; it bounds the numerator and the denominator by the square root of `(m - 1)/2`.',
+          sample: '11',
+        },
+      },
       broadcastable: true,
       examples: ['RationalReconstruction(6, 11)  // 1/2'],
       evaluate: floatResultIfFloatOperand(
@@ -2162,7 +2567,22 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
     DirichletCharacter: {
       description:
         "The Dirichlet character χ_j(n) modulo `k`, the `j`-th of the φ(k) characters (Wolfram's indexing, `j = 1` the principal character). Zero where gcd(n, k) > 1; otherwise a root of unity.",
-      signature: '(integer, integer, integer) -> number',
+      signature: '(k: integer, j: integer, n: integer) -> number',
+      parameters: {
+        k: {
+          description: 'The modulus of the character, at least 1.',
+          sample: '5',
+        },
+        j: {
+          description:
+            'The index of the character, from 1 (the principal character) to φ(k); another one stays unevaluated.',
+          sample: '2',
+        },
+        n: {
+          description: 'The integer at which the character is evaluated.',
+          sample: '2',
+        },
+      },
       broadcastable: true,
       examples: [
         'DirichletCharacter(5, 2, 2)  // i',
@@ -2191,7 +2611,22 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
     DirichletL: {
       description:
         'The Dirichlet L-function L(s, χ) = Σ χ(n)/nˢ (n ≥ 1) of the character χ_j modulo `k` (`DirichletCharacter(k, j, ·)`): `k^(−s) Σ_{r=1}^{k} χ(r) ζ(s, r/k)`. Entire for a non-principal character; the principal one is `ζ(s) Π_{p|k} (1 − p^(−s))`.',
-      signature: '(integer, integer, number) -> number',
+      signature: '(k: integer, j: integer, s: number) -> number',
+      parameters: {
+        k: {
+          description: 'The modulus of the character, at least 1.',
+          sample: '4',
+        },
+        j: {
+          description:
+            'The index of the character, from 1 (the principal character) to φ(k).',
+          sample: '2',
+        },
+        s: {
+          description: 'The point at which the L-function is evaluated.',
+          sample: '2',
+        },
+      },
       broadcastable: true,
       examples: [
         'DirichletL(1, 1, 2)  // π²/6',
@@ -2215,6 +2650,14 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
       description:
         'The nth prime number. `PrimeNumber` is an alias for `NthPrime`, which is the preferred name.',
       signature: '(integer) -> integer',
+      parameters: [
+        {
+          description:
+            'The rank of the prime, from 1; it stays unevaluated below 1.',
+          sample: '10',
+        },
+      ],
+      examples: ['PrimeNumber(10)  // 29'],
       broadcastable: true,
       // `ce.function()` validates the operands against the `NthPrime`
       // signature, so the alias fails where `NthPrime` fails. `_fn()` skipped
@@ -2236,6 +2679,14 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
       // at runtime, because a symbolic operand reaches it undecided
       // (`toBigint` COERCES via rounding, so the gate must come first).
       signature: '(integer) -> integer',
+      parameters: [
+        {
+          description:
+            'The integer `n`; φ(0) is 0, and the sign of `n` is ignored.',
+          sample: '12',
+        },
+      ],
+      examples: ['Totient(12)  // 4', 'Totient(36)  // 12'],
       broadcastable: true,
       evaluate: floatResultIfFloatOperand(([n], { engine: ce }) => {
         // Runtime integrality guard. The `integer` signature refuses a
@@ -2262,6 +2713,13 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
       description:
         "`EulerPhi` is an alias for `Totient`, which is the preferred name. Euler's totient function φ(n): count of positive integers ≤ n that are coprime to n, for n ≥ 1; φ(0) = 0 and φ(−n) = φ(n).",
       signature: '(integer) -> integer',
+      parameters: [
+        {
+          description:
+            'The integer whose totient is computed; its sign is ignored, and φ(0) is 0.',
+          sample: '12',
+        },
+      ],
       broadcastable: true,
       examples: ['EulerPhi(12)  // 4'],
       canonical: (ops, { engine: ce }) => ce.function('Totient', ops),
@@ -2270,6 +2728,14 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
     Sigma0: {
       description: 'Number of positive divisors of n.',
       signature: '(integer) -> integer',
+      parameters: [
+        {
+          description:
+            'The integer whose divisors are taken; it stays unevaluated below 1.',
+          sample: '12',
+        },
+      ],
+      examples: ['Sigma0(12)  // 6'],
       broadcastable: true,
       evaluate: floatResultIfFloatOperand(([n], { engine: ce }) => {
         const k = toBigint(n);
@@ -2281,6 +2747,14 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
     Sigma1: {
       description: 'Sum of positive divisors of n.',
       signature: '(integer) -> integer',
+      parameters: [
+        {
+          description:
+            'The integer whose divisors are taken; it stays unevaluated below 1.',
+          sample: '12',
+        },
+      ],
+      examples: ['Sigma1(12)  // 28', 'Sigma1(6)  // 12'],
       broadcastable: true,
       evaluate: floatResultIfFloatOperand(([n], { engine: ce }) => {
         const k = toBigint(n);
@@ -2292,6 +2766,14 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
     SigmaMinus1: {
       description: 'Sum of reciprocals of positive divisors of n.',
       signature: '(integer) -> rational',
+      parameters: [
+        {
+          description:
+            'The integer whose divisors are taken; it stays unevaluated below 1.',
+          sample: '12',
+        },
+      ],
+      examples: ['SigmaMinus1(12)  // 7/3', 'SigmaMinus1(6)  // 2'],
       broadcastable: true,
       evaluate: floatResultIfFloatOperand(
         ([n], { engine: ce, numericApproximation }) => {
@@ -2311,6 +2793,13 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
       description:
         'Returns "True" if n is a perfect number, a positive integer which equals the sum of all its divisors.',
       signature: '(integer) -> boolean',
+      parameters: [
+        {
+          description: 'The integer to test; one below 1 is not perfect.',
+          sample: '28',
+        },
+      ],
+      examples: ['IsPerfect(28)  // "True"'],
       broadcastable: true,
       evaluate: ([n], { engine: ce }) => {
         const k = toBigint(n);
@@ -2327,7 +2816,19 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
     Eulerian: {
       description:
         'Eulerian number A(n, m): number of permutations of {1..n} with exactly m ascents.',
-      signature: '(integer, integer) -> integer',
+      signature: '(n: integer, m: integer) -> integer',
+      parameters: {
+        n: {
+          description: 'The number of elements permuted, at least 0.',
+          sample: '4',
+        },
+        m: {
+          description:
+            'The number of ascents, at least 0; the value is 0 from `m = n` on (for `n ≥ 1`).',
+          sample: '1',
+        },
+      },
+      examples: ['Eulerian(4, 1)  // 11', 'Eulerian(5, 2)  // 66'],
       broadcastable: true,
       evaluate: floatResultIfFloatOperand(([n, m], { engine: ce }) => {
         const nn = toBigint(n);
@@ -2378,7 +2879,19 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
     Stirling: {
       description:
         'Stirling number of the second kind S(n, m): ways to partition n elements into m non-empty subsets.',
-      signature: '(integer, integer) -> integer',
+      signature: '(n: integer, m: integer) -> integer',
+      parameters: {
+        n: {
+          description: 'The number of elements, at least 0.',
+          sample: '5',
+        },
+        m: {
+          description:
+            'The number of subsets, at least 0; past `n` the value is 0.',
+          sample: '2',
+        },
+      },
+      examples: ['Stirling(5, 2)  // 15'],
       broadcastable: true,
       evaluate: floatResultIfFloatOperand(([n, m], { engine: ce }) => {
         const nn = toBigint(n);
@@ -2434,8 +2947,19 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
     // signature, so the alias fails where `Stirling` fails.
     StirlingS2: {
       description:
-        '`StirlingS2` is an alias for `Stirling`, which is the preferred name. Returns the Stirling number of the second kind S(n, k).',
-      signature: '(integer, integer) -> integer',
+        '`StirlingS2` is an alias for `Stirling`, which is the preferred name. Returns the Stirling number of the second kind S(n, m).',
+      signature: '(n: integer, m: integer) -> integer',
+      parameters: {
+        n: {
+          description: 'The number of elements, at least 0.',
+          sample: '5',
+        },
+        m: {
+          description:
+            'The number of subsets, at least 0; past `n` the value is 0.',
+          sample: '2',
+        },
+      },
       broadcastable: true,
       examples: ['StirlingS2(6, 3)  // 90'],
       canonical: (ops, { engine: ce }) => ce.function('Stirling', ops),
@@ -2444,7 +2968,18 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
     StirlingS1: {
       description:
         'Signed Stirling number of the first kind s(n, m): the coefficient of x^m in the falling factorial x(x−1)…(x−n+1). Its absolute value counts the permutations of n elements with exactly m disjoint cycles.',
-      signature: '(integer, integer) -> integer',
+      signature: '(n: integer, m: integer) -> integer',
+      parameters: {
+        n: {
+          description: 'The number of elements, at least 0.',
+          sample: '5',
+        },
+        m: {
+          description:
+            'The number of cycles, at least 0; past `n` the value is 0.',
+          sample: '2',
+        },
+      },
       broadcastable: true,
       examples: ['StirlingS1(5, 2)  // -50'],
       evaluate: floatResultIfFloatOperand(([n, m], { engine: ce }) => {
@@ -2494,6 +3029,13 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
       description:
         'Number of integer partitions of n, for n ≥ 0; it is 0 for n < 0.',
       signature: '(integer) -> integer',
+      parameters: [
+        {
+          description: 'The integer to partition; a negative one gives 0.',
+          sample: '5',
+        },
+      ],
+      examples: ['NPartition(5)  // 7', 'NPartition(10)  // 42'],
       broadcastable: true,
       evaluate: floatResultIfFloatOperand(([n], { engine: ce }) => {
         // `toBigint` rounds a non-integer, so the integrality test comes
@@ -2543,6 +3085,12 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
       signature: '(integer) -> integer',
       broadcastable: true,
       examples: ['PartitionsQ(10)  // 10'],
+      parameters: [
+        {
+          description: 'The integer to partition; a negative one gives 0.',
+          sample: '10',
+        },
+      ],
       evaluate: floatResultIfFloatOperand(([n], { engine: ce }) => {
         // The integrality test comes first, as for `NPartition`: `toBigint`
         // rounds a non-integer.
@@ -2594,12 +3142,25 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
       signature: '(integer) -> integer',
       broadcastable: true,
       examples: ['PartitionsP(5)  // 7'],
+      parameters: [
+        {
+          description: 'The integer to partition; a negative one gives 0.',
+          sample: '5',
+        },
+      ],
       canonical: (ops, { engine: ce }) => ce.function('NPartition', ops),
     },
 
     IsTriangular: {
       description: 'True if n is a triangular number.',
       signature: '(integer) -> boolean',
+      parameters: [
+        {
+          description: 'The integer to test; one below 1 is not triangular.',
+          sample: '10',
+        },
+      ],
+      examples: ['IsTriangular(10)  // "True"'],
       broadcastable: true,
       evaluate: ([n], { engine: ce }) => {
         // An operand that is not a number literal (a symbol, an unevaluated
@@ -2620,6 +3181,14 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
     IsSquare: {
       description: 'True if n is a perfect square.',
       signature: '(integer) -> boolean',
+      parameters: [
+        {
+          description:
+            'The integer to test; 0 is a square, a negative integer is not.',
+          sample: '49',
+        },
+      ],
+      examples: ['IsSquare(49)  // "True"'],
       broadcastable: true,
       evaluate: ([n], { engine: ce }) => {
         // An operand that is not a number literal (a symbol, an unevaluated
@@ -2637,6 +3206,13 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
     IsOctahedral: {
       description: 'True if n is an octahedral number.',
       signature: '(integer) -> boolean',
+      parameters: [
+        {
+          description: 'The integer to test; one below 1 is not octahedral.',
+          sample: '19',
+        },
+      ],
+      examples: ['IsOctahedral(19)  // "True"'],
       broadcastable: true,
       evaluate: ([n], { engine: ce }) => {
         // An operand that is not a number literal (a symbol, an unevaluated
@@ -2669,6 +3245,14 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
       description:
         'True if n is a centered square number, n = t² + (t + 1)² for an integer t ≥ 0: 1, 5, 13, 25, 41, ...',
       signature: '(integer) -> boolean',
+      parameters: [
+        {
+          description:
+            'The integer to test; one below 1 is not a centered square.',
+          sample: '25',
+        },
+      ],
+      examples: ['IsCenteredSquare(25)  // "True"'],
       broadcastable: true,
       evaluate: ([n], { engine: ce }) => {
         // An operand that is not a number literal (a symbol, an unevaluated
@@ -2692,6 +3276,13 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
       description:
         'True if n is a happy number, a number which eventually reaches 1 when the number is replaced by the sum of the square of each digit',
       signature: '(integer) -> boolean',
+      parameters: [
+        {
+          description: 'The integer to test; one below 1 is not happy.',
+          sample: '19',
+        },
+      ],
+      examples: ['IsHappy(19)  // "True"', 'IsHappy(4)  // "False"'],
       broadcastable: true,
       evaluate: ([n], { engine: ce }) => {
         const seen = new Set<bigint>();
@@ -2716,6 +3307,13 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
     IsAbundant: {
       description: 'True if n is an abundant number (sum of divisors > 2n).',
       signature: '(integer) -> boolean',
+      parameters: [
+        {
+          description: 'The integer to test; one below 1 is not abundant.',
+          sample: '12',
+        },
+      ],
+      examples: ['IsAbundant(12)  // "True"'],
       broadcastable: true,
       evaluate: ([n], { engine: ce }) => {
         // An operand that is not a number literal (a symbol, an unevaluated

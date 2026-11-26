@@ -691,23 +691,23 @@ The [Number theory reference](/epsil/reference/number-theory/) has the full desc
 | `bernoulliB` | `BernoulliB` | `(integer) -> rational` | Return the nth Bernoulli number Bₙ as an exact rational, using the convention B₁ = -1/2. |
 | `carmichaelLambda` | `CarmichaelLambda` | `(integer) -> integer` | Return the Carmichael function λ(n) (the reduced totient): the smallest positive integer `m` such that `a^m ≡ 1 (mod n)` for every `a` coprime to `n`. |
 | `catalanNumber` | `CatalanNumber` | `(real) -> number` | Return the nth Catalan number `C(n) = (2n)! / ((n+1)! · n!)`: 1, 1, 2, 5, 14, 42, … Defined for `n ≥ 0`. |
-| `chineseRemainder` | `ChineseRemainder` | `(collection<any>, collection<any>, integer?) -> integer` | Solve a system of simultaneous congruences: return the smallest non-negative integer `x` such that `x ≡ residues[i] (mod moduli[i])` for every `i`. |
-| `continuedFraction` | `ContinuedFraction` | `(real, integer?) -> list<integer \| list<integer>>` | Return the continued-fraction expansion of `x` as a list of integer terms `[a0, a1, …]`. |
-| `digitCount` | `DigitCount` | `(integer, integer?, integer?, integer?) -> integer \| list<integer>` | Count digits of `n` in the given `base` (default 10); the sign of `n` is ignored. |
-| `digitSum` | `DigitSum` | `(integer, integer?, integer?) -> integer` | Return the sum of the digits of `n` in the given `base` (default 10). |
-| `dirichletCharacter` | `DirichletCharacter` | `(integer, integer, integer) -> number` | The Dirichlet character χ_j(n) modulo `k`, the `j`-th of the φ(k) characters (Wolfram's indexing, `j = 1` the principal character). |
-| `dirichletL` | `DirichletL` | `(integer, integer, number) -> number` | The Dirichlet L-function L(s, χ) = Σ χ(n)/nˢ (n ≥ 1) of the character χ_j modulo `k` (`dirichletCharacter(k, j, ·)`): `k^(−s) Σ_{r=1}^{k} χ(r) ζ(s, r/k)`. |
+| `chineseRemainder` | `ChineseRemainder` | `(residues: collection<any>, moduli: collection<any>, lower: integer?) -> integer` | Solve a system of simultaneous congruences: return the smallest non-negative integer `x` such that `x ≡ residues[i] (mod moduli[i])` for every `i`. |
+| `continuedFraction` | `ContinuedFraction` | `(x: real, count: integer?) -> list<integer \| list<integer>>` | Return the continued-fraction expansion of `x` as a list of integer terms `[a0, a1, …]`. |
+| `digitCount` | `DigitCount` | `(n: integer, base: integer?, digit: integer?, length: integer?) -> integer \| list<integer>` | Count digits of `n` in the given `base` (default 10); the sign of `n` is ignored. |
+| `digitSum` | `DigitSum` | `(n: integer, base: integer?, count: integer?) -> integer` | Return the sum of the digits of `n` in the given `base` (default 10). |
+| `dirichletCharacter` | `DirichletCharacter` | `(k: integer, j: integer, n: integer) -> number` | The Dirichlet character χ_j(n) modulo `k`, the `j`-th of the φ(k) characters (Wolfram's indexing, `j = 1` the principal character). |
+| `dirichletL` | `DirichletL` | `(k: integer, j: integer, s: number) -> number` | The Dirichlet L-function L(s, χ) = Σ χ(n)/nˢ (n ≥ 1) of the character χ_j modulo `k` (`dirichletCharacter(k, j, ·)`): `k^(−s) Σ_{r=1}^{k} χ(r) ζ(s, r/k)`. |
 | `divides` | `Divides` | `(integer, integer) -> boolean` | `divides(a, b)` returns `True` if `a` divides `b` (i.e. |
-| `divisorSigma` | `DivisorSigma` | `(integer, integer) -> rational` | The divisor function σ_k(n) = Σ_&#123;d \| n&#125; dᵏ over the positive divisors of `n`. σ₀ counts divisors, σ₁ sums them. |
+| `divisorSigma` | `DivisorSigma` | `(k: integer, n: integer) -> rational` | The divisor function σ_k(n) = Σ_&#123;d \| n&#125; dᵏ over the positive divisors of `n`. σ₀ counts divisors, σ₁ sums them. |
 | `divisors` | `Divisors` | `(integer) -> list<integer>` | Return the sorted list of positive divisors of an integer `n`. |
-| `eulerE` | `EulerE` | `(integer, number?) -> number` | Return the nth Euler number Eₙ (1, 0, -1, 0, 5, 0, -61, …) for `eulerE(n)`, or the Euler polynomial Eₙ(x) for `eulerE(n, x)`. |
+| `eulerE` | `EulerE` | `(n: integer, x: number?) -> number` | Return the nth Euler number Eₙ (1, 0, -1, 0, 5, 0, -61, …) for `eulerE(n)`, or the Euler polynomial Eₙ(x) for `eulerE(n, x)`. |
 | `eulerPhi` | `EulerPhi` | `(integer) -> integer` | `eulerPhi` is an alias for `totient`, which is the preferred name. |
-| `eulerian` | `Eulerian` | `(integer, integer) -> integer` | Eulerian number A(n, m): number of permutations of &#123;1..n&#125; with exactly m ascents. |
+| `eulerian` | `Eulerian` | `(n: integer, m: integer) -> integer` | Eulerian number A(n, m): number of permutations of &#123;1..n&#125; with exactly m ascents. |
 | `extendedGCD` | `ExtendedGCD` | `(integer, integer, integer*) -> tuple` | Return the extended GCD of `a` and `b` as a tuple `(g, x, y)` where `g = gcd(a, b)` is non-negative and `a·x + b·y = g` (Bézout coefficients). |
 | `factorInteger` | `FactorInteger` | `(rational) -> list<tuple<integer, integer>>` | Return the prime factorization of an integer `n` as a list of `[prime, exponent]` tuples, ordered by ascending prime. |
 | `fromContinuedFraction` | `FromContinuedFraction` | `(collection<any>) -> number` | Reconstruct the value of a continued fraction given its list of integer terms `[a0, a1, …]`. |
-| `fromDigits` | `FromDigits` | `(collection<any>, number?) -> number` | Reconstruct a number from its digits (most-significant first) in the given `base` (default 10). |
-| `integerDigits` | `IntegerDigits` | `(integer, integer?, integer?) -> list<integer>` | Return the digits of `n` in the given `base` (default 10), most-significant first. |
+| `fromDigits` | `FromDigits` | `(digits: collection<any>, base: number?) -> number` | Reconstruct a number from its digits (most-significant first) in the given `base` (default 10). |
+| `integerDigits` | `IntegerDigits` | `(n: integer, base: integer?, length: integer?) -> list<integer>` | Return the digits of `n` in the given `base` (default 10), most-significant first. |
 | `integerSqrt` | `IntegerSqrt` | `(integer) -> integer` | Return the integer square root of `n`, i.e. the largest integer `m` such that `m² ≤ n`. |
 | `isAbundant` | `IsAbundant` | `(integer) -> boolean` | True if n is an abundant number (sum of divisors &gt; 2n). |
 | `isAlgebraicInteger` | `IsAlgebraicInteger` | `(number) -> boolean` | Whether a is an algebraic integer: a root of a monic polynomial over ℤ. |
@@ -719,16 +719,16 @@ The [Number theory reference](/epsil/reference/number-theory/) has the full desc
 | `isSquare` | `IsSquare` | `(integer) -> boolean` | True if n is a perfect square. |
 | `isSquareFree` | `IsSquareFree` | `(rational) -> boolean` | Return `"True"` if `n` is square-free (not divisible by any perfect square &gt; 1). |
 | `isTriangular` | `IsTriangular` | `(integer) -> boolean` | True if n is a triangular number. |
-| `jacobiSymbol` | `JacobiSymbol` | `(integer, integer) -> integer` | The Jacobi symbol (a/n) for an odd `n > 0`. |
-| `legendreSymbol` | `LegendreSymbol` | `(integer, integer) -> integer` | The Legendre symbol (a/p) for an odd prime `p`. |
+| `jacobiSymbol` | `JacobiSymbol` | `(a: integer, n: integer) -> integer` | The Jacobi symbol (a/n) for an odd `n > 0`. |
+| `legendreSymbol` | `LegendreSymbol` | `(a: integer, p: integer) -> integer` | The Legendre symbol (a/p) for an odd prime `p`. |
 | `lucas` | `Lucas` | `(integer) -> integer` | `lucas` is an alias for `lucasL`, which is the preferred name. |
 | `lucasL` | `LucasL` | `(integer) -> integer` | Return the nth Lucas number: `lucasL(0)` is 2, `lucasL(1)` is 1, and `LucasL(n) = LucasL(n-1) + LucasL(n-2)`. |
-| `minimalPolynomial` | `MinimalPolynomial` | `(number, any) -> expression` | The minimal polynomial of the algebraic number a in x: primitive over ℤ, positive leading coefficient. |
-| `modularInverse` | `ModularInverse` | `(integer, integer) -> integer` | Return the modular multiplicative inverse of `a` modulo `m`: the integer `x` with `a·x ≡ 1 (mod m)`. |
+| `minimalPolynomial` | `MinimalPolynomial` | `(a: number, variable: any) -> expression` | The minimal polynomial of the algebraic number a in x: primitive over ℤ, positive leading coefficient. |
+| `modularInverse` | `ModularInverse` | `(a: integer, modulus: integer) -> integer` | Return the modular multiplicative inverse of `a` modulo `m`: the integer `x` with `a·x ≡ 1 (mod m)`. |
 | `moebiusMu` | `MoebiusMu` | `(integer) -> integer` | Return the Möbius function μ(n): 0 if `n` is divisible by a perfect square &gt; 1, otherwise (-1) raised to the number of distinct prime factors. |
-| `multiplicativeOrder` | `MultiplicativeOrder` | `(integer, integer, list<integer>?) -> integer` | The multiplicative order of `a` modulo `n`: the smallest `k > 0` such that `a^k ≡ 1 (mod n)`. |
+| `multiplicativeOrder` | `MultiplicativeOrder` | `(a: integer, modulus: integer, residues: list<integer>?) -> integer` | The multiplicative order of `a` modulo `n`: the smallest `k > 0` such that `a^k ≡ 1 (mod n)`. |
 | `nPartition` | `NPartition` | `(integer) -> integer` | Number of integer partitions of n, for n ≥ 0; it is 0 for n &lt; 0. |
-| `nextPrime` | `NextPrime` | `(real, integer?) -> integer` | Return the smallest prime greater than `n`. |
+| `nextPrime` | `NextPrime` | `(n: real, k: integer?) -> integer` | Return the smallest prime greater than `n`. |
 | `notDivides` | `NotDivides` | `(integer, integer) -> boolean` | `notDivides(a, b)` returns `True` if `a` does not divide `b`, corresponding to the notation `a ∤ b`. |
 | `nthPrime` | `NthPrime` | `(integer) -> integer` | Return the nth prime number (1-based): `nthPrime(1)` is 2, `nthPrime(2)` is 3, … |
 | `numberFieldDiscriminant` | `NumberFieldDiscriminant` | `(number) -> integer` | The discriminant of the field ℚ(a): of its ring of integers. |
@@ -736,9 +736,9 @@ The [Number theory reference](/epsil/reference/number-theory/) has the full desc
 | `numberFieldSignature` | `NumberFieldSignature` | `(number) -> list<integer>` | The signature (r₁, r₂) of ℚ(a): its real embeddings and its pairs of complex ones. |
 | `partitionsP` | `PartitionsP` | `(integer) -> integer` | `partitionsP` is an alias for `nPartition`, which is the preferred name. |
 | `partitionsQ` | `PartitionsQ` | `(integer) -> integer` | Number of partitions of n into distinct parts (equivalently, into odd parts), q(n); it is 0 for n &lt; 0. |
-| `polynomialRoot` | `PolynomialRoot` | `(any, any, integer?) -> number` | The root of the polynomial p in the variable x (bound, as in Wolfram's Root[Function[x, p], k]). |
-| `powerMod` | `PowerMod` | `(list<rational> \| rational, list<rational> \| rational, integer \| list<integer>) -> integer \| list<integer>` | Return `a^b mod m` (modular exponentiation). |
-| `powerModList` | `PowerModList` | `(list<rational> \| rational, list<rational> \| rational, integer \| list<integer>) -> list<integer> \| list<list<integer>>` | Return the sorted list of every `x` in [0, m) with `x^r ≡ a^s (mod m)`, for the exponent `s/r`. |
+| `polynomialRoot` | `PolynomialRoot` | `(polynomial: any, variable: any, index: integer?) -> number` | The root of the polynomial p in the variable x (bound, as in Wolfram's Root[Function[x, p], k]). |
+| `powerMod` | `PowerMod` | `(base: list<rational> \| rational, exponent: list<rational> \| rational, modulus: integer \| list<integer>) -> integer \| list<integer>` | Return `a^b mod m` (modular exponentiation). |
+| `powerModList` | `PowerModList` | `(base: list<rational> \| rational, exponent: list<rational> \| rational, modulus: integer \| list<integer>) -> list<integer> \| list<list<integer>>` | Return the sorted list of every `x` in [0, m) with `x^r ≡ a^s (mod m)`, for the exponent `s/r`. |
 | `primeFactors` | `PrimeFactors` | `(integer) -> list<integer>` | Return the sorted list of distinct prime factors of an integer `n`. |
 | `primeNu` | `PrimeNu` | `(integer) -> integer` | Return ω(n), the number of distinct prime factors of `n`. |
 | `primeNumber` | `PrimeNumber` | `(integer) -> integer` | The nth prime number. |
@@ -748,13 +748,13 @@ The [Number theory reference](/epsil/reference/number-theory/) has the full desc
 | `primitiveRootList` | `PrimitiveRootList` | `(integer) -> list<integer>` | The sorted list of all primitive roots modulo `n`: the generators of the multiplicative group of integers mod `n`. |
 | `radical` | `Radical` | `(integer) -> integer` | Return the radical of `n` (its square-free kernel): the product of its distinct prime factors. |
 | `randomPrime` | `RandomPrime` | `(integer, integer?) random -> integer` | Return a random prime. |
-| `rationalReconstruction` | `RationalReconstruction` | `(integer, integer) -> rational` | The rational `p/q` with `p ≡ a·q (mod m)` and `\|p\|, q ≤ ⌊√((m − 1)/2)⌋`, the unique such fraction in lowest terms when it exists (Wang's algorithm). |
+| `rationalReconstruction` | `RationalReconstruction` | `(a: integer, modulus: integer) -> rational` | The rational `p/q` with `p ≡ a·q (mod m)` and `\|p\|, q ≤ ⌊√((m − 1)/2)⌋`, the unique such fraction in lowest terms when it exists (Wang's algorithm). |
 | `sigma0` | `Sigma0` | `(integer) -> integer` | Number of positive divisors of n. |
 | `sigma1` | `Sigma1` | `(integer) -> integer` | Sum of positive divisors of n. |
 | `sigmaMinus1` | `SigmaMinus1` | `(integer) -> rational` | Sum of reciprocals of positive divisors of n. |
-| `stirling` | `Stirling` | `(integer, integer) -> integer` | Stirling number of the second kind S(n, m): ways to partition n elements into m non-empty subsets. |
-| `stirlingS1` | `StirlingS1` | `(integer, integer) -> integer` | Signed Stirling number of the first kind s(n, m): the coefficient of x^m in the falling factorial x(x−1)…(x−n+1). |
-| `stirlingS2` | `StirlingS2` | `(integer, integer) -> integer` | `stirlingS2` is an alias for `stirling`, which is the preferred name. |
+| `stirling` | `Stirling` | `(n: integer, m: integer) -> integer` | Stirling number of the second kind S(n, m): ways to partition n elements into m non-empty subsets. |
+| `stirlingS1` | `StirlingS1` | `(n: integer, m: integer) -> integer` | Signed Stirling number of the first kind s(n, m): the coefficient of x^m in the falling factorial x(x−1)…(x−n+1). |
+| `stirlingS2` | `StirlingS2` | `(n: integer, m: integer) -> integer` | `stirlingS2` is an alias for `stirling`, which is the preferred name. |
 | `totient` | `Totient` | `(integer) -> integer` | Euler's totient function φ(n): count of positive integers ≤ n that are coprime to n, for n ≥ 1; φ(0) = 0 and φ(−n) = φ(n). |
 
 ## Special functions
