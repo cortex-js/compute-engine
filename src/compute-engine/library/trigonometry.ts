@@ -366,6 +366,12 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
   {
     Degrees: {
       examples: ['Degrees(30)', 'Sin(Degrees(30))'],
+      parameters: [
+        {
+          description: 'The angle in degrees; it is not reduced modulo 360.',
+          sample: '30',
+        },
+      ],
       description: 'Convert an angle in degrees.',
       /* = Pi / 180 */
       signature: '(real) -> real',
@@ -486,13 +492,31 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
     // DMS(degrees, minutes?, seconds?) — programmatic angle construction
     DMS: {
       examples: ['DMS(30, 15)', 'N(DMS(30, 15))'],
+      parameters: {
+        degrees: {
+          description:
+            'The whole degrees of the angle; the minutes and seconds are added to it, also when it is negative.',
+          sample: '30',
+        },
+        minutes: {
+          description:
+            'The minutes of arc, 1/60 of a degree each; 0 by default.',
+          sample: '15',
+        },
+        seconds: {
+          description:
+            'The seconds of arc, 1/3600 of a degree each; 0 by default.',
+          sample: '30',
+        },
+      },
       description: 'Construct an angle from degrees, minutes, and seconds.',
       // A complex component cannot be folded and leaves the call
       // unevaluated rather than truncated (see the evaluate handler), so the
       // declaration admits it; the type handler claims `real` when every
       // component is provably real and the wide `number` otherwise, which
       // is what the declared result says.
-      signature: '(number, number?, number?) -> number',
+      signature:
+        '(degrees: number, minutes: number?, seconds: number?) -> number',
       broadcastable: true,
       type: (ops, context) =>
         BoxedType.forResult(
@@ -576,6 +600,13 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
     // Hypot: sqrt(x*x + y*y)
     Hypot: {
       examples: ['Hypot(3, 4)', 'Hypot(1, 1)'],
+      parameters: [
+        {
+          description: 'One leg; an infinite leg makes the result +∞.',
+          sample: '3',
+        },
+        { description: 'The other leg.', sample: '4' },
+      ],
       description: 'Hypotenuse length: sqrt(x^2 + y^2).',
       broadcastable: true,
       // The carrier is the finite reals plus EVERY infinity, because
@@ -728,6 +759,13 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
     // first in this preliminary section
     Sin: {
       examples: ['Sin(Pi / 6)', 'Sin(1)', 'N(Sin(1))'],
+      parameters: [
+        {
+          description:
+            'The angle, in radians (or in the angular unit of the engine).',
+          sample: 'pi / 6',
+        },
+      ],
       ...trigFunction('Sin', 5000, 'Sine of an angle.', 'complex'),
       keywords: ['sine'],
       // The carrier is the FINITE complex numbers: sine is entire but has
@@ -752,6 +790,13 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
     //
     Arctan: {
       examples: ['Arctan(1)', 'N(Arctan(2))'],
+      parameters: [
+        {
+          description:
+            'The tangent of the angle; ±∞ gives ±π/2 (in radians; the result is in the angular unit of the engine).',
+          sample: '1',
+        },
+      ],
       description: 'Inverse tangent.',
       keywords: ['atan'],
       wikidata: 'Q2257242',
@@ -886,6 +931,14 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
 
     Arctan2: {
       examples: ['Arctan2(1, -1)', 'Arctan2(-1, -1)'],
+      parameters: {
+        y: { description: 'The y coordinate of the point.', sample: '1' },
+        x: {
+          description:
+            'The x coordinate of the point; the result is the angle from the positive x axis, in (−π, π] in radians (in the angular unit of the engine), and 0 at the origin.',
+          sample: '-1',
+        },
+      },
       description: 'Two-argument arctangent giving the angle of a vector.',
       keywords: ['atan2'],
       wikidata: 'Q776598',
@@ -1018,6 +1071,13 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
 
     Cos: {
       examples: ['Cos(Pi / 3)', 'N(Cos(1))'],
+      parameters: [
+        {
+          description:
+            'The angle, in radians (or in the angular unit of the engine).',
+          sample: 'pi / 3',
+        },
+      ],
       // Like `Sin`: no value at any infinity (oscillates toward the real
       // infinities, no limit at `~oo`).
       ...trigFunction('Cos', 5050, 'Cosine of an angle.', 'complex'),
@@ -1026,6 +1086,13 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
 
     Tan: {
       examples: ['Tan(Pi / 3)', 'N(Tan(1))'],
+      parameters: [
+        {
+          description:
+            'The angle, in radians (or in the angular unit of the engine); an odd multiple of π/2 gives complex infinity.',
+          sample: 'pi / 4',
+        },
+      ],
       // No value at any infinity. The POLES (odd multiples of π/2) are
       // in-carrier finite points whose VALUE is `~oo` — the carrier
       // restricts arguments, not results.
@@ -1061,10 +1128,24 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
         'complex | signed_infinity'
       ),
       examples: ['Arcosh(1)', 'N(Arcosh(2))'],
+      parameters: [
+        {
+          description:
+            'The hyperbolic cosine of the result; below 1 the result is complex.',
+          sample: '2',
+        },
+      ],
     },
 
     Arcsin: {
       examples: ['Arcsin(1/2)', 'N(Arcsin(2))'],
+      parameters: [
+        {
+          description:
+            'The sine of the angle; outside [-1, 1] the result is complex.',
+          sample: '1 / 2',
+        },
+      ],
       ...trigFunction(
         'Arcsin',
         5500,
@@ -1093,6 +1174,12 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
         'complex | signed_infinity'
       ),
       examples: ['Arsinh(0)', 'N(Arsinh(1))'],
+      parameters: [
+        {
+          description: 'The hyperbolic sine of the result; ±∞ gives ±∞.',
+          sample: '1',
+        },
+      ],
     },
 
     // `Artanh(±∞) = ∓(π/2)i` — the imaginary asymptotes of the principal
@@ -1107,10 +1194,24 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
         'complex | signed_infinity'
       ),
       examples: ['Artanh(0)', 'N(Artanh(1/2))'],
+      parameters: [
+        {
+          description:
+            'The hyperbolic tangent of the result; ±1 gives ±∞, and outside [-1, 1] the result is complex.',
+          sample: '1 / 2',
+        },
+      ],
     },
 
     Cosh: {
       examples: ['Cosh(0)', 'N(Cosh(1))'],
+      parameters: [
+        {
+          description:
+            'The number; a real number gives a result of at least 1, and ±∞ gives +∞.',
+          sample: '1',
+        },
+      ],
       // `Cosh(±∞) = +∞`; no value at `~oo` (oscillates along the
       // imaginary directions).
       ...trigFunction(
@@ -1132,6 +1233,13 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
         'complex'
       ),
       examples: ['Cot(Pi / 6)', 'N(Cot(1))'],
+      parameters: [
+        {
+          description:
+            'The angle, in radians (or in the angular unit of the engine); a multiple of π gives complex infinity.',
+          sample: 'pi / 6',
+        },
+      ],
     },
 
     Csc: {
@@ -1143,6 +1251,13 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
       ),
       keywords: ['cosec', 'cosecant'],
       examples: ['Csc(Pi / 6)', 'N(Csc(1))'],
+      parameters: [
+        {
+          description:
+            'The angle, in radians (or in the angular unit of the engine); a multiple of π gives complex infinity.',
+          sample: 'pi / 6',
+        },
+      ],
     },
 
     Sec: {
@@ -1153,10 +1268,23 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
         'complex'
       ),
       examples: ['Sec(Pi / 3)', 'N(Sec(1))'],
+      parameters: [
+        {
+          description:
+            'The angle, in radians (or in the angular unit of the engine); an odd multiple of π/2 gives complex infinity.',
+          sample: 'pi / 3',
+        },
+      ],
     },
 
     Sinh: {
       examples: ['Sinh(0)', 'N(Sinh(1))'],
+      parameters: [
+        {
+          description: 'The number; ±∞ gives ±∞.',
+          sample: '1',
+        },
+      ],
       // `Sinh(±∞) = ±∞`; the two signs disagree, so no value at `~oo`.
       ...trigFunction(
         'Sinh',
@@ -1170,6 +1298,13 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
     /** = sin(z/2)^2 = (1 - cos z) / 2*/
     Haversine: {
       examples: ['Haversine(Pi / 3)', 'Haversine(x)'],
+      parameters: [
+        {
+          description:
+            'The angle, in radians (or in the angular unit of the engine); the result is (1 − cos(x))/2, in [0, 1].',
+          sample: 'pi / 3',
+        },
+      ],
       description: 'Haversine function.',
       wikidata: 'Q2528380',
       broadcastable: true,
@@ -1200,6 +1335,13 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
     /** = 2 * Arcsin(Sqrt(z)) */
     InverseHaversine: {
       examples: ['InverseHaversine(1/2)', 'N(InverseHaversine(1/4))'],
+      parameters: [
+        {
+          description:
+            'The haversine of the angle; inside [0, 1] the result is in [0, π] in radians (in the angular unit of the engine), and outside it the result is complex.',
+          sample: '1 / 2',
+        },
+      ],
       description: 'Inverse haversine function.',
       //  Range ['Interval', [['Negate', 'Pi'], 'Pi'],
       broadcastable: true,
@@ -1235,6 +1377,12 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
         'complex | signed_infinity'
       ),
       examples: ['N(Csch(1))'],
+      parameters: [
+        {
+          description: 'The number; 0 gives complex infinity, and ±∞ gives 0.',
+          sample: '1',
+        },
+      ],
     },
 
     Sech: {
@@ -1245,10 +1393,24 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
         'complex | signed_infinity'
       ),
       examples: ['Sech(0)', 'N(Sech(1))'],
+      parameters: [
+        {
+          description:
+            'The number; a real number gives a result in (0, 1], and ±∞ gives 0.',
+          sample: '1',
+        },
+      ],
     },
 
     Tanh: {
       examples: ['Tanh(0)', 'N(Tanh(1))'],
+      parameters: [
+        {
+          description:
+            'The number; a real number gives a result in (-1, 1), and ±∞ gives ±1.',
+          sample: '1',
+        },
+      ],
       // `Tanh(±∞) = ±1` (the horizontal asymptotes); the two signs
       // disagree, so no value at `~oo`.
       ...trigFunction(
@@ -1263,6 +1425,13 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
   {
     Arccos: {
       examples: ['Arccos(1/2)', 'N(Arccos(1/3))'],
+      parameters: [
+        {
+          description:
+            'The cosine of the angle; outside [-1, 1] the result is complex.',
+          sample: '1 / 2',
+        },
+      ],
       // Like `Arcsin`: extends to the whole finite complex plane but
       // diverges toward every infinity — no value at any of them.
       ...trigFunction(
@@ -1286,6 +1455,13 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
         'complex | signed_infinity'
       ),
       examples: ['N(Arccot(1))', 'N(Arccot(-1))'],
+      parameters: [
+        {
+          description:
+            'The cotangent of the angle; the result is in (0, π) in radians (in the angular unit of the engine), with 0 at +∞ and π at −∞.',
+          sample: '1',
+        },
+      ],
     },
 
     // Arcoth/Arcsch/Arcsec/Arccsc admit EVERY infinity (ruled
@@ -1301,6 +1477,13 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
         'complex | infinity'
       ),
       examples: ['N(Arcoth(2))'],
+      parameters: [
+        {
+          description:
+            'The hyperbolic cotangent of the result; ±1 gives ±∞, and inside (-1, 1) the result is complex.',
+          sample: '2',
+        },
+      ],
     },
 
     Arcsch: {
@@ -1311,6 +1494,13 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
         'complex | infinity'
       ),
       examples: ['N(Arcsch(1))'],
+      parameters: [
+        {
+          description:
+            'The hyperbolic cosecant of the result; 0 gives complex infinity.',
+          sample: '1',
+        },
+      ],
     },
 
     Arcsec: {
@@ -1321,6 +1511,13 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
         'complex | infinity'
       ),
       examples: ['Arcsec(2)', 'N(Arcsec(3))'],
+      parameters: [
+        {
+          description:
+            'The secant of the angle; inside (-1, 1) the result is complex, and 0 has no value (an exact 0 stays unevaluated, a numeric 0 gives NaN).',
+          sample: '2',
+        },
+      ],
     },
 
     // `Arsech(±∞) = (π/2)i` — both real approaches give `arcosh(0)`
@@ -1335,6 +1532,13 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
         'complex | signed_infinity'
       ),
       examples: ['Arsech(1)', 'N(Arsech(1/2))'],
+      parameters: [
+        {
+          description:
+            'The hyperbolic secant of the result; 0 gives +∞, and outside [0, 1] the result is complex.',
+          sample: '1 / 2',
+        },
+      ],
     },
 
     Arccsc: {
@@ -1345,6 +1549,13 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
         'complex | infinity'
       ),
       examples: ['Arccsc(2)', 'N(Arccsc(3))'],
+      parameters: [
+        {
+          description:
+            'The cosecant of the angle; inside (-1, 1) the result is complex, and 0 has no value (an exact 0 stays unevaluated, a numeric 0 gives NaN).',
+          sample: '2',
+        },
+      ],
     },
 
     // `Coth(±∞) = ±1`; the two signs disagree, so no value at `~oo`.
@@ -1356,6 +1567,12 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
         'complex | signed_infinity'
       ),
       examples: ['N(Coth(1))'],
+      parameters: [
+        {
+          description: 'The number; 0 gives complex infinity, and ±∞ gives ±1.',
+          sample: '1',
+        },
+      ],
     },
 
     //
@@ -1375,6 +1592,12 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
     /** sinc(x) = sin(x)/x with sinc(0) = 1 (unnormalized cardinal sine) */
     Sinc: {
       examples: ['Sinc(0)', 'N(Sinc(1))'],
+      parameters: [
+        {
+          description: 'The number; 0 gives 1, and ±∞ gives 0.',
+          sample: 'pi / 2',
+        },
+      ],
       description: 'Unnormalized sinc function: sin(x)/x with sinc(0)=1.',
       complexity: 5100,
       broadcastable: true,
@@ -1461,6 +1684,12 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
     /** FresnelS(x) = ∫₀ˣ sin(πt²/2) dt — odd function, S(∞) = 1/2 */
     FresnelS: {
       examples: ['FresnelS(+oo)', 'N(FresnelS(1))'],
+      parameters: [
+        {
+          description: 'The upper limit of the integral from 0; ±∞ gives ±1/2.',
+          sample: '1',
+        },
+      ],
       description: 'Fresnel sine integral.',
       complexity: 5200,
       broadcastable: true,
@@ -1505,6 +1734,12 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
     /** FresnelC(x) = ∫₀ˣ cos(πt²/2) dt — odd function, C(∞) = 1/2 */
     FresnelC: {
       examples: ['FresnelC(+oo)', 'N(FresnelC(1))'],
+      parameters: [
+        {
+          description: 'The upper limit of the integral from 0; ±∞ gives ±1/2.',
+          sample: '1',
+        },
+      ],
       description: 'Fresnel cosine integral.',
       complexity: 5200,
       broadcastable: true,
@@ -1554,6 +1789,12 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
      */
     SinIntegral: {
       examples: ['SinIntegral(+oo)', 'N(SinIntegral(1))'],
+      parameters: [
+        {
+          description: 'The upper limit of the integral from 0; ±∞ gives ±π/2.',
+          sample: '1',
+        },
+      ],
       description: 'Sine integral: ∫₀ˣ sin(t)/t dt.',
       complexity: 5200,
       broadcastable: true,
@@ -1633,6 +1874,13 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
      */
     CosIntegral: {
       examples: ['N(CosIntegral(1))'],
+      parameters: [
+        {
+          description:
+            'The number; 0 gives −∞, +∞ gives 0, and a negative real number gives a complex value.',
+          sample: '1',
+        },
+      ],
       description: 'Cosine integral: γ + ln(x) + ∫₀ˣ (cos(t)−1)/t dt.',
       complexity: 5200,
       broadcastable: true,
@@ -1721,6 +1969,12 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
      */
     SinhIntegral: {
       examples: ['SinhIntegral(0)', 'N(SinhIntegral(1))'],
+      parameters: [
+        {
+          description: 'The upper limit of the integral from 0; ±∞ gives ±∞.',
+          sample: '1',
+        },
+      ],
       description: 'Hyperbolic sine integral: ∫₀ˣ sinh(t)/t dt.',
       complexity: 5200,
       broadcastable: true,
@@ -1790,6 +2044,13 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
      */
     CoshIntegral: {
       examples: ['N(CoshIntegral(1))'],
+      parameters: [
+        {
+          description:
+            'The number; 0 gives −∞, ±∞ gives +∞, and a negative real number gives a complex value.',
+          sample: '1',
+        },
+      ],
       description:
         'Hyperbolic cosine integral: γ + ln|x| + ∫₀ˣ (cosh(t)−1)/t dt.',
       complexity: 5200,
@@ -1871,6 +2132,13 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
     // },
     InverseFunction: {
       examples: ['InverseFunction(Sin)', 'InverseFunction(Tan)(1)'],
+      parameters: [
+        {
+          description:
+            'The function to invert; a function with no known inverse leaves the call unevaluated.',
+          sample: 'sin',
+        },
+      ],
       description: 'Inverse of a function.',
       lazy: true,
       signature: '(function) -> function',
@@ -1897,12 +2165,21 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
   //
   {
     TrigExpand: {
-      examples: ['TrigExpand(Sin(a + b))', 'TrigExpand(Cos(2 * x))'],
+      examples: [
+        'TrigExpand(Sin(a + b))',
+        'TrigExpand(Sin(2x))',
+        'TrigExpand(Cos(2 * x))',
+      ],
+      parameters: [
+        {
+          description:
+            'The expression whose trigonometric and hyperbolic functions are expanded.',
+          sample: 'sin(2x)',
+        },
+      ],
       description:
         'Expand trigonometric and hyperbolic functions of sums and integer ' +
-        'multiples of angles. ' +
-        'Example: TrigExpand(sin(a+b)) → sin(a)cos(b) + cos(a)sin(b), ' +
-        'TrigExpand(sin(2x)) → 2 sin(x) cos(x)',
+        'multiples of angles.',
       lazy: true,
       signature: '(value) -> value',
       type: ([x], context) => {
@@ -1930,11 +2207,16 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
     },
 
     TrigToExp: {
-      examples: ['TrigToExp(Cos(x))'],
+      examples: ['TrigToExp(Sin(x))', 'TrigToExp(Cos(x))'],
+      parameters: [
+        {
+          description: 'The expression to rewrite.',
+          sample: 'cos(x)',
+        },
+      ],
       description:
         'Rewrite trigonometric and hyperbolic functions in terms of the ' +
-        'complex exponential, exactly. ' +
-        'Example: TrigToExp(sin(x)) → -(i/2) e^{ix} + (i/2) e^{-ix}',
+        'complex exponential, exactly.',
       lazy: true,
       signature: '(value) -> value',
       type: ([x], context) => {
@@ -1963,11 +2245,16 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
 
     TrigReduce: {
       examples: ['TrigReduce(Sin(x)^2)', 'TrigReduce(Sin(x) * Cos(x))'],
+      parameters: [
+        {
+          description: 'The expression whose products and powers are reduced.',
+          sample: 'sin(x)^2',
+        },
+      ],
       description:
         'Rewrite products and integer powers of trigonometric and hyperbolic ' +
         'functions as a linear combination of functions of multiple angles ' +
-        '(the inverse of TrigExpand). ' +
-        'Example: TrigReduce(sin(x)^2) → (1 - cos(2x))/2',
+        '(the inverse of TrigExpand).',
       lazy: true,
       signature: '(value) -> value',
       type: ([x], context) => {

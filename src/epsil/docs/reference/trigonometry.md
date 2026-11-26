@@ -200,6 +200,8 @@ category.
 
 MathJSON `Arccos` · `(complex | quantity) -> number`
 
+- argument 1 — The cosine of the angle; outside [-1, 1] the result is complex. Sample: `1 / 2`.
+
 Arccosine, the inverse cosine function.
 
 ```epsil
@@ -215,6 +217,8 @@ N(arccos(1/3))
 ### arccot
 
 MathJSON `Arccot` · `(complex | quantity | signed_infinity) -> number`
+
+- argument 1 — The cotangent of the angle; the result is in (0, π) in radians (in the angular unit of the engine), with 0 at +∞ and π at −∞. Sample: `1`.
 
 Arccotangent, the inverse cotangent function.
 
@@ -232,6 +236,8 @@ N(arccot(-1))
 
 MathJSON `Arccsc` · `(complex | infinity | quantity) -> number`
 
+- argument 1 — The cosecant of the angle; inside (-1, 1) the result is complex, and 0 has no value (an exact 0 stays unevaluated, a numeric 0 gives NaN). Sample: `2`.
+
 Arccosecant, the inverse cosecant function.
 
 ```epsil
@@ -247,6 +253,8 @@ N(arccsc(3))
 ### arcosh
 
 MathJSON `Arcosh` · `(complex | quantity | signed_infinity) -> number`
+
+- argument 1 — The hyperbolic cosine of the result; below 1 the result is complex. Sample: `2`.
 
 Inverse hyperbolic cosine (area hyperbolic cosine).
 
@@ -264,6 +272,8 @@ N(arcosh(2))
 
 MathJSON `Arcoth` · `(complex | infinity | quantity) -> number`
 
+- argument 1 — The hyperbolic cotangent of the result; ±1 gives ±∞, and inside (-1, 1) the result is complex. Sample: `2`.
+
 Inverse hyperbolic cotangent (area hyperbolic cotangent).
 
 ```epsil
@@ -275,6 +285,8 @@ N(arcoth(2))
 
 MathJSON `Arcsch` · `(complex | infinity | quantity) -> number`
 
+- argument 1 — The hyperbolic cosecant of the result; 0 gives complex infinity. Sample: `1`.
+
 Inverse hyperbolic cosecant (area hyperbolic cosecant).
 
 ```epsil
@@ -285,6 +297,8 @@ N(arcsch(1))
 ### arcsec
 
 MathJSON `Arcsec` · `(complex | infinity | quantity) -> number`
+
+- argument 1 — The secant of the angle; inside (-1, 1) the result is complex, and 0 has no value (an exact 0 stays unevaluated, a numeric 0 gives NaN). Sample: `2`.
 
 Arcsecant, the inverse secant function.
 
@@ -302,6 +316,8 @@ N(arcsec(3))
 
 MathJSON `Arcsin` · `(complex | quantity) -> number`
 
+- argument 1 — The sine of the angle; outside [-1, 1] the result is complex. Sample: `1 / 2`.
+
 Arcsine, the inverse sine function.
 
 ```epsil
@@ -317,6 +333,8 @@ N(arcsin(2))
 ### arctan
 
 MathJSON `Arctan` · `(complex | quantity | signed_infinity) -> number`
+
+- argument 1 — The tangent of the angle; ±∞ gives ±π/2 (in radians; the result is in the angular unit of the engine). Sample: `1`.
 
 Inverse tangent.
 
@@ -334,6 +352,9 @@ N(arctan(2))
 
 MathJSON `Arctan2` · `(y: real | signed_infinity, x: real | signed_infinity) -> real`
 
+- `y` — The y coordinate of the point. Sample: `1`.
+- `x` — The x coordinate of the point; the result is the angle from the positive x axis, in (−π, π] in radians (in the angular unit of the engine), and 0 at the origin. Sample: `-1`.
+
 Two-argument arctangent giving the angle of a vector.
 
 ```epsil
@@ -349,6 +370,8 @@ arctan2(-1, -1)
 ### arsech
 
 MathJSON `Arsech` · `(complex | quantity | signed_infinity) -> number`
+
+- argument 1 — The hyperbolic secant of the result; 0 gives +∞, and outside [0, 1] the result is complex. Sample: `1 / 2`.
 
 Inverse hyperbolic secant (area hyperbolic secant).
 
@@ -366,6 +389,8 @@ N(arsech(1/2))
 
 MathJSON `Arsinh` · `(complex | quantity | signed_infinity) -> number`
 
+- argument 1 — The hyperbolic sine of the result; ±∞ gives ±∞. Sample: `1`.
+
 Inverse hyperbolic sine (area hyperbolic sine).
 
 ```epsil
@@ -381,6 +406,8 @@ N(arsinh(1))
 ### artanh
 
 MathJSON `Artanh` · `(complex | quantity | signed_infinity) -> number`
+
+- argument 1 — The hyperbolic tangent of the result; ±1 gives ±∞, and outside [-1, 1] the result is complex. Sample: `1 / 2`.
 
 Inverse hyperbolic tangent (area hyperbolic tangent).
 
@@ -398,6 +425,8 @@ N(artanh(1/2))
 
 MathJSON `Cos` · `(complex | quantity) -> number`
 
+- argument 1 — The angle, in radians (or in the angular unit of the engine). Sample: `pi / 3`.
+
 Cosine of an angle.
 
 ```epsil
@@ -414,6 +443,8 @@ N(cos(1))
 
 MathJSON `CosIntegral` · `(complex | infinity) -> number`
 
+- argument 1 — The number; 0 gives −∞, +∞ gives 0, and a negative real number gives a complex value. Sample: `1`.
+
 Cosine integral: γ + ln(x) + ∫₀ˣ (cos(t)−1)/t dt.
 
 ```epsil
@@ -424,6 +455,8 @@ N(cosIntegral(1))
 ### cosh
 
 MathJSON `Cosh` · `(complex | quantity | signed_infinity) -> number`
+
+- argument 1 — The number; a real number gives a result of at least 1, and ±∞ gives +∞. Sample: `1`.
 
 Hyperbolic cosine.
 
@@ -441,6 +474,8 @@ N(cosh(1))
 
 MathJSON `CoshIntegral` · `(complex | infinity) -> number`
 
+- argument 1 — The number; 0 gives −∞, ±∞ gives +∞, and a negative real number gives a complex value. Sample: `1`.
+
 Hyperbolic cosine integral: γ + ln|x| + ∫₀ˣ (cosh(t)−1)/t dt.
 
 ```epsil
@@ -451,6 +486,8 @@ N(coshIntegral(1))
 ### cot
 
 MathJSON `Cot` · `(complex | quantity) -> number`
+
+- argument 1 — The angle, in radians (or in the angular unit of the engine); a multiple of π gives complex infinity. Sample: `pi / 6`.
 
 Cotangent, the reciprocal of tangent.
 
@@ -468,6 +505,8 @@ N(cot(1))
 
 MathJSON `Coth` · `(complex | quantity | signed_infinity) -> number`
 
+- argument 1 — The number; 0 gives complex infinity, and ±∞ gives ±1. Sample: `1`.
+
 Hyperbolic cotangent, the reciprocal of hyperbolic tangent.
 
 ```epsil
@@ -478,6 +517,8 @@ N(coth(1))
 ### csc
 
 MathJSON `Csc` · `(complex | quantity) -> number`
+
+- argument 1 — The angle, in radians (or in the angular unit of the engine); a multiple of π gives complex infinity. Sample: `pi / 6`.
 
 Cosecant, the reciprocal of sine.
 
@@ -495,6 +536,8 @@ N(csc(1))
 
 MathJSON `Csch` · `(complex | quantity | signed_infinity) -> number`
 
+- argument 1 — The number; 0 gives complex infinity, and ±∞ gives 0. Sample: `1`.
+
 Hyperbolic cosecant, the reciprocal of hyperbolic sine.
 
 ```epsil
@@ -504,7 +547,11 @@ N(csch(1))
 
 ### dms
 
-MathJSON `DMS` · `(number, number?, number?) -> number`
+MathJSON `DMS` · `(degrees: number, minutes: number?, seconds: number?) -> number`
+
+- `degrees` — The whole degrees of the angle; the minutes and seconds are added to it, also when it is negative. Sample: `30`.
+- `minutes` — The minutes of arc, 1/60 of a degree each; 0 by default. Sample: `15`.
+- `seconds` — The seconds of arc, 1/3600 of a degree each; 0 by default. Sample: `30`.
 
 Construct an angle from degrees, minutes, and seconds.
 
@@ -522,6 +569,8 @@ N(dms(30, 15))
 
 MathJSON `Degrees` · `(real) -> real`
 
+- argument 1 — The angle in degrees; it is not reduced modulo 360. Sample: `30`.
+
 Convert an angle in degrees.
 
 ```epsil
@@ -537,6 +586,8 @@ sin(degrees(30))
 ### fresnelC
 
 MathJSON `FresnelC` · `(complex | signed_infinity) -> complex`
+
+- argument 1 — The upper limit of the integral from 0; ±∞ gives ±1/2. Sample: `1`.
 
 Fresnel cosine integral.
 
@@ -554,6 +605,8 @@ N(fresnelC(1))
 
 MathJSON `FresnelS` · `(complex | signed_infinity) -> complex`
 
+- argument 1 — The upper limit of the integral from 0; ±∞ gives ±1/2. Sample: `1`.
+
 Fresnel sine integral.
 
 ```epsil
@@ -569,6 +622,8 @@ N(fresnelS(1))
 ### haversine
 
 MathJSON `Haversine` · `(real) -> number`
+
+- argument 1 — The angle, in radians (or in the angular unit of the engine); the result is (1 − cos(x))/2, in [0, 1]. Sample: `pi / 3`.
 
 Haversine function.
 
@@ -586,6 +641,9 @@ haversine(x)
 
 MathJSON `Hypot` · `(infinity | real, infinity | real) -> +oo | nan | real`
 
+- argument 1 — One leg; an infinite leg makes the result +∞. Sample: `3`.
+- argument 2 — The other leg. Sample: `4`.
+
 Hypotenuse length: sqrt(x^2 + y^2).
 
 ```epsil
@@ -602,6 +660,8 @@ hypot(1, 1)
 
 MathJSON `InverseFunction` · `(function) -> function`
 
+- argument 1 — The function to invert; a function with no known inverse leaves the call unevaluated. Sample: `sin`.
+
 Inverse of a function.
 
 ```epsil
@@ -617,6 +677,8 @@ inverseFunction(tan)(1)
 ### inverseHaversine
 
 MathJSON `InverseHaversine` · `(real) -> number`
+
+- argument 1 — The haversine of the angle; inside [0, 1] the result is in [0, π] in radians (in the angular unit of the engine), and outside it the result is complex. Sample: `1 / 2`.
 
 Inverse haversine function.
 
@@ -650,6 +712,8 @@ cos(pi)
 
 MathJSON `Sec` · `(complex | quantity) -> number`
 
+- argument 1 — The angle, in radians (or in the angular unit of the engine); an odd multiple of π/2 gives complex infinity. Sample: `pi / 3`.
+
 Secant, the reciprocal of cosine.
 
 ```epsil
@@ -666,6 +730,8 @@ N(sec(1))
 
 MathJSON `Sech` · `(complex | quantity | signed_infinity) -> number`
 
+- argument 1 — The number; a real number gives a result in (0, 1], and ±∞ gives 0. Sample: `1`.
+
 Hyperbolic secant, the reciprocal of hyperbolic cosine.
 
 ```epsil
@@ -681,6 +747,8 @@ N(sech(1))
 ### sin
 
 MathJSON `Sin` · `(complex | quantity) -> number`
+
+- argument 1 — The angle, in radians (or in the angular unit of the engine). Sample: `pi / 6`.
 
 Sine of an angle.
 
@@ -703,6 +771,8 @@ N(sin(1))
 
 MathJSON `SinIntegral` · `(complex | infinity) -> number`
 
+- argument 1 — The upper limit of the integral from 0; ±∞ gives ±π/2. Sample: `1`.
+
 Sine integral: ∫₀ˣ sin(t)/t dt.
 
 ```epsil
@@ -718,6 +788,8 @@ N(sinIntegral(1))
 ### sinc
 
 MathJSON `Sinc` · `(complex | signed_infinity) -> complex`
+
+- argument 1 — The number; 0 gives 1, and ±∞ gives 0. Sample: `pi / 2`.
 
 Unnormalized sinc function: sin(x)/x with sinc(0)=1.
 
@@ -735,6 +807,8 @@ N(sinc(1))
 
 MathJSON `Sinh` · `(complex | quantity | signed_infinity) -> number`
 
+- argument 1 — The number; ±∞ gives ±∞. Sample: `1`.
+
 Hyperbolic sine.
 
 ```epsil
@@ -750,6 +824,8 @@ N(sinh(1))
 ### sinhIntegral
 
 MathJSON `SinhIntegral` · `(complex | infinity) -> number`
+
+- argument 1 — The upper limit of the integral from 0; ±∞ gives ±∞. Sample: `1`.
 
 Hyperbolic sine integral: ∫₀ˣ sinh(t)/t dt.
 
@@ -767,6 +843,8 @@ N(sinhIntegral(1))
 
 MathJSON `Tan` · `(complex | quantity) -> number`
 
+- argument 1 — The angle, in radians (or in the angular unit of the engine); an odd multiple of π/2 gives complex infinity. Sample: `pi / 4`.
+
 Tangent of an angle.
 
 ```epsil
@@ -782,6 +860,8 @@ N(tan(1))
 ### tanh
 
 MathJSON `Tanh` · `(complex | quantity | signed_infinity) -> number`
+
+- argument 1 — The number; a real number gives a result in (-1, 1), and ±∞ gives ±1. Sample: `1`.
 
 Hyperbolic tangent.
 
@@ -799,11 +879,18 @@ N(tanh(1))
 
 MathJSON `TrigExpand` · `(value) -> value`
 
-Expand trigonometric and hyperbolic functions of sums and integer multiples of angles. Example: TrigExpand(sin(a+b)) → sin(a)cos(b) + cos(a)sin(b), TrigExpand(sin(2x)) → 2 sin(x) cos(x)
+- argument 1 — The expression whose trigonometric and hyperbolic functions are expanded. Sample: `sin(2x)`.
+
+Expand trigonometric and hyperbolic functions of sums and integer multiples of angles.
 
 ```epsil
 trigExpand(sin(a + b))
 // ➔ sin(b) * cos(a) + sin(a) * cos(b)
+```
+
+```epsil
+trigExpand(sin(2x))
+// ➔ 2sin(x) * cos(x)
 ```
 
 ```epsil
@@ -815,7 +902,9 @@ trigExpand(cos(2 * x))
 
 MathJSON `TrigReduce` · `(value) -> value`
 
-Rewrite products and integer powers of trigonometric and hyperbolic functions as a linear combination of functions of multiple angles (the inverse of TrigExpand). Example: TrigReduce(sin(x)^2) → (1 - cos(2x))/2
+- argument 1 — The expression whose products and powers are reduced. Sample: `sin(x)^2`.
+
+Rewrite products and integer powers of trigonometric and hyperbolic functions as a linear combination of functions of multiple angles (the inverse of TrigExpand).
 
 ```epsil
 trigReduce(sin(x)^2)
@@ -831,7 +920,14 @@ trigReduce(sin(x) * cos(x))
 
 MathJSON `TrigToExp` · `(value) -> value`
 
-Rewrite trigonometric and hyperbolic functions in terms of the complex exponential, exactly. Example: TrigToExp(sin(x)) → -(i/2) e^&#123;ix&#125; + (i/2) e^&#123;-ix&#125;
+- argument 1 — The expression to rewrite. Sample: `cos(x)`.
+
+Rewrite trigonometric and hyperbolic functions in terms of the complex exponential, exactly.
+
+```epsil
+trigToExp(sin(x))
+// ➔ -1/2 * i * e^(i * x) + 1/2 * i * e^(-i * x)
+```
 
 ```epsil
 trigToExp(cos(x))

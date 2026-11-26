@@ -31,7 +31,15 @@ describe('EPSIL SIGNATURE HELP: CALLEE', () => {
       signatures: [
         {
           label: 'sin(complex | quantity) -> number',
-          parameters: [{ type: 'complex | quantity', range: [4, 22] }],
+          parameters: [
+            {
+              type: 'complex | quantity',
+              range: [4, 22],
+              documentation:
+                'The angle, in radians (or in the angular unit of the engine).',
+              sample: 'pi / 6',
+            },
+          ],
           documentation: 'Sine of an angle.',
           description: ['Sine of an angle.'],
           activeParameter: 0,

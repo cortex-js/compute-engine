@@ -582,7 +582,7 @@ The [Trigonometry reference](/epsil/reference/trigonometry/) has the full descri
 | `coth` | `Coth` | `(complex \| quantity \| signed_infinity) -> number` | Hyperbolic cotangent, the reciprocal of hyperbolic tangent. |
 | `csc` | `Csc` | `(complex \| quantity) -> number` | Cosecant, the reciprocal of sine. |
 | `csch` | `Csch` | `(complex \| quantity \| signed_infinity) -> number` | Hyperbolic cosecant, the reciprocal of hyperbolic sine. |
-| `dms` | `DMS` | `(number, number?, number?) -> number` | Construct an angle from degrees, minutes, and seconds. |
+| `dms` | `DMS` | `(degrees: number, minutes: number?, seconds: number?) -> number` | Construct an angle from degrees, minutes, and seconds. |
 | `degrees` | `Degrees` | `(real) -> real` | Convert an angle in degrees. |
 | `fresnelC` | `FresnelC` | `(complex \| signed_infinity) -> complex` | Fresnel cosine integral. |
 | `fresnelS` | `FresnelS` | `(complex \| signed_infinity) -> complex` | Fresnel sine integral. |
