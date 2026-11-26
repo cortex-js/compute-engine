@@ -849,46 +849,46 @@ The [Statistics reference](/epsil/reference/statistics/) has the full descriptio
 |:------|:---------|:----------|:--------|
 | `betaDistribution` | `BetaDistribution` | `(real<0<..>, real<0<..>) -> expression<BetaDistribution>` | Beta distribution with shape parameters α and β, on the interval [0, 1]. |
 | `betaRegularized` | `BetaRegularized` | `(complex \| infinity, complex \| infinity, complex \| infinity, (complex \| infinity)?) -> number` | Regularized incomplete beta function I_x(a, b); with four arguments, I_z1(a, b) − I_z0(a, b) |
-| `binCounts` | `BinCounts` | `(collection<number>, list<number> \| number) -> list<number>` | Count the number of elements falling into each bin. |
-| `binomialDistribution` | `BinomialDistribution` | `(integer<0..>, real<0..1>) -> expression<BinomialDistribution>` | Binomial distribution: number of successes in n independent trials, each with success probability p. |
+| `binCounts` | `BinCounts` | `(xs: collection<number>, bins: list<number> \| number) -> list<number>` | Count the number of elements falling into each bin. |
+| `binomialDistribution` | `BinomialDistribution` | `(n: integer<0..>, p: real<0..1>) -> expression<BinomialDistribution>` | Binomial distribution: number of successes in n independent trials, each with success probability p. |
 | `cdf` | `CDF` | `(distribution, real \| signed_infinity) -> nan \| real<0..1>` | Cumulative distribution function P(X ≤ x) of a distribution. |
 | `chiSquareDistribution` | `ChiSquareDistribution` | `(real<0<..>) -> expression<ChiSquareDistribution>` | Chi-square distribution with k degrees of freedom (k &gt; 0, not necessarily an integer). |
-| `correlation` | `Correlation` | `(collection<number \| tuple>, collection<number>?) -> nan \| real<-1..1>` | Pearson's correlation coefficient of paired data, given as two equal-length collections or one collection of (x, y) pairs. |
-| `covariance` | `Covariance` | `(collection<number \| tuple>, collection<number>?) -> nan \| real` | Sample covariance (n − 1 denominator) of paired data, given as two equal-length collections or one collection of (x, y) pairs. |
+| `correlation` | `Correlation` | `(xs: collection<number \| tuple>, ys: collection<number>?) -> nan \| real<-1..1>` | Pearson's correlation coefficient of paired data, given as two equal-length collections or one collection of (x, y) pairs. |
+| `covariance` | `Covariance` | `(xs: collection<number \| tuple>, ys: collection<number>?) -> nan \| real` | Sample covariance (n − 1 denominator) of paired data, given as two equal-length collections or one collection of (x, y) pairs. |
 | `erf` | `Erf` | `(complex \| signed_infinity, (complex \| signed_infinity)?) -> complex` | Gauss error function; with two arguments, Erf(z1) − Erf(z0) |
 | `erfInv` | `ErfInv` | `(complex \| infinity, (complex \| infinity)?) -> number` | Inverse of the error function; with two arguments, the x with Erf(z0, x) = z, that is ErfInv(z + Erf(z0)) |
 | `erfc` | `Erfc` | `(complex \| signed_infinity) -> complex` | Complementary error function: 1 - Erf(x) |
 | `erfi` | `Erfi` | `(complex \| signed_infinity) -> complex \| signed_infinity` | Imaginary error function: -i·Erf(i·x) |
 | `exponentialDistribution` | `ExponentialDistribution` | `(real<0<..>) -> expression<ExponentialDistribution>` | Exponential distribution with rate parameter λ. |
 | `fRatioDistribution` | `FRatioDistribution` | `(real<0<..>, real<0<..>) -> expression<FRatioDistribution>` | Snedecor's F distribution with d₁ degrees of freedom in the numerator and d₂ in the denominator. |
-| `findFit` | `FindFit` | `(any, any, any, any, dictionary?) -> dictionary` | Nonlinear least-squares fit of a model to data. |
-| `gammaDistribution` | `GammaDistribution` | `(real<0<..>, real<0<..>) -> expression<GammaDistribution>` | Gamma distribution with shape α and scale θ: the density is x^(α−1)·e^(−x/θ)/(Γ(α)·θ^α) for x &gt; 0. |
+| `findFit` | `FindFit` | `(data: any, model: any, params: any, vars: any, options: dictionary?) -> dictionary` | Nonlinear least-squares fit of a model to data. |
+| `gammaDistribution` | `GammaDistribution` | `(shape: real<0<..>, scale: real<0<..>) -> expression<GammaDistribution>` | Gamma distribution with shape α and scale θ: the density is x^(α−1)·e^(−x/θ)/(Γ(α)·θ^α) for x &gt; 0. |
 | `gammaRegularized` | `GammaRegularized` | `(complex \| infinity, complex \| infinity, (complex \| infinity)?) -> number` | Regularized upper incomplete gamma function Q(a, z) = Γ(a, z)/Γ(a); with three arguments, Q(a, z0) − Q(a, z1) |
 | `geometricDistribution` | `GeometricDistribution` | `(real<0..1>) -> expression<GeometricDistribution>` | Geometric distribution: the number of failures before the first success, each trial a success with probability p (0 &lt; p ≤ 1). |
-| `histogram` | `Histogram` | `(collection<number>, list<number> \| number) -> list<tuple<number, integer>>` | Compute a histogram of the values in a collection. |
-| `hypergeometricDistribution` | `HypergeometricDistribution` | `(integer<0..>, integer<0..>, integer<0..>) -> expression<HypergeometricDistribution>` | Hypergeometric distribution: the number of successes in n draws without replacement from a population of N items of which K are successes (0 ≤ n ≤ N, 0 ≤ K ≤ N). |
+| `histogram` | `Histogram` | `(xs: collection<number>, bins: list<number> \| number) -> list<tuple<number, integer>>` | Compute a histogram of the values in a collection. |
+| `hypergeometricDistribution` | `HypergeometricDistribution` | `(draws: integer<0..>, successes: integer<0..>, population: integer<0..>) -> expression<HypergeometricDistribution>` | Hypergeometric distribution: the number of successes in n draws without replacement from a population of N items of which K are successes (0 ≤ n ≤ N, 0 ≤ K ≤ N). |
 | `interquartileRange` | `InterquartileRange` | `((collection<number> \| number)+) -> +oo \| nan \| real<0..>` | Interquartile range (Q3 - Q1) of a collection. |
 | `kurtosis` | `Kurtosis` | `((collection<number> \| number)+) -> nan \| real` | Kurtosis of a collection of numbers. |
 | `linearRegression` | `LinearRegression` | `(any+) -> tuple<number, number>` | Least-squares linear fit b0 + b1·x. |
 | `mean` | `Mean` | `((collection<number> \| distribution \| number)+) -> number` | Arithmetic mean (average) of a collection of numbers. |
 | `median` | `Median` | `((collection<number> \| number)+) -> nan \| real \| signed_infinity` | Median of a collection of numbers. |
 | `mode` | `Mode` | `((collection<number> \| number)+) -> nan \| real \| signed_infinity` | Most frequently occurring value in a collection. |
-| `negativeBinomialDistribution` | `NegativeBinomialDistribution` | `(integer<1..>, real<0..1>) -> expression<NegativeBinomialDistribution>` | Negative binomial distribution: the number of failures before the n-th success (n a positive integer), each trial a success with probability p (0 &lt; p ≤ 1). |
-| `normalDistribution` | `NormalDistribution` | `(real, real<0<..>) -> expression<NormalDistribution>` | Normal (Gaussian) distribution with mean μ and standard deviation σ. |
+| `negativeBinomialDistribution` | `NegativeBinomialDistribution` | `(n: integer<1..>, p: real<0..1>) -> expression<NegativeBinomialDistribution>` | Negative binomial distribution: the number of failures before the n-th success (n a positive integer), each trial a success with probability p (0 &lt; p ≤ 1). |
+| `normalDistribution` | `NormalDistribution` | `(mu: real, sigma: real<0<..>) -> expression<NormalDistribution>` | Normal (Gaussian) distribution with mean μ and standard deviation σ. |
 | `pdf` | `PDF` | `(distribution, real \| signed_infinity) -> nan \| real<0..>` | Probability density (continuous) or mass (discrete) function of a distribution, evaluated at x. |
 | `poissonDistribution` | `PoissonDistribution` | `(real<0<..>) -> expression<PoissonDistribution>` | Poisson distribution with rate parameter λ. |
 | `polynomialFit` | `PolynomialFit` | `(any+) -> list<number>` | Least-squares polynomial fit of the given degree. |
-| `populationCovariance` | `PopulationCovariance` | `(collection<number \| tuple>, collection<number>?) -> nan \| real` | Population covariance (n denominator) of paired data, given as two equal-length collections or one collection of (x, y) pairs. |
+| `populationCovariance` | `PopulationCovariance` | `(xs: collection<number \| tuple>, ys: collection<number>?) -> nan \| real` | Population covariance (n denominator) of paired data, given as two equal-length collections or one collection of (x, y) pairs. |
 | `populationStandardDeviation` | `PopulationStandardDeviation` | `((collection<number> \| number)+) -> nan \| real<0..>` | Population Standard Deviation of a collection of numbers. |
 | `populationVariance` | `PopulationVariance` | `((collection<number> \| number)+) -> nan \| real<0..>` | Population variance of a collection of numbers. |
 | `quantile` | `Quantile` | `(collection<any> \| distribution, real<0..1>) -> nan \| real \| signed_infinity` | Quantile (inverse CDF): the least x with CDF(x) ≥ p, for p in [0, 1]. |
 | `quartiles` | `Quartiles` | `((collection<number> \| number)+) -> tuple<lower: nan \| real \| signed_infinity, mid: nan \| real \| signed_infinity, upper: nan \| real \| signed_infinity>` | Lower quartile, median, and upper quartile of a collection. |
-| `randomSample` | `RandomSample` | `((T, number) random -> T where T: string) & ((indexed_collection, number) random -> list)` | RandomSample(xs, k): a list of k elements drawn from the indexed collection `xs`, without replacement. "Without replacement" is over POSITIONS, not values: on a multiset, repeats are expected — RandomSample([1, 1, 2], 2) can return [1, 1]. |
+| `randomSample` | `RandomSample` | `((xs: T, count: number) random -> T where T: string) & ((xs: indexed_collection, count: number) random -> list)` | RandomSample(xs, count): a list of count elements drawn from the indexed collection `xs`, without replacement. "Without replacement" is over POSITIONS, not values: on a multiset, repeats are expected — RandomSample([1, 1, 2], 2) can return… |
 | `skewness` | `Skewness` | `((collection<number> \| number)+) -> nan \| real` | Skewness of a collection of numbers. |
-| `slidingWindow` | `SlidingWindow` | `((S, integer, integer?) -> list<string> where S: string) & ((collection, integer, integer?) -> list<list>)` | Return overlapping sliding windows of fixed size over the collection. |
+| `slidingWindow` | `SlidingWindow` | `((xs: S, count: integer, step: integer?) -> list<string> where S: string) & ((xs: collection, count: integer, step: integer?) -> list<list>)` | Return overlapping sliding windows of fixed size over the collection. |
 | `standardDeviation` | `StandardDeviation` | `((collection<number> \| distribution \| number)+) -> nan \| real<0..>` | Sample Standard Deviation of a collection of numbers. |
 | `studentTDistribution` | `StudentTDistribution` | `(real<0<..>) -> expression<StudentTDistribution>` | Student's t distribution with ν degrees of freedom (ν &gt; 0, not necessarily an integer). |
-| `uniformDistribution` | `UniformDistribution` | `(real, real) -> expression<UniformDistribution>` | Continuous uniform distribution on the interval [a, b]. |
+| `uniformDistribution` | `UniformDistribution` | `(lower: real, upper: real) -> expression<UniformDistribution>` | Continuous uniform distribution on the interval [a, b]. |
 | `variance` | `Variance` | `((collection<number> \| distribution \| number)+) -> nan \| real<0..>` | Sample variance of a collection of numbers. |
 
 ## Units

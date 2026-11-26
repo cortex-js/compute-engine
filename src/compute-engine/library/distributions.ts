@@ -650,6 +650,24 @@ export const DISTRIBUTIONS_LIBRARY: SymbolDefinitions[] = [
     GammaRegularized: {
       description:
         'Regularized upper incomplete gamma function Q(a, z) = Γ(a, z)/Γ(a); with three arguments, Q(a, z0) − Q(a, z1)',
+      examples: ['GammaRegularized(2, 1)', 'GammaRegularized(2, 1.0)'],
+      parameters: [
+        {
+          description:
+            'The parameter a; for a > 0 and z ≥ 0 the value is in [0, 1].',
+          sample: '2',
+        },
+        {
+          description:
+            'The lower limit z of the integral; with three arguments, the first limit z0.',
+          sample: '1',
+        },
+        {
+          description:
+            'The second limit z1: the result is Q(a, z0) − Q(a, z1).',
+          sample: '3',
+        },
+      ],
       complexity: 7500,
       // Both slots take the Γ-family carrier: every finite complex point has
       // a value or a documented capability gap, and every infinity is in the
@@ -818,6 +836,31 @@ export const DISTRIBUTIONS_LIBRARY: SymbolDefinitions[] = [
     BetaRegularized: {
       description:
         'Regularized incomplete beta function I_x(a, b); with four arguments, I_z1(a, b) − I_z0(a, b)',
+      examples: ['BetaRegularized(1/2, 2, 3)', 'BetaRegularized(0.3, 2, 3)'],
+      // By position: the four-argument form puts the two points first, so
+      // a position means another argument there.
+      parameters: [
+        {
+          description:
+            'The point x, in [0, 1] for a value in [0, 1]; with four arguments, the lower point z0.',
+          sample: '1/2',
+        },
+        {
+          description:
+            'The parameter a, positive; with four arguments, the upper point z1.',
+          sample: '2',
+        },
+        {
+          description:
+            'The parameter b, positive; with four arguments, the parameter a.',
+          sample: '3',
+        },
+        {
+          description:
+            'With four arguments, the parameter b: the result is I_z1(a, b) − I_z0(a, b).',
+          sample: '3',
+        },
+      ],
       complexity: 7500,
       // The three slots take the Γ-family carrier, as `GammaRegularized`
       // does; `betaRegularizedValueAtInfinity` says which infinite points
@@ -920,7 +963,22 @@ export const DISTRIBUTIONS_LIBRARY: SymbolDefinitions[] = [
     NormalDistribution: {
       description:
         'Normal (Gaussian) distribution with mean μ and standard deviation σ.',
-      signature: '(real, real<0<..>) -> expression<NormalDistribution>',
+      examples: [
+        'PDF(NormalDistribution(0, 1), 0)  // 1/sqrt(2 pi)',
+        'CDF(NormalDistribution(0, 1), 1.96)  // 0.975',
+      ],
+      signature:
+        '(mu: real, sigma: real<0<..>) -> expression<NormalDistribution>',
+      parameters: {
+        mu: {
+          description: 'The mean, the center of the bell curve.',
+          sample: '0',
+        },
+        sigma: {
+          description: 'The standard deviation, greater than 0.',
+          sample: '1',
+        },
+      },
       nanBehavior: 'reject',
       canonical: (ops, { engine: ce }) => {
         if (ops.length !== 2) return null;
@@ -946,8 +1004,19 @@ export const DISTRIBUTIONS_LIBRARY: SymbolDefinitions[] = [
       description:
         'Binomial distribution: number of successes in n independent trials, ' +
         'each with success probability p.',
+      examples: [
+        'PDF(BinomialDistribution(10, 1/2), 5)',
+        'Mean(BinomialDistribution(10, 0.3))',
+      ],
       signature:
-        '(integer<0..>, real<0..1>) -> expression<BinomialDistribution>',
+        '(n: integer<0..>, p: real<0..1>) -> expression<BinomialDistribution>',
+      parameters: {
+        n: { description: 'The number of trials.', sample: '10' },
+        p: {
+          description: 'The probability of success of each trial.',
+          sample: '1/2',
+        },
+      },
       nanBehavior: 'reject',
       canonical: (ops, { engine: ce }) => {
         if (ops.length !== 2) return null;
@@ -979,7 +1048,17 @@ export const DISTRIBUTIONS_LIBRARY: SymbolDefinitions[] = [
 
     PoissonDistribution: {
       description: 'Poisson distribution with rate parameter λ.',
+      examples: [
+        'PDF(PoissonDistribution(2), 3)  // 4/(3e^2)',
+        'Variance(PoissonDistribution(3))  // 3',
+      ],
       signature: '(real<0<..>) -> expression<PoissonDistribution>',
+      parameters: [
+        {
+          description: 'The rate λ, the mean number of events, greater than 0.',
+          sample: '3',
+        },
+      ],
       nanBehavior: 'reject',
       canonical: (ops, { engine: ce }) => {
         if (ops.length !== 1) return null;
@@ -995,7 +1074,19 @@ export const DISTRIBUTIONS_LIBRARY: SymbolDefinitions[] = [
     UniformDistribution: {
       description:
         'Continuous uniform distribution on the interval [a, b]. `UniformDistribution([a, b])` is the same, and `UniformDistribution()` is on [0, 1].',
-      signature: '(real, real) -> expression<UniformDistribution>',
+      examples: [
+        'PDF(UniformDistribution(0, 4), 1)  // 1/4',
+        'Mean(UniformDistribution(2, 6))  // 4',
+      ],
+      signature:
+        '(lower: real, upper: real) -> expression<UniformDistribution>',
+      parameters: {
+        lower: { description: 'The lower end a of the interval.', sample: '0' },
+        upper: {
+          description: 'The upper end b of the interval, greater than `lower`.',
+          sample: '4',
+        },
+      },
       nanBehavior: 'reject',
       canonical: (ops, { engine: ce }) => {
         // Wolfram's forms: `UniformDistribution()` is on [0, 1] and
@@ -1030,7 +1121,18 @@ export const DISTRIBUTIONS_LIBRARY: SymbolDefinitions[] = [
 
     ExponentialDistribution: {
       description: 'Exponential distribution with rate parameter λ.',
+      examples: [
+        'CDF(ExponentialDistribution(2), 1)',
+        'Variance(ExponentialDistribution(2))',
+      ],
       signature: '(real<0<..>) -> expression<ExponentialDistribution>',
+      parameters: [
+        {
+          description:
+            'The rate λ, positive: the mean of the distribution is 1/λ.',
+          sample: '2',
+        },
+      ],
       nanBehavior: 'reject',
       canonical: (ops, { engine: ce }) => {
         if (ops.length !== 1) return null;
@@ -1046,7 +1148,18 @@ export const DISTRIBUTIONS_LIBRARY: SymbolDefinitions[] = [
     StudentTDistribution: {
       description:
         "Student's t distribution with ν degrees of freedom (ν > 0, not necessarily an integer).",
+      examples: [
+        'PDF(StudentTDistribution(1), 0)  // 1/pi',
+        'Variance(StudentTDistribution(5))  // 5/3',
+      ],
       signature: '(real<0<..>) -> expression<StudentTDistribution>',
+      parameters: [
+        {
+          description:
+            'The degrees of freedom ν, greater than 0 and not necessarily an integer.',
+          sample: '5',
+        },
+      ],
       nanBehavior: 'reject',
       canonical: positiveParameters('StudentTDistribution', ['ν']),
     },
@@ -1054,7 +1167,17 @@ export const DISTRIBUTIONS_LIBRARY: SymbolDefinitions[] = [
     ChiSquareDistribution: {
       description:
         'Chi-square distribution with k degrees of freedom (k > 0, not necessarily an integer).',
+      examples: [
+        'CDF(ChiSquareDistribution(2), 1)',
+        'Mean(ChiSquareDistribution(4))',
+      ],
       signature: '(real<0<..>) -> expression<ChiSquareDistribution>',
+      parameters: [
+        {
+          description: 'The number of degrees of freedom k, positive.',
+          sample: '4',
+        },
+      ],
       nanBehavior: 'reject',
       canonical: positiveParameters('ChiSquareDistribution', ['k']),
     },
@@ -1062,7 +1185,22 @@ export const DISTRIBUTIONS_LIBRARY: SymbolDefinitions[] = [
     FRatioDistribution: {
       description:
         "Snedecor's F distribution with d₁ degrees of freedom in the numerator and d₂ in the denominator.",
+      examples: [
+        'Mean(FRatioDistribution(2, 5))',
+        'CDF(FRatioDistribution(2, 3), 1.0)',
+      ],
       signature: '(real<0<..>, real<0<..>) -> expression<FRatioDistribution>',
+      parameters: [
+        {
+          description: 'The degrees of freedom d₁ of the numerator, positive.',
+          sample: '2',
+        },
+        {
+          description:
+            'The degrees of freedom d₂ of the denominator, positive.',
+          sample: '5',
+        },
+      ],
       nanBehavior: 'reject',
       canonical: positiveParameters('FRatioDistribution', ['d₁', 'd₂']),
     },
@@ -1070,7 +1208,20 @@ export const DISTRIBUTIONS_LIBRARY: SymbolDefinitions[] = [
     GammaDistribution: {
       description:
         'Gamma distribution with shape α and scale θ: the density is x^(α−1)·e^(−x/θ)/(Γ(α)·θ^α) for x > 0.',
-      signature: '(real<0<..>, real<0<..>) -> expression<GammaDistribution>',
+      examples: [
+        'Mean(GammaDistribution(2, 3))',
+        'CDF(GammaDistribution(2, 1), 1)',
+      ],
+      signature:
+        '(shape: real<0<..>, scale: real<0<..>) -> expression<GammaDistribution>',
+      parameters: {
+        shape: { description: 'The shape α, positive.', sample: '2' },
+        scale: {
+          description:
+            'The scale θ, positive: the mean of the distribution is α·θ.',
+          sample: '3',
+        },
+      },
       nanBehavior: 'reject',
       canonical: positiveParameters('GammaDistribution', ['α', 'θ']),
     },
@@ -1078,7 +1229,19 @@ export const DISTRIBUTIONS_LIBRARY: SymbolDefinitions[] = [
     BetaDistribution: {
       description:
         'Beta distribution with shape parameters α and β, on the interval [0, 1].',
+      examples: [
+        'Mean(BetaDistribution(2, 3))',
+        'CDF(BetaDistribution(2, 3), 1/2)',
+      ],
       signature: '(real<0<..>, real<0<..>) -> expression<BetaDistribution>',
+      parameters: [
+        {
+          description:
+            'The shape α, positive: the density is proportional to x^(α−1)·(1−x)^(β−1).',
+          sample: '2',
+        },
+        { description: 'The shape β, positive.', sample: '3' },
+      ],
       nanBehavior: 'reject',
       canonical: positiveParameters('BetaDistribution', ['α', 'β']),
     },
@@ -1086,7 +1249,18 @@ export const DISTRIBUTIONS_LIBRARY: SymbolDefinitions[] = [
     GeometricDistribution: {
       description:
         'Geometric distribution: the number of failures before the first success, each trial a success with probability p (0 < p ≤ 1). The support is {0, 1, 2, …}.',
+      examples: [
+        'PDF(GeometricDistribution(1/2), 2)',
+        'Mean(GeometricDistribution(1/4))',
+      ],
       signature: '(real<0..1>) -> expression<GeometricDistribution>',
+      parameters: [
+        {
+          description:
+            'The probability p of success of each trial; p = 0 is refused.',
+          sample: '1/4',
+        },
+      ],
       nanBehavior: 'reject',
       canonical: (ops, { engine: ce }) => {
         if (ops.length !== 1) return null;
@@ -1099,8 +1273,23 @@ export const DISTRIBUTIONS_LIBRARY: SymbolDefinitions[] = [
     NegativeBinomialDistribution: {
       description:
         'Negative binomial distribution: the number of failures before the n-th success (n a positive integer), each trial a success with probability p (0 < p ≤ 1). The support is {0, 1, 2, …}.',
+      examples: [
+        'PDF(NegativeBinomialDistribution(3, 1/2), 2)  // 3/16',
+        'Mean(NegativeBinomialDistribution(3, 1/2))  // 3',
+      ],
       signature:
-        '(integer<1..>, real<0..1>) -> expression<NegativeBinomialDistribution>',
+        '(n: integer<1..>, p: real<0..1>) -> expression<NegativeBinomialDistribution>',
+      parameters: {
+        n: {
+          description: 'The number of successes to reach, at least 1.',
+          sample: '3',
+        },
+        p: {
+          description:
+            'The probability of success of each trial, greater than 0 and at most 1.',
+          sample: '1/2',
+        },
+      },
       nanBehavior: 'reject',
       canonical: (ops, { engine: ce }) => {
         if (ops.length !== 2) return null;
@@ -1121,8 +1310,27 @@ export const DISTRIBUTIONS_LIBRARY: SymbolDefinitions[] = [
     HypergeometricDistribution: {
       description:
         'Hypergeometric distribution: the number of successes in n draws without replacement from a population of N items of which K are successes (0 ≤ n ≤ N, 0 ≤ K ≤ N).',
+      examples: [
+        'PDF(HypergeometricDistribution(5, 10, 20), 2)',
+        'Mean(HypergeometricDistribution(5, 10, 20))',
+      ],
       signature:
-        '(integer<0..>, integer<0..>, integer<0..>) -> expression<HypergeometricDistribution>',
+        '(draws: integer<0..>, successes: integer<0..>, population: integer<0..>) -> expression<HypergeometricDistribution>',
+      parameters: {
+        draws: {
+          description: 'The number n of draws, at most the population.',
+          sample: '5',
+        },
+        successes: {
+          description:
+            'The number K of successes in the population, at most the population.',
+          sample: '10',
+        },
+        population: {
+          description: 'The size N of the population.',
+          sample: '20',
+        },
+      },
       nanBehavior: 'reject',
       canonical: (ops, { engine: ce }) => {
         if (ops.length !== 3) return null;
@@ -1168,8 +1376,23 @@ export const DISTRIBUTIONS_LIBRARY: SymbolDefinitions[] = [
       description:
         'Probability density (continuous) or mass (discrete) function of a ' +
         'distribution, evaluated at x.',
+      examples: [
+        'PDF(NormalDistribution(0, 1), 0)  // 1/sqrt(2 pi)',
+        'PDF(PoissonDistribution(2), 3)  // 4/(3e^2)',
+      ],
       complexity: 7500,
       signature: '(distribution, real | signed_infinity) -> real<0..> | nan',
+      parameters: [
+        {
+          description: 'The distribution.',
+          sample: 'normalDistribution(0, 1)',
+        },
+        {
+          description:
+            'The point x; outside the support, and off the integers for a discrete distribution, the value is 0.',
+          sample: '1',
+        },
+      ],
       nanBehavior: ['reject', 'propagate'],
       evaluate: ([dist, x], { numericApproximation, engine: ce }) => {
         if (!dist || !x || !isDistributionExpression(dist)) return undefined;
@@ -1187,6 +1410,21 @@ export const DISTRIBUTIONS_LIBRARY: SymbolDefinitions[] = [
     CDF: {
       description:
         'Cumulative distribution function P(X ≤ x) of a distribution.',
+      examples: [
+        'CDF(NormalDistribution(0, 1), 0)',
+        'CDF(BinomialDistribution(10, 1/2), 5)',
+      ],
+      parameters: [
+        {
+          description: 'The distribution.',
+          sample: 'normalDistribution(0, 1)',
+        },
+        {
+          description:
+            'The point x; for a discrete distribution, a point that is not an integer is read as its floor.',
+          sample: '1',
+        },
+      ],
       complexity: 7500,
       signature: '(distribution, real | signed_infinity) -> real<0..1> | nan',
       nanBehavior: ['reject', 'propagate'],
@@ -1213,8 +1451,24 @@ export const DISTRIBUTIONS_LIBRARY: SymbolDefinitions[] = [
         'The first argument may also be a data collection, in which case the ' +
         'empirical quantile is returned.',
       complexity: 7500,
+      examples: [
+        'Quantile(NormalDistribution(0, 1), 0.975)  // 1.96',
+        'Quantile([1, 2, 3, 4, 5], 1/4)  // 3/2',
+      ],
       signature:
         '(distribution | collection<any>, real<0..1>) -> real | signed_infinity | nan',
+      parameters: [
+        {
+          description:
+            'The distribution, or a collection of numbers whose empirical quantile agrees with `Quartiles` at 1/4, 1/2 and 3/4.',
+          sample: 'normalDistribution(0, 1)',
+        },
+        {
+          description:
+            'The probability p, from 0 to 1; 0 and 1 give the ends of the support, or the least and the greatest datum.',
+          sample: '0.975',
+        },
+      ],
       nanBehavior: ['reject', 'propagate'],
       evaluate: ([dist, p], { numericApproximation, engine: ce }) => {
         if (!dist || !p) return undefined;

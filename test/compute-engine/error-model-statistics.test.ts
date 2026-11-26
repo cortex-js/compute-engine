@@ -594,8 +594,9 @@ describe('the bivariate statistics', () => {
       // Pearson's r is bounded, and its kernel keeps the bound at every
       // precision, so `Correlation` alone declares the range.
       const real = h === 'Correlation' ? 'real<-1..1>' : 'real';
+      const [xs, ys] = ['xs: ', 'ys: '];
       expect(`${h}: ${signatureOf(ce, h)}`).toBe(
-        `${h}: (collection<number | tuple>, collection<number>?) -> nan | ${real}`
+        `${h}: (${xs}collection<number | tuple>, ${ys}collection<number>?) -> nan | ${real}`
       );
       // The DERIVED policies here are `reject` (a `collection` slot) and
       // `pass-through`; neither describes a head that answers `NaN` for a

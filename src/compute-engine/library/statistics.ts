@@ -427,6 +427,17 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
     Erf: {
       description:
         'Gauss error function; with two arguments, Erf(z1) − Erf(z0)',
+      examples: ['Erf(0.5)', 'Erf(0, 1.0)'],
+      parameters: [
+        {
+          description: 'The point z; with two arguments, the lower point z0.',
+          sample: '1/2',
+        },
+        {
+          description: 'The upper point z1: the result is Erf(z1) − Erf(z0).',
+          sample: '1',
+        },
+      ],
       complexity: 7500,
       // The error functions apply to each element of a list, as the other
       // special functions of one argument (`Gamma`, `Zeta`, …) do.
@@ -501,6 +512,8 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
 
     Erfc: {
       description: 'Complementary error function: 1 - Erf(x)',
+      examples: ['Erfc(0.5)', 'Erfc(-oo)'],
+      parameters: [{ description: 'The point x.', sample: '1/2' }],
       complexity: 7500,
       broadcastable: true,
       // The same carrier as `Erf` (erfc = 1 − erf): the finite complex
@@ -558,6 +571,18 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
     ErfInv: {
       description:
         'Inverse of the error function; with two arguments, the x with Erf(z0, x) = z, that is ErfInv(z + Erf(z0))',
+      examples: ['ErfInv(0.5)', 'ErfInv(1)'],
+      parameters: [
+        {
+          description:
+            'The value z, in [−1, 1] for a real result (±1 give ±∞); with two arguments, the point z0.',
+          sample: '1/2',
+        },
+        {
+          description: 'The value z: the result is the x with Erf(z0, x) = z.',
+          sample: '1/2',
+        },
+      ],
       complexity: 7500,
       broadcastable: true,
       // The engine has a REAL kernel only. On the real segment (−1, 1) the
@@ -648,6 +673,8 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
 
     Erfi: {
       description: 'Imaginary error function: -i·Erf(i·x)',
+      examples: ['Erfi(0.5)'],
+      parameters: [{ description: 'The point x.', sample: '1/2' }],
       complexity: 7500,
       broadcastable: true,
       // The carrier is every point where erfi has a value: the finite
@@ -715,9 +742,20 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
     // https://towardsdatascience.com/on-average-youre-using-the-wrong-average-part-ii-b32fcb41527e
 
     Mean: {
+      examples: [
+        'Mean([1, 2, 3, 4])  // 5/2',
+        'Mean(NormalDistribution(3, 2))  // 3',
+      ],
       complexity: 1200,
       broadcastable: false,
       signature: '((collection<number> | number | distribution)+) -> number',
+      parameters: [
+        {
+          description:
+            'The data, as collections or single numbers that form one sample, or a single distribution, whose mean is returned; no data gives `NaN`.',
+          sample: '[1, 2, 3, 4]',
+        },
+      ],
       // A data-consuming aggregate (§3.C): result type is the numeric base
       // with NO `| missing` arm (I6 absorption) — `number`, NOT `real`,
       // because every arm of the wide type is reachable. An absent datum or
@@ -812,6 +850,13 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
       broadcastable: false,
       signature:
         '((collection<number> | number)+) -> real | signed_infinity | nan',
+      parameters: [
+        {
+          description:
+            'The data, as collections or single numbers that form one sample; an even count gives the mean of the two middle values, and no data gives `NaN`.',
+          sample: '[3, 1, 4, 2]',
+        },
+      ],
       // Complex data is REJECTED here (`nonRealUnivariateError`) and a
       // non-numeric datum with it (`collectData`); an `Error(...)` has a type
       // outside the numeric lattice, so it neither confirms nor contradicts
@@ -878,10 +923,21 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
 
     Variance: {
       description: 'Sample variance of a collection of numbers.',
+      examples: [
+        'Variance([1, 2, 3, 4])  // 5/3',
+        'Variance(PoissonDistribution(3))  // 3',
+      ],
       complexity: 1200,
       broadcastable: false,
       signature:
         '((collection<number> | number | distribution)+) -> real<0..> | nan',
+      parameters: [
+        {
+          description:
+            'The data, as collections or single numbers that form one sample, or a single distribution, whose variance is returned; the divisor is n − 1, so fewer than two values give `NaN`.',
+          sample: '[1, 2, 3, 4]',
+        },
+      ],
       // The variance is a mean of SQUARED deviations, so it is real and
       // non-negative even for complex data (`Variance([1, 1+2i, 3])` is
       // `8/3` — see `complexVariance`), and infinite data has no variance at
@@ -964,9 +1020,17 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
 
     PopulationVariance: {
       description: 'Population variance of a collection of numbers.',
+      examples: ['PopulationVariance([1, 2, 3, 4])  // 5/4'],
       complexity: 1200,
       broadcastable: false,
       signature: '((collection<number> | number)+) -> real<0..> | nan',
+      parameters: [
+        {
+          description:
+            'The data, as collections or single numbers that form one sample; the divisor is n, so one value gives 0 and no data gives `NaN`.',
+          sample: '[1, 2, 3, 4]',
+        },
+      ],
       // The population variance is the same mean of SQUARED deviations the
       // sample variance is, over the divisor `n`: real and non-negative even
       // for complex data (`PopulationVariance([1, 1+2i, 3])` is `16/9` — see
@@ -1044,9 +1108,20 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
       complexity: 1200,
       broadcastable: false,
       description: 'Sample Standard Deviation of a collection of numbers.',
+      examples: [
+        'StandardDeviation([1, 3, 5])  // 2',
+        'StandardDeviation(NormalDistribution(0, 3))  // 3',
+      ],
       keywords: ['stdev', 'std'],
       signature:
         '((collection<number> | number | distribution)+) -> real<0..> | nan',
+      parameters: [
+        {
+          description:
+            'The data, as collections or single numbers that form one sample, or a single distribution, whose standard deviation is returned; the divisor is n − 1, so fewer than two values give `NaN`.',
+          sample: '[1, 3, 5]',
+        },
+      ],
       // The standard deviation is the square root of a mean of SQUARED
       // deviations, so it is real and non-negative even for complex data
       // (`StandardDeviation([1, 1+2i, 3])` is `2/3·√6` — see
@@ -1140,7 +1215,15 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
       complexity: 1200,
       broadcastable: false,
       description: 'Population Standard Deviation of a collection of numbers.',
+      examples: ['PopulationStandardDeviation([2, 4, 4, 4, 5, 5, 7, 9])  // 2'],
       signature: '((collection<number> | number)+) -> real<0..> | nan',
+      parameters: [
+        {
+          description:
+            'The data, as collections or single numbers that form one sample; the divisor is n, so one value gives 0 and no data gives `NaN`.',
+          sample: '[2, 4, 4, 4, 5, 5, 7, 9]',
+        },
+      ],
       // The population standard deviation is the square root of a mean of
       // SQUARED deviations over the divisor `n`, so it is real and
       // non-negative even for complex data
@@ -1223,6 +1306,14 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
 
     Kurtosis: {
       description: 'Kurtosis of a collection of numbers.',
+      examples: ['Kurtosis([1, 2, 3, 4, 10])'],
+      parameters: [
+        {
+          description:
+            'The data, as collections or single numbers that form one sample; the result is the population kurtosis m₄/m₂² (3 for a normal distribution, not the excess), and `NaN` when every value is the same.',
+          sample: '[1, 2, 3, 4, 10]',
+        },
+      ],
       complexity: 1200,
       broadcastable: false,
       signature: '((collection<number> | number)+) -> real | nan',
@@ -1275,9 +1366,17 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
 
     Skewness: {
       description: 'Skewness of a collection of numbers.',
+      examples: ['Skewness([1, 2, 3, 10])  // 18/25 sqrt(2)'],
       complexity: 1200,
       broadcastable: false,
       signature: '((collection<number> | number)+) -> real | nan',
+      parameters: [
+        {
+          description:
+            'The data, as collections or single numbers that form one sample; the skewness is the third central moment over the cube of the population standard deviation, and constant data or no data gives `NaN`.',
+          sample: '[1, 2, 3, 10]',
+        },
+      ],
       // Complex data is REJECTED here (`nonRealUnivariateError`) and a
       // non-numeric datum with it (`collectData`); an `Error(...)` has a type
       // outside the numeric lattice, so it neither confirms nor contradicts
@@ -1332,6 +1431,13 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
       broadcastable: false,
       signature:
         '((collection<number> | number)+) -> real | signed_infinity | nan',
+      parameters: [
+        {
+          description:
+            'The data, as collections or single numbers that form one sample; a tie gives the smallest of the most frequent values, and no data gives `NaN`.',
+          sample: '[1, 2, 2, 3]',
+        },
+      ],
       // Complex data is REJECTED here (`nonRealUnivariateError`) and a
       // non-numeric datum with it (`collectData`); an `Error(...)` has a type
       // outside the numeric lattice, so it neither confirms nor contradicts
@@ -1406,6 +1512,13 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
       // admitted, so the handler can apply the §3.C absent-data rule.
       signature:
         '((collection<number> | number)+) -> tuple<lower: real | signed_infinity | nan, mid: real | signed_infinity | nan, upper: real | signed_infinity | nan>',
+      parameters: [
+        {
+          description:
+            'The data, as collections or single numbers that form one sample; no data gives a triple of `NaN`.',
+          sample: '[1, 2, 3, 4, 5]',
+        },
+      ],
       nanBehavior: 'handle',
       missingBehavior: 'handle',
       examples: ['Quartiles([1, 2, 3, 4, 5])  // Returns (1.5, 3, 4.5)'],
@@ -1463,6 +1576,14 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
 
     InterquartileRange: {
       description: 'Interquartile range (Q3 - Q1) of a collection.',
+      examples: ['InterquartileRange([1, 2, 3, 4, 5, 6, 7, 8])'],
+      parameters: [
+        {
+          description:
+            'The data, as collections or single numbers that form one sample; Q1 and Q3 are the medians of the lower and upper halves, without the median of an odd count, and an empty collection gives `NaN`.',
+          sample: '[1, 2, 3, 4, 5, 6, 7, 8]',
+        },
+      ],
       complexity: 1200,
       broadcastable: false,
       signature: '((collection<number> | number)+) -> real<0..> | +oo | nan',
@@ -1537,7 +1658,19 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
       // (`computeBinning` returns undefined) — width semantics are the
       // importer's to translate (e.g. to explicit bin edges).
       signature:
-        '(collection<number>, number | list<number>) -> list<tuple<number, integer>>',
+        '(xs: collection<number>, bins: number | list<number>) -> list<tuple<number, integer>>',
+      parameters: {
+        xs: {
+          description:
+            'The data, finite real numbers; an empty collection stays unevaluated.',
+          sample: '[1, 2, 2, 3]',
+        },
+        bins: {
+          description:
+            'A positive integer number of bins of equal width from the least to the greatest value, or a list of bin edges; a bin holds its lower edge, the last bin also its upper edge, and a value outside the edges is not counted. A number that is not a positive integer stays unevaluated.',
+          sample: '3',
+        },
+      },
       examples: [
         'Histogram([1, 2, 2, 3], 3)  // Returns [(1,1), (1.6667,2), (2.3333,1)]',
       ],
@@ -1571,7 +1704,20 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
       description: 'Count the number of elements falling into each bin.',
       complexity: 8200,
       // Same widened bin spec as Histogram (non-integer counts stay inert).
-      signature: '(collection<number>, number | list<number>) -> list<number>',
+      signature:
+        '(xs: collection<number>, bins: number | list<number>) -> list<number>',
+      parameters: {
+        xs: {
+          description:
+            'The data, finite real numbers; an empty collection stays unevaluated.',
+          sample: '[1, 2, 2, 3]',
+        },
+        bins: {
+          description:
+            'A positive integer number of bins of equal width from the least to the greatest value, or a list of bin edges; a bin holds its lower edge, the last bin also its upper edge, and a value outside the edges is not counted. A number that is not a positive integer stays unevaluated.',
+          sample: '3',
+        },
+      },
       examples: ['BinCounts([1, 2, 2, 3], 3)  // Returns [1, 2, 1]'],
       // Decline-only, same `computeBinning` precondition as `Histogram`.
       canEnumerate: canEnumerateFiniteSource,
@@ -1606,7 +1752,24 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
       // ground `string` parameter would win most-specific-wins on every
       // untyped operand.
       signature:
-        '((S, integer, integer?) -> list<string> where S: string) & ((collection, integer, integer?) -> list<list>)',
+        '((xs: S, count: integer, step: integer?) -> list<string> where S: string) & ((xs: collection, count: integer, step: integer?) -> list<list>)',
+      parameters: {
+        xs: {
+          description:
+            'The collection to read; a string gives windows that are strings.',
+          sample: '[1, 2, 3, 4]',
+        },
+        count: {
+          description:
+            'The number of elements in each window, at least 1; a count larger than the collection gives no window.',
+          sample: '2',
+        },
+        step: {
+          description:
+            'The distance between the starts of two windows, at least 1, by default 1; only complete windows are kept.',
+          sample: '2',
+        },
+      },
       examples: [
         'SlidingWindow([1, 2, 3, 4], 2)  // Returns [[1,2], [2,3], [3,4]]',
         'SlidingWindow("abcd", 2)  // Returns ["ab", "bc", "cd"]',
@@ -1669,10 +1832,25 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
       description:
         'Sample covariance (n − 1 denominator) of paired data, given as two ' +
         'equal-length collections or one collection of (x, y) pairs.',
+      examples: [
+        'Covariance([1, 2, 3], [2, 4, 7])',
+        'Covariance([(1, 2), (2, 4), (3, 7)])',
+      ],
+      parameters: {
+        xs: {
+          description:
+            'The x values, or the (x, y) pairs when `ys` is omitted; at least two points are needed.',
+          sample: '[1, 2, 3]',
+        },
+        ys: {
+          description: 'The y values, as many as the x values.',
+          sample: '[2, 4, 7]',
+        },
+      },
       complexity: 1200,
       broadcastable: false,
       signature:
-        '(collection<number | tuple>, (collection<number>)?) -> real | nan',
+        '(xs: collection<number | tuple>, ys: (collection<number>)?) -> real | nan',
       // A data-consuming aggregate (§3.C). The `nan` arm is the codomain
       // vocabulary the `handle` policies need: a `NaN` or an infinite datum,
       // an absent (`Missing`) datum, and empty input all make the answer
@@ -1703,10 +1881,25 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
       description:
         'Population covariance (n denominator) of paired data, given as two ' +
         'equal-length collections or one collection of (x, y) pairs.',
+      examples: [
+        'PopulationCovariance([1, 2, 3], [2, 4, 7])  // 5/3',
+        'PopulationCovariance([(1, 2), (2, 4), (3, 7)])  // 5/3',
+      ],
       complexity: 1200,
       broadcastable: false,
       signature:
-        '(collection<number | tuple>, (collection<number>)?) -> real | nan',
+        '(xs: collection<number | tuple>, ys: (collection<number>)?) -> real | nan',
+      parameters: {
+        xs: {
+          description:
+            'The x values, or the (x, y) pairs when `ys` is omitted; at least two points are needed.',
+          sample: '[1, 2, 3]',
+        },
+        ys: {
+          description: 'The y values, as many as the x values.',
+          sample: '[2, 4, 7]',
+        },
+      },
       // A data-consuming aggregate (§3.C). The `nan` arm is the codomain
       // vocabulary the `handle` policies need: a `NaN` or an infinite datum,
       // an absent (`Missing`) datum, and empty input all make the answer
@@ -1737,10 +1930,25 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
       description:
         "Pearson's correlation coefficient of paired data, given as two " +
         'equal-length collections or one collection of (x, y) pairs.',
+      examples: [
+        'Correlation([1, 2, 3], [2, 4, 7])',
+        'Correlation([1, 2, 3], [3, 2, 1])',
+      ],
+      parameters: {
+        xs: {
+          description:
+            'The x values, or the (x, y) pairs when `ys` is omitted; at least two points are needed, and data with no variance is an error.',
+          sample: '[1, 2, 3]',
+        },
+        ys: {
+          description: 'The y values, as many as the x values.',
+          sample: '[2, 4, 7]',
+        },
+      },
       complexity: 1200,
       broadcastable: false,
       signature:
-        '(collection<number | tuple>, (collection<number>)?) -> real<-1..1> | nan',
+        '(xs: collection<number | tuple>, ys: (collection<number>)?) -> real<-1..1> | nan',
       // Pearson's r lies in [−1, 1], and the kernel keeps it there at every
       // precision: two-pass centered sums, then a clip of the rounding
       // residue (`correlation`, `numerics/statistics.ts`). The one-pass
@@ -1787,7 +1995,20 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
         'fitted expression if a trailing variable symbol is given.',
       complexity: 1200,
       broadcastable: false,
+      examples: [
+        'LinearRegression([1, 2, 3], [2, 4, 7])  // (-2/3, 5/2)',
+        'LinearRegression([1, 2, 3], [2, 4, 7], x)  // 5/2 x - 2/3',
+      ],
       signature: '(any+) -> tuple<number, number>',
+      // By position: the arguments are read from the end (an optional
+      // variable), so a position has no fixed role.
+      parameters: [
+        {
+          description:
+            'The data, as two collections of x and y values or one collection of (x, y) pairs with at least two points, then optionally the variable of the fitted line.',
+          sample: '[1, 2, 3]',
+        },
+      ],
       type: (ops, context) =>
         BoxedType.forResult(
           fitResultType(ops, LINEAR_FIT_COEFFICIENTS),
@@ -1806,7 +2027,20 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
         'if a trailing variable symbol is given.',
       complexity: 1200,
       broadcastable: false,
+      examples: [
+        'PolynomialFit([0, 1, 2, 3], [1, 2, 5, 10], 2)  // [1, 0, 1]',
+        'PolynomialFit([0, 1, 2, 3], [1, 2, 5, 10], 2, x)  // x^2 + 1',
+      ],
       signature: '(any+) -> list<number>',
+      // By position: the arguments are read from the end (an optional
+      // variable, then the degree), so a position has no fixed role.
+      parameters: [
+        {
+          description:
+            'The data, as two collections of x and y values or one collection of (x, y) pairs, then the degree, an integer from 0 to 12 and less than the number of points, then optionally the variable of the fitted polynomial.',
+          sample: '[0, 1, 2, 3]',
+        },
+      ],
       type: (ops, context) =>
         BoxedType.forResult(
           fitResultType(ops, POLYNOMIAL_FIT_COEFFICIENTS),
@@ -1864,7 +2098,45 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
       // value that must NOT be substituted before the fit (model/params/vars
       // stay held; the data operand is evaluated inside the handler).
       lazy: true,
-      signature: '(any, any, any, any, dictionary?) -> dictionary',
+      signature:
+        '(data: any, model: any, params: any, vars: any, options: dictionary?) -> dictionary',
+      examples: [
+        'FindFit([(0, 1), (1, 3), (2, 5)], a * x + b, [a, b], [x])',
+        'FindFit([1, 3, 5], a * x + b, [(a, 1), b], [x])',
+      ],
+      parameters: {
+        data: {
+          description:
+            'The data: a list of (x…, y) tuples, or a plain list of y values at x = 1, 2, 3, …; a list of datasets for a list of models.',
+          sample: '[(0, 1), (1, 3), (2, 5)]',
+        },
+        model: {
+          description:
+            'The model, an expression in the variables and the parameters, or a list of models that share parameters.',
+          sample: 'a * x + b',
+        },
+        params: {
+          description:
+            'The parameters, each a symbol, (a, a0) with the start value a0, or (a, a0, lo, hi) with bounds.',
+          sample: '[a, b]',
+        },
+        vars: {
+          description: 'The variables, a symbol or a list of symbols.',
+          sample: '[x]',
+        },
+        options: {
+          description: 'The options of the fit.',
+          sample: '{global -> {a -> [0, 5]}}',
+          keys: {
+            global: {
+              type: 'dictionary<list<real>>',
+              description:
+                'The parameters (at most two) searched over a range [lo, hi] or [lo, hi, step] for the lowest sum of squared residuals, instead of the local minimum nearest the start.',
+              sample: '{a -> [0, 5]}',
+            },
+          },
+        },
+      },
       // The record of the result, with one field per parameter of the
       // third operand (`fitRecordType`).
       type: (ops, context) =>
@@ -1888,7 +2160,7 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
     // `docs/RANDOMNESS-MODEL.md` §5.
     RandomSample: {
       description:
-        'RandomSample(xs, k): a list of k elements drawn from the indexed ' +
+        'RandomSample(xs, count): a list of count elements drawn from the indexed ' +
         'collection `xs`, without replacement. "Without replacement" is over ' +
         'POSITIONS, not values: on a multiset, repeats are expected — ' +
         'RandomSample([1, 1, 2], 2) can return [1, 1]. Sampling a string ' +
@@ -1917,8 +2189,21 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
       // arm, so a ground `string` parameter would win most-specific-wins on
       // every untyped operand and claim `string` for a call that usually
       // returns a list. A bounded variable with no call-site binding does not.
+      examples: ['WithRandomSeed(42, RandomSample([1, 2, 3, 4, 5], 2))'],
       signature:
-        '((T, number) random -> T where T: string) & ((indexed_collection, number) random -> list)',
+        '((xs: T, count: number) random -> T where T: string) & ((xs: indexed_collection, count: number) random -> list)',
+      parameters: {
+        xs: {
+          description:
+            'The collection to draw from; a string gives a string of its characters.',
+          sample: '[1, 2, 3, 4, 5]',
+        },
+        count: {
+          description:
+            'The number of elements to draw, from 0 to the length of the collection; it is rounded to an integer.',
+          sample: '2',
+        },
+      },
       // IMPURE producer: decline-only from the source facet — zero draws,
       // never `true` (see `RandomShuffle`/`RandomChoice`).
       canEnumerate: (expr) => {

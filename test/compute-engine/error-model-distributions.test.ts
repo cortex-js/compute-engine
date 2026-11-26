@@ -55,18 +55,20 @@ describe('Contract B — distribution constructor carriers', () => {
     // distribution has no spelling in a type and stays the handler's.
     expect(
       ce.lookupDefinition('NormalDistribution')!.operator!.signature.toString()
-    ).toBe('(real, real<0<..>) -> expression<NormalDistribution>');
+    ).toBe('(mu: real, sigma: real<0<..>) -> expression<NormalDistribution>');
     expect(
       ce
         .lookupDefinition('BinomialDistribution')!
         .operator!.signature.toString()
-    ).toBe('(integer<0..>, real<0..1>) -> expression<BinomialDistribution>');
+    ).toBe(
+      '(n: integer<0..>, p: real<0..1>) -> expression<BinomialDistribution>'
+    );
     expect(
       ce.lookupDefinition('PoissonDistribution')!.operator!.signature.toString()
     ).toBe('(real<0<..>) -> expression<PoissonDistribution>');
     expect(
       ce.lookupDefinition('UniformDistribution')!.operator!.signature.toString()
-    ).toBe('(real, real) -> expression<UniformDistribution>');
+    ).toBe('(lower: real, upper: real) -> expression<UniformDistribution>');
     expect(
       ce
         .lookupDefinition('ExponentialDistribution')!
