@@ -12,7 +12,10 @@ import type { BoxedDefinition } from '../compute-engine/global-types.js';
 import type { Type } from '../common/type/types.js';
 import { typeToString } from '../common/type/serialize.js';
 
-import { implicitVariableCandidates } from '../compute-engine/boxed-expression/implicit-variable-rule.js';
+import {
+  implicitVariableCandidates,
+  implicitVariableCandidatesAsWritten,
+} from '../compute-engine/boxed-expression/implicit-variable-rule.js';
 import {
   ANONYMOUS_SLOT_NAMES,
   freeAnonymousSlots,
@@ -315,12 +318,25 @@ function implicitVariableOf(
   // names that the engine reads as unknowns (`N` in `limit(N + h, 1)`) were
   // not candidates. Boxing an unknown name declares it in the current scope,
   // so the names are boxed in a scope of their own, which is then removed.
+  //
+  // A name that the program binds is not read as a formula that a symbol
+  // of the same name holds in the engine: after `G := sin(x)` in the engine,
+  // the `G` of `function f(G) { limit(G*h, 0) }` is the parameter, and it
+  // is a candidate itself, not `x`.
   let candidates: string[];
   ce.pushScope();
   try {
-    candidates = implicitVariableCandidates(
-      ce.box(['List', ...writtenName.keys()])
-    );
+    const engineNames = [...writtenName.keys()];
+    const isBoundName = (n: string): boolean =>
+      isBound(writtenName.get(n) ?? n);
+    const bound = engineNames.filter(isBoundName);
+    const free = engineNames.filter((n) => !isBoundName(n));
+    candidates = [
+      ...new Set([
+        ...implicitVariableCandidatesAsWritten(ce.box(['List', ...bound])),
+        ...implicitVariableCandidates(ce.box(['List', ...free])),
+      ]),
+    ];
   } catch {
     candidates = [];
   } finally {

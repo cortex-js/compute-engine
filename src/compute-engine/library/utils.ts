@@ -82,6 +82,7 @@ import { appliesJumpFunction } from '../jump-functions.js';
 import {
   reduceCollection,
   enumerationDeclinedAfterWalk,
+  orderIndependentSource,
 } from './collections.js';
 import { extractFiniteDomainWithReason } from './logic-analysis.js';
 import {
@@ -5472,7 +5473,9 @@ export function* reduceBigOp<T>(
         if (folded !== undefined) return folded;
       }
     }
-    const value = body.evaluate();
+    // The fold does not depend on the order of the elements, so a `Sort`
+    // that could not order them (`Sort([3, x, 1])`) is read as its source.
+    const value = orderIndependentSource(body.evaluate());
     if (value.isCollection) {
       if (!isWalkableFiniteCollection(value)) return NON_ENUMERABLE_DOMAIN;
       const folded = options?.foldValue?.(value);

@@ -20,6 +20,33 @@
   `hostSum(map(x => x * 2, [1, 2]))`, `hostSum([1, 2] + 1)`, and a list
   constant) now compile, where they declined.
 
+### New Features
+
+- **`epsilProgramSites()` gives the sites of the names of an Epsil program,
+  each with the binding it resolves to** (CE-1628, CE-1255.2). It is exported
+  from `@cortex-js/compute-engine/epsil` and reads the source without running
+  it. A host that runs a program in a scope of its own, such as a notebook
+  cell over the scope of its section, reads from it which names come from
+  outside the program. Each site has its range, its `role` (`definition`,
+  `read`, `write`, `read-write`, `reference`), whether it is `deferred` (in a
+  function body) and its binding, whose `kind` is `program`, `local`,
+  `external`, `library` or `unresolved`. `externalWrites` names the outer
+  bindings that the program writes, and `statements` gives, for each
+  top-level statement, the top-level bindings that it reads, defines and
+  writes. The resolution follows the interpreter: with an outer `k`, the
+  `k` of `function g() { k }` followed by `let k = 7` is the `k` of the
+  program, and the initializer of `let k = k + 1` reads the outer `k`.
+
+  ```ts
+  ce.declare("k", "integer");
+  ce.pushScope();
+  const source = "let k = k + 1\nfor k in 1..3 { k }";
+  const { bindings, sites } = epsilProgramSites(ce, source);
+  sites.map((s) => `${s.start} ${s.role} ${bindings[s.binding].kind}`);
+  // ➔ ["4 definition program", "8 read external",
+  //    "18 definition local", "30 read local"]
+  ```
+
 ### Improvements
 
 - **Compiled JavaScript reads a `Map` or a `Filter` where it is, with no
@@ -83,13 +110,72 @@
   comparison runs when an element of the result is read. This also
   holds for a list of rows of a run-time count, and for a stated length
   beside a run-time one (`MatrixMultiply(K, v)` with `K: matrix<real^2x3>`
-  and `v: list<real>`), which gave an unspecified value before. A
-  `list<list<real>>` argument at a parameter of a matrix type, `Determinant`
-  and `Inverse` of a matrix of run-time size, matrices of complex numbers or
+  and `v: list<real>`), which gave an unspecified value before.
+  `Shape(M)` gives `(2, 3)` and `Rank(M)` gives 2; they also compile for a
+  table that the program builds, of a run-time number of rows. A parameter
+  of a matrix type takes a matrix of stated size, a literal and a build of a
+  constant row length: with `tr := m ↦ Transpose(m)` declared
+  `(matrix<real>) -> list<list<real>>`, `tr([[1, 2], [3, 4]])` gives
+  `[[1, 3], [2, 4]]`. An `Apply` whose body is a list of rows gives it whole:
+  `Apply((m: matrix<real>) ↦ Transpose(m), M)` gives
+  `[[1, 4], [2, 5], [3, 6]]`. `Determinant`, `Inverse`, `MatrixPower` and
+  `Diagonal` of a matrix of run-time size compile too: at
+  `M = [[1, 2], [3, 4]]`, `Determinant(M)` gives -2 and `Inverse(M)` gives
+  `[[-2, 1], [1.5, -0.5]]`, and for a matrix that is not square
+  `Determinant(M)` throws
+  `RangeError: expected-square-matrix: a matrix of 2 rows and 3 columns`.
+  A `list<list<real>>` argument and a call result at a parameter of a
+  matrix type, `RowReduce` of a matrix of run-time size, matrices of complex numbers or
   of booleans, a matrix of one stated dimension (`matrix<real^2x?>`), GLSL,
   the interval target and the `bigint` mode decline.
 
 ### Resolved Issues
+
+- **A loop that writes the elements of a list of more than 10,000 elements
+  gives its value** (CE-1796). With
+  `let fb: list<integer> = [0 for k in 1..20000]`, the loop
+  `for k in 1..2000 { fb[k] = k % 256 }` ended with the error
+  `Maximum call stack size exceeded`, and `fb[2000]` now gives `208`. Each
+  write made a lazy view over the view of the write before; the views are
+  listed into one list at each 32 writes, as they were for a shorter list.
+  The loop is also faster: 2000 writes to a list of 5,000 elements took
+  about 2.1 seconds and take about 1.1 seconds. A variable that holds a
+  range of more than 10,000 elements (`let xs: list<integer> = 1..20000`)
+  still gives the error; start from a list (`[k for k in 1..20000]`).
+
+- **A derivative, an integral or a limit with no variable written, of a
+  formula that reads a variable that holds a formula, is computed with the
+  variable of that formula** (CE-1787). After
+  `ce.assign('G', ce.parse('\\sin(x)'))`, `ND(2G, 1)` gave `2` (the
+  derivative with respect to `G`) and now gives `2cos(1) ≈ 1.0806`;
+  `\int_0^1 G + x` gave `x + 1/2` and now gives `3/2 − cos(1)`; `\int G + x`
+  gave `G^2/2 + G·x` and now gives `x^2/2 − cos(x)`; `D(G^2)` gave `2G` and
+  now gives `2sin(x)cos(x)`. A variable that holds a formula is not chosen
+  as the variable: the variable is chosen from the symbols of its formula
+  and the other symbols of the expression. This applies to `D`, `Series`,
+  `Integrate`, `Limit`, `NLimit`, `ND` and `NIntegrate`, when the formula is
+  assigned before the expression is parsed or boxed. The integral of a
+  function literal with a limit that names no variable reads such a formula
+  too: `Integrate(Function(G + a, x), Limits(Nothing, 0, 1))` gave
+  `a + sin(x)` and now gives `a + 1 − cos(1)`.
+
+- **The numeric inverse of a singular matrix with complex entries stays
+  unevaluated** (CE-1803).
+  `Inverse([[3 + i, 2, 1], [1, 1, 1], [4 + i, 3, 2]]).N()` gave entries of
+  about `5e15`, because rounding left a small nonzero pivot in place of 0. It
+  now stays unevaluated, as `evaluate()` does. The same holds for `evaluate()`
+  of a matrix with entries such as `0.9 + 0.3i`, for `PseudoInverse(…).N()`
+  and for `MatrixPower` with a negative exponent. The inverse of a matrix of
+  complex machine numbers now uses partial pivoting, and a pivot is zero when
+  it is very small relative to the entries, so a regular matrix that is very
+  ill-conditioned also stays unevaluated. A matrix of complex machine numbers
+  with an infinite or `NaN` entry stays unevaluated too.
+
+- **The sum, the product, the maximum, the minimum and the count of a value
+  of a sorted list are found when an element is a variable** (CE-1804). With
+  `x` declared `real`, `Sum(Sort([3, x, 1]))`, `Max(Sort([3, x, 1]))` and
+  `Count(Sort([3, x, 1]), 1)` stayed unevaluated. They now give `x + 4`,
+  `Max(3, x)` and `1`, also when a symbol holds the sorted list.
 
 - **The Epsil syntax highlighting styles a `\` at the end of an unclosed
   single-line string as invalid** (CE-1782). For `let s = "C:\`,

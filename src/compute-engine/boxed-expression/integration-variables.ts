@@ -1,8 +1,12 @@
 import type { Expression } from '../global-types.js';
 import { isSubtype } from '../../common/type/subtype.js';
 import { isFunction, isSymbol, sym } from './type-guards.js';
-import { functionLiteralParameterName } from './function-literal.js';
-import { collectBinderNames, implicitVariableCandidates } from './utils.js';
+import {
+  ANONYMOUS_SLOT_NAMES,
+  functionLiteralParameterName,
+} from './function-literal.js';
+import { collectBinderNames } from './utils.js';
+import { isImplicitVariableCandidate } from './implicit-variable-rule.js';
 import { isOperatorDef, isValueDef } from './definition-guards.js';
 
 // The variable of an integration limit that names no variable
@@ -24,7 +28,9 @@ import { isOperatorDef, isValueDef } from './definition-guards.js';
  * variable of the first limit that names no variable. This is also true when
  * the symbol has an assigned value: the variable is a bound variable, and
  * the order of boxing and assignment does not change it. A constant (`Pi`)
- * is not a variable (`implicitVariableCandidates`).
+ * is not a variable (`isImplicitVariableCandidate()`). A symbol that holds
+ * a formula is the variable here too: it is read as its formula only when
+ * no limit names a variable, before this function is called.
  *
  * The result is:
  * - the name of the variable;
@@ -73,7 +79,15 @@ export function implicitIntegrationVariable(
     if (
       position === 0 &&
       !named.has(f.symbol) &&
-      implicitVariableCandidates(f).includes(f.symbol)
+      // The rule for one symbol, and not the candidates of `f`: a symbol
+      // that holds a formula is not among its own candidates, and it is the
+      // variable here, where another limit names a variable.
+      !ANONYMOUS_SLOT_NAMES.has(f.symbol) &&
+      isImplicitVariableCandidate(
+        f.engine,
+        f.symbol,
+        f.unknowns.includes(f.symbol)
+      )
     )
       return f.symbol;
   }

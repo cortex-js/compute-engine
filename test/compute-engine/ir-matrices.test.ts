@@ -144,6 +144,16 @@ describe('MATRIX OPERATORS: THE INTERPRETER VALUE ON JAVASCRIPT', () => {
     ['Trace 1x1', ['Trace', 'S'], [{ S: [[-2.5]] }]],
     ['Diagonal of a matrix', ['Diagonal', 'B'], [{ B: B1 }, { B: B2 }]],
     ['Diagonal of rows of run-time count', ['Diagonal', 'P'], [{ P: P1 }]],
+    // A number of rows known at run time only: rank 2 and its two lengths
+    // (the interpreter's empty list of rows has rank 1 and the shape `(0)`,
+    // a known limitation of `docs/COMPILATION-MODEL.md`).
+    ['Rank of rows of run-time count', ['Rank', 'P'], [{ P: P1 }]],
+    ['Shape of rows of run-time count', ['Shape', 'P'], [{ P: P1 }]],
+    // Of a run-time number of rows of 2 elements: square where it has two
+    // rows (`rows.order`; a `RangeError` at another, below).
+    ['Inverse of rows of run-time count', ['Inverse', 'P'], [{ P: A1 }, { P: A2 }]],
+    ['MatrixPower of rows of run-time count', ['MatrixPower', 'P', 2], [{ P: A1 }]],
+    ['Determinant of rows of run-time count', ['Determinant', 'P'], [{ P: A1 }]],
     ['Diagonal of a vector', ['Diagonal', 'U'], [{ U: [1.5, -2, 3] }]],
     ['Determinant 1x1', ['Determinant', 'S'], [{ S: [[3.5]] }]],
     ['Determinant 2x2', ['Determinant', 'A'], [{ A: A1 }, { A: A2 }]],
@@ -444,6 +454,18 @@ describe('MATRIX OPERATORS: THE INTERPRETER VALUE ON JAVASCRIPT', () => {
   });
 });
 
+describe('MATRIX OPERATORS: A RUN-TIME ORDER', () => {
+  // The interpreter's `expected-square-matrix`.
+  test.each([['Inverse'], ['Determinant'], ['Trace']])(
+    '%s of rows of run-time count that are not square',
+    (h) => {
+      const r = compiled([h, 'P']);
+      expect(r.success).toBe(true);
+      expect(() => r.run({ P: P1 })).toThrow(/expected-square-matrix/);
+    }
+  );
+});
+
 describe('MATRIX OPERATORS: DECLINES', () => {
   const DECLINES: Array<[any, RegExp]> = [
     // The rows of a `list<list<real>>` can have two lengths: a matrix
@@ -454,8 +476,6 @@ describe('MATRIX OPERATORS: DECLINES', () => {
     // time only.
     [['Trace', 'B'], /not square/],
     [['Determinant', 'B'], /not square/],
-    [['Inverse', 'P'], /known at run time only/],
-    [['MatrixPower', 'P', 2], /known at run time only/],
     // The transpose of `P` has rows of run-time length.
     [['Transpose', 'P'], /known at run time only/],
     [['Diagonal', 'L'], /run-time length/],
@@ -469,11 +489,6 @@ describe('MATRIX OPERATORS: DECLINES', () => {
     [['Shape', 'x'], /empty tuple/],
     [['Flatten', 'B', 'n'], /depth that is not a constant/],
     [['Flatten', 'B', -1], /depth that is not a constant/],
-    // An empty list of rows has rank 1 and the shape `(0)` in the
-    // interpreter, so a number of rows known at run time only settles
-    // neither.
-    [['Rank', 'P'], /known at run time only/],
-    [['Shape', 'P'], /known at run time only/],
   ];
   for (const [json, cause] of DECLINES)
     it(JSON.stringify(json), () => {

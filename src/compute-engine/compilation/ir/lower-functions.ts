@@ -1711,6 +1711,10 @@ export function functionLowering(
           `a list argument of ${e.operator} that the parameter ${i + 1}, a list or a point, would take whole (the interpreter maps the function over the list)`
         );
       if (mapped) return [];
+      // A parameter of a matrix type takes a list of rank 2 as its rows
+      // (`matrixRows()`), whose rows have its stated length.
+      if (p.width === true && type(values[i]).lane !== 'rows')
+        values[i] = lists.matrixRows(e, values[i]) ?? values[i];
       // A parameter of the lane `rows` takes a list of lists of run-time
       // length only.
       if (p.lane === 'rows' && type(values[i]).lane !== 'rows')

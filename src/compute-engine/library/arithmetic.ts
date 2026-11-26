@@ -475,6 +475,7 @@ import {
   enumerationDeclinedAfterWalk,
   compiledMapDoubles,
   compiledMapDoublesSteps,
+  orderIndependentSource,
 } from './collections.js';
 import {
   rangeExtremumClosedForm,
@@ -19014,7 +19015,11 @@ function* minMaxSteps(
     if (listed !== undefined && !isFunction(listed, 'List')) {
       if (!isInfiniteListing(listed)) return listed;
     }
-    const op = isFunction(listed, 'List') ? listed : operand;
+    // An extremum does not depend on the order of the elements, so a `Sort`
+    // that could not order them (`Sort([3, x, 1])`) is read as its source.
+    const op = isFunction(listed, 'List')
+      ? listed
+      : orderIndependentSource(operand);
     const [val, others] = processMinMaxItem(op, mode);
     // An error (a dictionary operand or element) is the answer of the whole
     // extremum, as it is for `Sum`.

@@ -8164,8 +8164,31 @@ volumes
         // (CE-157). A symbol that holds a formula in an integration variable
         // is read the same way: with `G := sin(x)`, `∫ G dx` is `-cos(x)`
         // (`formulaValueOf`).
+        //
+        // The variable of a limit that names none is a parameter of the
+        // integrand (`implicitIntegrationVariable`), and a formula in it is
+        // read too: with `G := sin(x)`, `\int_0^1 G + x` has the parameter
+        // `x` and is `3/2 − cos(1)`. The integral with the values in place
+        // names that variable in its limit: its canonical form would choose
+        // the variable again from the symbols of the new integrand, which
+        // can be another symbol than the parameter.
         {
-          const names = ops.slice(1).flatMap((l) => {
+          const limits = ops.slice(1).map((l, i) => {
+            if (!isFunction(l, 'Limits') || sym(l.op1) !== 'Nothing') return l;
+            const implicit = implicitIntegrationVariable(
+              ops[0],
+              ops.slice(1),
+              i
+            );
+            return typeof implicit === 'string'
+              ? ce.function(
+                  'Limits',
+                  [ce.symbol(implicit, { canonical: false }), l.op2, l.op3],
+                  { form: 'raw' }
+                )
+              : l;
+          });
+          const names = limits.flatMap((l) => {
             const v = isFunction(l) ? sym(l.op1) : undefined;
             return v !== undefined && v !== 'Nothing' ? [v] : [];
           });
@@ -8212,7 +8235,7 @@ volumes
                 ce,
                 withOperandBindings(ce, withValues, replaced, () =>
                   ce
-                    .function('Integrate', [withValues, ...ops.slice(1)])
+                    .function('Integrate', [withValues, ...limits])
                     .evaluate({ numericApproximation })
                 ),
                 expression,

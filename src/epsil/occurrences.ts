@@ -106,12 +106,19 @@ export type BindingGroup = {
    * start of the loop, or from the end of the comprehension's body, to the
    * end of the clause's collection. */
   hidden?: [number, number];
+  /** The binding is made at the top level of the program. Set only under
+   * the `engineRules` option of {@link documentBindings}. */
+  topLevel?: true;
 };
 
 type Scope = {
   span: [number, number];
   bindings: Map<string, BindingGroup>;
   parent: Scope | undefined;
+  /** Under the `engineRules` option, the names whose `let` or `const`
+   * statement of this scope has its initializer walked now: such a name is
+   * read outside this scope. */
+  initializing?: ReadonlySet<string>;
 };
 
 /**
@@ -242,8 +249,38 @@ export function documentBindings(
       isBound: (name: string) => boolean,
       declarationOf: (name: string) => ProgramDeclaration | undefined
     ) => readonly BinderSite[] | undefined;
+    /**
+     * Resolve the names as the engine does when it prepares the program,
+     * where the default is the model of the editor (above):
+     *
+     * - a `let` or `const` statement of a block or of the program binds its
+     *   names in the whole scope, also above the statement and in a function
+     *   body written above it. Its own initializer is the exception: a name
+     *   of the statement there is read outside the scope (`let k = k + 1`
+     *   reads the outer `k`), and names the binding itself when nothing
+     *   outside binds it. An initializer that is a function literal always
+     *   names the binding itself (a recursive `let f = (n) => … f(n - 1)`);
+     * - an assignment never declares: a target with no visible binding is a
+     *   `write` of a free name;
+     * - the collection of a `for` clause is read in the scope of its loop:
+     *   in `for n in 1..n`, the second `n` is the loop variable;
+     * - the target of `+=`, and the collection or record of an indexed or
+     *   field target (`a[1] = 2`, `r.x = 2`), is a `write`.
+     *
+     * `defined(name)` is true when the engine or the library binds `name`
+     * outside the program. `library(name, start)` is true when the
+     * occurrence of `name` at the offset `start` names the library whatever
+     * the program binds: no binding of the program is visible there, and a
+     * call with that head binds its variables. A group made at the top
+     * level of the program has `topLevel` set.
+     */
+    engineRules?: {
+      defined: (name: string) => boolean;
+      library?: (name: string, start: number) => boolean;
+    };
   }
 ): BindingGroup[] {
+  const rules = options?.engineRules;
   const groups: BindingGroup[] = [];
   const freeGroups = new Map<string, BindingGroup>();
   const typeRegions: TypeRegion[] = [];
@@ -358,6 +395,7 @@ export function documentBindings(
       ...(declaration === undefined ? {} : { declaration }),
       scope: scope.span,
       visibleFrom,
+      ...(rules !== undefined && scope === root ? { topLevel: true } : {}),
     };
     groups.push(group);
     scope.bindings.set(name, group);
@@ -373,12 +411,10 @@ export function documentBindings(
     scope: Scope,
     role: OccurrenceRole
   ): void {
-    for (let s: Scope | undefined = scope; s !== undefined; s = s.parent) {
-      const binding = s.bindings.get(name);
-      if (binding !== undefined && span[0] >= binding.visibleFrom) {
-        binding.occurrences.push({ start: span[0], end: span[1], role });
-        return;
-      }
+    const binding = visibleBinding(scope, name, span[0]);
+    if (binding !== undefined) {
+      binding.occurrences.push({ start: span[0], end: span[1], role });
+      return;
     }
     let group = freeGroups.get(name);
     if (group === undefined) {
@@ -729,11 +765,13 @@ export function documentBindings(
       return;
     }
 
-    switch (head) {
+    // Under `engineRules`, `t += e` writes its target as an assignment does.
+    switch (head === 'AddTo' && rules !== undefined ? 'Assign' : head) {
       case 'Block': {
         const inner = childScope(spanOf(node), scope);
         const statements = [...operands(node)];
         hoistFunctions(statements, inner);
+        hoistDeclarations(statements, inner);
         for (const statement of statements) walk(statement, inner);
         return;
       }
@@ -741,6 +779,19 @@ export function documentBindings(
       case 'Declare': {
         // The initializer first: `let x = x + 1` reads the OUTER `x`.
         const ops = [...operands(node)];
+        const enclosing = scope.initializing;
+        // A function literal as the initializer names the binding itself:
+        // `let f = (n) => … f(n - 1)` is recursive also when an outer `f`
+        // exists.
+        const initializer = initializerOf(node);
+        if (
+          rules !== undefined &&
+          (initializer === null || operator(initializer) !== 'Function')
+        )
+          scope.initializing = new Set([
+            ...(enclosing ?? []),
+            ...patternNames(ops[0] ?? null),
+          ]);
         for (let i = 1; i < ops.length; i++) {
           // A direct STRING operand is the type annotation: the parser puts
           // the initializer — a string literal included — inside the
@@ -748,6 +799,7 @@ export function documentBindings(
           typeText(ops[i], scope);
           walk(ops[i], scope);
         }
+        scope.initializing = enclosing;
         const statementSpan = spanOf(node);
         bindPattern(
           ops[0] ?? null,
@@ -846,7 +898,7 @@ export function documentBindings(
         const iterator = operand(node, 2);
         if (iterator !== null && operator(iterator) === 'Element') {
           const collection = operand(iterator, 2);
-          walk(collection, scope);
+          if (rules === undefined) walk(collection, scope);
           const inner = childScope(spanOf(node), scope);
           bindPattern(
             operand(iterator, 1),
@@ -855,7 +907,11 @@ export function documentBindings(
             spanOf(iterator),
             inner.span[0]
           );
-          hideIn(inner, inner.span[0], collection);
+          // Under `engineRules`, the collection is read in the scope of
+          // the loop, as the interpreter does: in `for n in 1..n`, the
+          // second `n` is the loop variable.
+          if (rules === undefined) hideIn(inner, inner.span[0], collection);
+          else walk(collection, inner);
           walk(operand(node, 1), inner);
           return;
         }
@@ -885,7 +941,7 @@ export function documentBindings(
             continue;
           }
           const collection = operand(clause, 2);
-          walk(collection, inner);
+          if (rules === undefined) walk(collection, inner);
           inner = childScope(spanOf(node), inner);
           bindPattern(
             operand(clause, 1),
@@ -894,7 +950,10 @@ export function documentBindings(
             spanOf(clause),
             inner.span[0]
           );
-          hideIn(inner, bodyEnd, collection);
+          // Under `engineRules`, a clause reads its collection in its own
+          // scope, as for a loop.
+          if (rules === undefined) hideIn(inner, bodyEnd, collection);
+          else walk(collection, inner);
           if (nops(clause) >= 3) walk(operand(clause, 3), inner);
         }
         walk(ops[0] ?? null, inner);
@@ -1141,7 +1200,10 @@ export function documentBindings(
     }
     const written = writtenSymbol(target);
     if (written !== undefined) {
-      if (visibleBinding(scope, written.name, written.span[0]) !== undefined)
+      if (
+        rules !== undefined ||
+        visibleBinding(scope, written.name, written.span[0]) !== undefined
+      )
         use(written.name, written.span, scope, 'write');
       else
         bindPattern(
@@ -1153,7 +1215,8 @@ export function documentBindings(
         );
       return;
     }
-    walk(target, scope);
+    if (rules !== undefined) writeAccess(target, scope);
+    else walk(target, scope);
   }
 
   /** The binding `name` resolves to at `offset`, walking outward. */
@@ -1162,12 +1225,66 @@ export function documentBindings(
     name: string,
     offset: number
   ): BindingGroup | undefined {
+    if (rules?.library?.(name, offset) === true) return undefined;
+    // The binding of a `let` whose initializer holds the occurrence
+    // (`engineRules`).
+    let own: BindingGroup | undefined;
     for (let s: Scope | undefined = scope; s !== undefined; s = s.parent) {
       const binding = s.bindings.get(name);
-      if (binding !== undefined && offset >= binding.visibleFrom)
-        return binding;
+      if (binding === undefined || offset < binding.visibleFrom) continue;
+      if (s.initializing?.has(name) !== true) return binding;
+      own ??= binding;
     }
-    return undefined;
+    return own !== undefined && rules?.defined(name) === false
+      ? own
+      : undefined;
+  }
+
+  /** The names that a declaration target binds: a name, a `Typed` name, or
+   * a `Tuple` of these, nested. */
+  function patternNames(node: MathJsonExpression | null): string[] {
+    if (node === null) return [];
+    const head = operator(node);
+    if (head === 'Typed') return patternNames(operand(node, 1));
+    if (head === 'Tuple') return [...operands(node)].flatMap(patternNames);
+    const written = head === '' ? writtenSymbol(node) : undefined;
+    return written === undefined ? [] : [written.name];
+  }
+
+  /** Under `engineRules`, bind the names of the `let` and `const`
+   * statements among a scope's statements for the whole scope. */
+  function hoistDeclarations(
+    statements: readonly (MathJsonExpression | null)[],
+    scope: Scope
+  ): void {
+    if (rules === undefined) return;
+    for (const statement of statements) {
+      if (statement === null || operator(statement) !== 'Declare') continue;
+      for (const name of patternNames(operand(statement, 1)))
+        ensureBinding(
+          scope,
+          name,
+          'variable',
+          spanOf(statement),
+          scope.span[0]
+        );
+    }
+  }
+
+  /** Under `engineRules`, the target of a write that is not a name or a
+   * pattern: the collection or record of an indexed or field target is
+   * written, and the other operands are read. */
+  function writeAccess(target: MathJsonExpression, scope: Scope): void {
+    const head = operator(target);
+    if (head === 'At' || head === 'Field') {
+      const ops = [...operands(target)];
+      if (ops[0] !== undefined) writeAccess(ops[0], scope);
+      for (let i = 1; i < ops.length; i++) walk(ops[i], scope);
+      return;
+    }
+    const written = writtenSymbol(target);
+    if (written !== undefined) use(written.name, written.span, scope, 'write');
+    else walk(target, scope);
   }
 
   /**
@@ -1376,6 +1493,7 @@ export function documentBindings(
     if (operator(ast) === 'Program') {
       const statements = [...operands(ast)];
       hoistFunctions(statements, root);
+      hoistDeclarations(statements, root);
       for (const statement of statements) walk(statement, root);
     } else {
       hoistFunctions([ast], root);

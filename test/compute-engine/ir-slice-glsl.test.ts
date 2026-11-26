@@ -71,6 +71,8 @@ describe('IR slice: GLSL text', () => {
       // The length of the rows of a matrix input, and the run-time checks
       // of two lengths of the matrix operators.
       'rows.width', 'rows.agree', 'rows.square',
+      // The order of a matrix of run-time size, and the kernels of one.
+      'rows.order', 'rows.inverse', 'rows.power',
       // The rows of two values of the lane, in order (CE-1736).
       'rows.join',
       // A row of it at an index known at run time.
