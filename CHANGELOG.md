@@ -381,6 +381,20 @@
   ill-conditioned also stays unevaluated. A matrix of complex machine numbers
   with an infinite or `NaN` entry stays unevaluated too.
 
+- **The inverse of a singular matrix with exact and decimal entries stays
+  unevaluated** (CE-1822).
+  `Inverse([[1/3, 2.5, 1], [1, 1, 1], [4/3, 3.5, 2]])` gave entries of about
+  `3.5e20` with `evaluate()` and with `N()`, because rounding at the
+  precision of the engine left a small nonzero pivot in place of 0. It now
+  stays unevaluated. The same holds for a matrix with `i` next to a decimal
+  entry, for `PseudoInverse` and for `MatrixPower` with a negative exponent.
+  The inverse of a matrix of numbers with an inexact entry that is not a
+  matrix of machine numbers now uses partial pivoting, and a pivot is zero
+  when it is very small relative to the entries at the precision of the
+  engine, so a regular matrix that is very ill-conditioned also stays
+  unevaluated. The last digits of the inverse of a regular matrix can
+  change.
+
 - **The sum, the product, the maximum, the minimum and the count of a value
   of a sorted list are found when an element is a variable** (CE-1804). With
   `x` declared `real`, `Sum(Sort([3, x, 1]))`, `Max(Sort([3, x, 1]))` and
