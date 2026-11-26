@@ -2233,20 +2233,28 @@ numbers or booleans (with a clause `True`: without one, the interpreter gives
 (on GLSL a list of points of a constant length is an array of vectors, below;
 another declines). Stated lengths that differ decline (the canonical form
 already gives `incompatible-dimensions` for most); lists of two run-time lengths
-are an error of the interpreter (`incompatible-dimensions` for `Which` and for
-`If` with an `else`), so the value is unspecified: a list as long as the first
-condition, never an arm whole (CE-1238). A condition or an arm that is an
+are an error of the interpreter (`incompatible-dimensions` for a later list
+condition that it evaluates, and for an arm of another length where a position
+selects it, of `Which` and of `If` with an `else`). A condition or an arm that is an
 element-wise operation of two lists of run-time lengths compares them
 ("Lists") once, before the selection, and its build is accepted
-(`If(L > 0, L·M, 0)`). Such an arm of another length than the mask (except in
-a restriction, which zips them) is compared with the mask by the same `agree()`,
-and the length of the selection reads that check: `If(N > 0, L·M, 0)` makes two
-checks, and `If(L > 0, L + List(1, 2, 3), 0)` reads the one of the arm; a mask
-and an arm of two stated lengths decline. A check throws also where no position
-selects the arm, where the interpreter has a value (a known limitation). An
-arm that compares no length (`If(N > 0, L, 0)`) is not compared with the mask.
-A condition after the first that compares lengths is accepted only when its
-length, without the check, is the mask's. On GLSL a stated length writes the
+(`If(L > 0, L·M, 0)`). On JavaScript, outside the bigint mode, each list arm
+and each later list condition whose length, without such a check, is not
+proved equal to the mask's (except in a restriction, which zips them) is
+compared with the mask by the same `agree()`, before the selection, and the
+length of the selection reads that check: `If(N > 0, L, 0)`,
+`If(N > 0, 2L, 0)`, `Which(N > 0, 1, L > 0, 2, True, 0)` and an arm or a mask
+of a stated length beside a run-time one make one check, `If(N > 0, L, M)` and
+`If(N > 0, L·M, 0)` two, `If(L > 0, L + List(1, 2, 3), 0)` reads the one of
+the arm, `If(L > 0, L, 0)` none; a check of the same two lengths is read again
+(`If(N > 0, L, 0) + If(N > 0, L, 1)` makes one), and a mask and an arm of two
+stated lengths decline. A check throws also where no position selects the arm,
+and where a scalar condition that holds comes before the later list condition,
+where the interpreter has a value (a known limitation). A `Range` arm is
+compared too and still never built. A condition after the first that compares
+lengths is accepted only when its length, without the check, is the mask's.
+Elsewhere the value of lists of two run-time lengths is unspecified: a list as
+long as the first condition, never an arm whole (CE-1238). On GLSL a stated length writes the
 selection out (`vec3` of three conditionals); a run-time length declines. The
 interval mode declines it.
 
@@ -2668,6 +2676,34 @@ list is the product; `Rank` of it is 2 and `Shape` the tuple of `rows.count`
 (or its `rowCounts`) and its `rowWidths`; `Diagonal` of it is the build of
 its `Min(rows, columns)` diagonal elements; `Determinant`, `Inverse` and
 `MatrixPower` of it are the kernels of its order (`rowsKernel()`, below).
+
+An operation that threads (an operator row with `threads`) of such a value
+and scalars or other matrices is the interpreter's element-wise value
+(`elementwise()` of `lower-matrices.ts`, CE-1834): `apply()` of `lower.ts`
+gives it every call whose operands include a value of the lane `rows`, and
+an operand whose static type is a matrix type is lowered whole for it
+(`operand()` of `lower.ts`, also in `product()`). Each operand is a value of
+the lane with the row-length fact, a list of rank 2 of reals or integers (a
+stated size, a build), or a scalar, the same at every element. Its value is
+the build of the rows (`rows.build`) of the operation on the elements at
+each row and column, so it carries `rowCounts` and `rowWidths` and every
+reader above reads it (`Transpose(A + B)`, `MatrixMultiply(A + B, C)`,
+`Determinant(A − B)`, `Shape(2·A)`). The numbers of rows of the matrices,
+and the lengths of their rows, are each compared by `agreedLength()` of
+`lower-lists.ts`, where `same()` does not prove them equal, before the
+builds: `A + B` makes two checks, `A + A` and `A + 1` none,
+`A + Transpose(A)` one (the two lengths of `A`), `A + B + C` four; the build
+reads them through its two lengths. An operand that `elementwise()` made is
+read at each element as the operation on its elements (`tableElements`), so
+`2·A + B` is one nest of two loops, as an element-wise operation of flat
+lists (`elementAt()`). Declined: an operand of the lane without the fact (a
+`list<list<real>>` input, a join of two arms), a flat list (`A + L`, `A·L`:
+the interpreter pairs the element `i` of the list with the row `i`, or
+multiplies the matrix and the vector), a tuple, a `Multiply` of two matrices
+(the matrix product), a `Power` whose base is a matrix (the matrix power at
+an integer exponent), and an element that is not a real or an integer
+number. A comparison of a matrix is a chain, whose operands are not lowered
+whole, and declines at the name.
 
 An input of the entry of a matrix type of no stated dimensions (a name read
 at the entry, a positional parameter of a root function literal: `input()` of

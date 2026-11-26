@@ -16,7 +16,7 @@ import {
 } from '../../boxed-expression/type-guards.js';
 import type { Expression } from '../../global-types.js';
 import { isSubLane, scalarType, type Length, type V } from './ir.js';
-import { rowOfHead, rowOfOp } from './operators.js';
+import { rowOfHead, rowOfOp, type OperatorRow } from './operators.js';
 import { decline, type Fn, type Lowering } from './lower-context.js';
 import { MAX_MATRIX_POWER_EXPONENT } from '../../numerics/value-scaled-caps.js';
 import type { listLowering } from './lower-lists.js';
@@ -650,5 +650,113 @@ export function matrixLowering(
     return cx.apply(e, op('mpower'), [m, exponent(e)]);
   };
 
-  return { matrix };
+  /** The element at each row and column of a value that `elementwise()`
+   *  made: the operation on the elements of its operands, so that an
+   *  operation of such values computes each element once. */
+  const tableElements = new Map<V, (i: V, j: V) => V>();
+
+  /** The row `r`, which threads, of the values `args`, one of them of the
+   *  lane `rows` (a matrix of run-time size, CE-1736): the interpreter's
+   *  value is the matrix of the operation on the elements at each row and
+   *  column. `apply(elements)` applies `r` to the elements. An operand is
+   *  such a value whose rows have one length (`rowWidths`), a list of rank
+   *  2 of reals or integers, or a scalar, the same at every element. The
+   *  numbers of rows of the matrices, and the lengths of their rows, that
+   *  `same()` does not prove equal are compared once, before the builds
+   *  (`agreedLength()` of `lower-lists.ts`): the interpreter gives
+   *  `incompatible-dimensions` for two matrices of two sizes. The value is
+   *  a build of rows of one length, which records both lengths
+   *  (`rowCounts`, `rowWidths`), so the matrix operators read it.
+   *  Declined: rows that can have different lengths, a flat list (the
+   *  interpreter adds its element `i` to each element of the row `i`, and
+   *  multiplies the matrix and the vector), a tuple, the product of two
+   *  matrices (the matrix product), a power whose base is a matrix (the
+   *  matrix power at an integer exponent, element by element at another),
+   *  and elements that are not real or integer numbers. */
+  const elementwise = (
+    e: Expression,
+    r: OperatorRow,
+    args: V[],
+    apply: (elements: V[]) => V
+  ): V => {
+    type Table = { rows: V; columns: V; at: (i: V, j: V) => V };
+    // A scalar is its value, a number.
+    const operand = (m: V): Table | V => {
+      const t = type(m);
+      if (t.lane === 'rows') {
+        if (!cx.rowWidths.has(m) || !cx.rowsElements.has(m))
+          decline(
+            e,
+            `${r.head} of a list of lists of run-time length (its rows can have different lengths)`
+          );
+        return {
+          rows: rowCount(m),
+          columns: cx.rowWidths.get(m)!,
+          at: tableElements.get(m) ?? ((i: V, j: V) => rowsAt(m, i, j)),
+        };
+      }
+      if (cx.tuples.has(m))
+        decline(e, `${r.head} of a matrix and a tuple or a list of tuples`);
+      if (t.shape.length === 0) return m;
+      if (t.shape.length !== 2 || !isSubLane(t.lane, 'real'))
+        decline(
+          e,
+          `${r.head} of a matrix and a list (the interpreter's value is ${r.head === 'Multiply' ? 'the product of the matrix and the vector' : 'the operation of the element i of the list with each element of the row i'})`
+        );
+      return {
+        rows: length(t.shape[0]),
+        columns: length(t.shape[1]),
+        at: (i: V, j: V) => at(at(m, i), j),
+      };
+    };
+    const operands = args.map(operand);
+    const tables = operands.filter((x): x is Table => typeof x !== 'number');
+    if (
+      (r.head === 'Multiply' && tables.length > 1) ||
+      (r.head === 'Power' && typeof operands[0] !== 'number')
+    )
+      decline(
+        e,
+        `${r.head} of a matrix${r.head === 'Power' ? ' as a base' : ' with a matrix'}: the interpreter's value is the matrix ${r.head === 'Power' ? 'power' : 'product'}`
+      );
+    // The number of rows and the length of the rows, compared with those of
+    // each other matrix.
+    const agreed = (lengths: V[]): V => {
+      let n = lengths[0];
+      for (const m of lengths.slice(1)) {
+        const [k, c] = [lists.knownLength(n), lists.knownLength(m)];
+        if (k !== undefined && c !== undefined && k !== c)
+          decline(e, `${r.head} of matrices of two sizes`);
+        const x = lists.agreedLength(e, n, m);
+        if (x === undefined) decline(e, `${r.head} of matrices of two sizes`);
+        n = x;
+      }
+      return n;
+    };
+    const n = agreed(tables.map((x) => x.rows));
+    const w = agreed(tables.map((x) => x.columns));
+    const element = (i: V, j: V): V => {
+      const x = apply(
+        operands.map((o) => (typeof o === 'number' ? o : o.at(i, j)))
+      );
+      const t = type(x);
+      if (
+        t.shape.length > 0 ||
+        cx.tuples.has(x) ||
+        (t.lane !== 'real' && t.lane !== 'integer')
+      )
+        decline(
+          e,
+          `${r.head} of a matrix whose elements are not real or integer numbers`
+        );
+      return x;
+    };
+    const out = build(e as Fn, n, (i) =>
+      build(e as Fn, w, (j) => element(i, j))
+    );
+    tableElements.set(out, element);
+    return out;
+  };
+
+  return { matrix, elementwise };
 }

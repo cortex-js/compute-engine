@@ -377,6 +377,18 @@
   `[[-2, 1], [1.5, -0.5]]`, and for a matrix that is not square
   `Determinant(M)` throws
   `RangeError: expected-square-matrix: a matrix of 2 rows and 3 columns`.
+  Element-wise arithmetic of such matrices compiles too (CE-1834):
+  `M + A`, `M − A`, `2·M`, `M/2`, `−M`, `M + 1`, `Sin(M)` declined with
+  "M of type matrix<real> other than in an element read M[i][j]" and now
+  give the interpreter's value: `M + 2·M` gives
+  `[[3, 6, 9], [12, 15, 18]]`, and `Transpose(M + 1)`, `Shape(M/2)` and
+  `Determinant(A − 2·A)` read the result. The numbers of rows and the
+  lengths of the rows of two matrices are compared at run time where the
+  compiler does not prove them equal: `M + A` throws
+  `RangeError: incompatible-dimensions: lists of lengths 2 and 3`, where the
+  interpreter gives `incompatible-dimensions`. The product of two matrices,
+  a power of a matrix, a matrix with a list (`M + L`), a comparison and a
+  `list<list<real>>` input still decline.
   A `list<list<real>>` argument and a call result at a parameter of a
   matrix type, `RowReduce` of a matrix of run-time size, matrices of complex numbers or
   of booleans, a matrix of one stated dimension (`matrix<real^2x?>`), GLSL,
@@ -399,8 +411,18 @@
   Later operations on the same lists read the first comparison:
   `(L + M)·(L − M)` compares once. Lengths that the compiler proves equal
   (`L + L`, `Dot(L, L)`, `h(L, L)`) compare nothing, and their code is
-  unchanged. Lists of points, GLSL, the interval target and the `bigint`
-  mode compare no length.
+  unchanged. A selection at each position compares the length of its first
+  condition with each list arm and each later list condition the same way:
+  with `N: list<real>`, `If(N > 0, L, 0)` at `N = [1, -1, 1]`, `L = [1, 2]`
+  gave `[1, 0, undefined]` and `Which(N > 0, 1, L > 0, 2, True, 0)` gave
+  `[1, 2, 1]`; both now throw
+  `RangeError: incompatible-dimensions: lists of lengths 3 and 2`, the
+  interpreter's error. `If(L > 0, L, 0)` compares nothing, and an `If` with
+  no else still reads the shorter of the two lists, as the interpreter. The
+  comparison runs also where no position selects the arm, where the
+  interpreter gives a value. An element-wise operation of two lists of
+  points compares no length (a selection whose arms are lists of points
+  does); GLSL, the interval target and the `bigint` mode compare no length.
 
 ### Behavior Changes
 

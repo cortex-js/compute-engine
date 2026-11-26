@@ -315,10 +315,10 @@ describe('a matrix input: its two lengths', () => {
     expect(errors).toBe(0);
   });
 
-  // A read that no reader of the rows admits declines (element-wise
-  // arithmetic: CE-1834).
-  test('arithmetic of the input declines', () => {
-    expect(declines(['Add', 'M', 1])).toMatch(
+  // A read that no reader of the rows admits declines (a comparison; the
+  // element-wise arithmetic is in "element-wise operations of matrices").
+  test('a comparison of the input declines', () => {
+    expect(declines(['Less', 'M', 1])).toMatch(
       /M of type matrix<real> other than in an element read M\[i\]\[j\]/
     );
   });
@@ -699,5 +699,321 @@ describe('the kernels of a matrix of run-time size', () => {
     expect(code(['Inverse', 'P'])).toBe(
       ['(() => {', '  return _SYS.matrixInverse(_.P);', '})()'].join('\n')
     );
+  });
+});
+
+// An element-wise operation of matrices of run-time size (`elementwise()`
+// of `lower-matrices.ts`, CE-1834): the interpreter's value is the matrix
+// of the operation on the elements at each row and column. The numbers of
+// rows and the lengths of the rows that the lowering does not prove equal
+// are compared once, before the builds: a `RangeError` where the
+// interpreter gives `incompatible-dimensions`. The result is a build of
+// rows of one length, which the matrix operators read.
+describe('element-wise operations of matrices', () => {
+  const me = new ComputeEngine();
+  for (const name of ['X', 'Y', 'W']) me.declare(name, 'matrix<real>');
+  me.declare('J', 'matrix<integer>');
+  me.declare('K', 'matrix<real^2x3>');
+  me.declare('G', 'list<list<real>>');
+  me.declare('v', 'list<real>');
+  me.declare('x', 'real');
+  me.declare('n', 'integer');
+  const mbox = (json: Json): Expression => me.box(json as never);
+  const grid = (g: Grid) => mbox(['List', ...g.map((r) => ['List', ...r])]);
+
+  type At = Record<string, Grid | number[] | number>;
+  /** The interpreter's value of `json` at `p`, or `'error'` (also for a
+   *  list that holds an error: two matrices of two row lengths). `Shape`
+   *  is a tuple, read as the list of its elements. */
+  const value = (json: Json, p: At): unknown =>
+    me.withValues(
+      Object.fromEntries(
+        Object.entries(p).map(([k, v]) => [
+          k,
+          typeof v === 'number'
+            ? me.number(v)
+            : Array.isArray(v[0])
+              ? grid(v as Grid)
+              : mbox(['List', ...(v as number[])]),
+        ])
+      ) as never,
+      () => {
+        const r = mbox(json).evaluate();
+        if (
+          r.operator === 'Error' ||
+          (r.isCollection && [...r.each()].some((x) => x.operator === 'Error'))
+        )
+          return 'error';
+        if (r.operator === 'Tuple') return r.ops!.map(read);
+        return read(r);
+      }
+    );
+  const run = (json: Json) => {
+    const r = compile(mbox(json), { fallback: false });
+    expect(r.success).toBe(true);
+    return r;
+  };
+  const checks = (code: string) => code.match(/_agree\(/g)?.length ?? 0;
+  const mdeclines = (json: Json, options: object = {}): string => {
+    try {
+      const r = compile(mbox(json), { ...options, fallback: false } as never);
+      return r.success ? '' : (r.diagnostic?.message ?? '');
+    } catch (x) {
+      return (
+        (x as { diagnostic?: { message: string } }).diagnostic?.message ??
+        (x as Error).message
+      );
+    }
+  };
+
+  // Equal sizes: a 2 × 3, a 1 × 1, a 3 × 2 and a 2 × 2 matrix, and a
+  // matrix of one row of no element (whose `Transpose` the interpreter
+  // leaves unevaluated). `Y` has no 0, a divisor.
+  // prettier-ignore
+  const EQUAL: Grid[][] = [
+    [[[1, 2, 3], [4, 5, 6]], [[0.5, -1, 2], [3, 0.25, 1]], [[1, 1, 1], [2, 2, 2]]],
+    [[[7]], [[2]], [[-3]]],
+    [[[1.5, -2], [0.25, 4], [3, 1]], [[1, 2], [3, 4], [5, 6]], [[0, 1], [1, 0], [2, 2]]],
+    [[[1, 2], [3, 4]], [[2, 1], [-0.5, 1]], [[1, 0], [0, 1]]],
+    [[[]], [[]], [[]]],
+  ];
+  const at = ([X, Y, W]: Grid[]): At => ({ X, Y, W, x: 3, n: 2 });
+
+  // The number of checks of each program.
+  // prettier-ignore
+  const OPERATIONS: [string, Json, number][] = [
+    ['X + Y', ['Add', 'X', 'Y'], 2],
+    ['X − Y', ['Subtract', 'X', 'Y'], 2],
+    ['X / Y', ['Divide', 'X', 'Y'], 2],
+    ['X + Y + W', ['Add', 'X', 'Y', 'W'], 4],
+    ['Arctan2(X, Y)', ['Arctan2', 'X', 'Y'], 2],
+    ['2·X', ['Multiply', 2, 'X'], 0],
+    ['x·X', ['Multiply', 'x', 'X'], 0],
+    ['X / 2', ['Divide', 'X', 2], 0],
+    ['X / 3', ['Divide', 'X', 3], 0],
+    ['1 / X', ['Divide', 1, 'X'], 0],
+    ['−X', ['Negate', 'X'], 0],
+    ['X + 1', ['Add', 'X', 1], 0],
+    ['X − 1', ['Subtract', 'X', 1], 0],
+    ['2^X', ['Power', 2, 'X'], 0],
+    ['Sin(X)', ['Sin', 'X'], 0],
+    ['Abs(X)', ['Abs', 'X'], 0],
+    ['Exp(X)', ['Exp', 'X'], 0],
+    ['Mod(X, 2)', ['Mod', 'X', 2], 0],
+    ['X + X', ['Add', 'X', 'X'], 0],
+    ['2·X + Y', ['Add', ['Multiply', 2, 'X'], 'Y'], 2],
+    ['(X + Y) − (X + Y)', ['Subtract', ['Add', 'X', 'Y'], ['Add', 'X', 'Y']], 2],
+    ['(X + Y) + (X − Y)', ['Add', ['Add', 'X', 'Y'], ['Subtract', 'X', 'Y']], 2],
+    // The matrix operators read the result.
+    ['Transpose(X + Y)', ['Transpose', ['Add', 'X', 'Y']], 2],
+    ['Shape(2·X)', ['Shape', ['Multiply', 2, 'X']], 0],
+    ['Shape(X + Y)', ['Shape', ['Add', 'X', 'Y']], 2],
+    ['Flatten(X − Y)', ['Flatten', ['Subtract', 'X', 'Y']], 2],
+    ['MatrixMultiply(X + Y, Transpose(W))', ['MatrixMultiply', ['Add', 'X', 'Y'], ['Transpose', 'W']], 3],
+  ];
+
+  test.each(OPERATIONS)('%s', (_, json, count) => {
+    const r = run(json);
+    expect(checks(r.code)).toBe(count);
+    for (const g of EQUAL) {
+      if (g[0][0].length === 0 && JSON.stringify(json).includes('Transpose'))
+        continue;
+      const want = value(json, at(g));
+      const got = r.run!(at(g) as never);
+      if (!agree(got, want))
+        throw new Error(
+          `${JSON.stringify(json)} at ${JSON.stringify(g)}: ${JSON.stringify(got)}, the interpreter ${JSON.stringify(want)}`
+        );
+    }
+    // Each matrix in turn with another number of rows, and with another
+    // length of its rows (not one read by `MatrixMultiply` through its
+    // transpose, whose number of rows is free).
+    const base: Grid = [
+      [1, 2],
+      [3, 4],
+    ];
+    const text = JSON.stringify(json);
+    const names = ['X', 'Y', 'W'].filter(
+      (k) => text.includes(`"${k}"`) && !text.includes(`["Transpose","${k}"]`)
+    );
+    for (const k of names.length > 1 ? names : [])
+      for (const other of [
+        [
+          [1, 2],
+          [3, 4],
+          [5, 6],
+        ],
+        [
+          [1, 2, 3],
+          [4, 5, 6],
+        ],
+      ]) {
+        const p = { ...at([base, base, base]), [k]: other };
+        expect(value(json, p)).toBe('error');
+        expect(() => r.run!(p as never)).toThrow(
+          /^incompatible-dimensions: lists of lengths \d+ and \d+$/
+        );
+      }
+  });
+
+  test('integers stay integers', () => {
+    const r = run(['Add', ['Multiply', 2, 'J'], 1]);
+    expect(r.run!({ J: [[1, 2], [3, 4]] } as never)).toEqual([
+      [3, 5],
+      [7, 9],
+    ]);
+    expect(run(['Divide', 'J', 2]).run!({ J: [[1, 2]] } as never)).toEqual([
+      [0.5, 1],
+    ]);
+  });
+
+  test('the code of X + Y: two checks, one nest of loops', () => {
+    const { code } = run(['Add', 'X', 'Y']);
+    expect(code).toMatch(
+      /const v\d+ = _agree\(_\.X\.length, _\.Y\.length\);\n {2}const v\d+ = _agree\(v\d+, v\d+\);/
+    );
+    expect(code.match(/new Array\(/g)).toHaveLength(2);
+    // An operand that is itself element-wise is read at each element.
+    expect(
+      run(['Add', ['Multiply', 2, 'X'], 'Y']).code.match(/new Array\(/g)
+    ).toHaveLength(2);
+  });
+
+  // `Transpose(X)` has the rows of `X` as its columns: one check of the
+  // two lengths of `X`, a square matrix.
+  test('X + Transpose(X): one check', () => {
+    const json = ['Add', 'X', ['Transpose', 'X']];
+    const r = run(json);
+    expect(checks(r.code)).toBe(1);
+    for (const X of [
+      [
+        [1, 2],
+        [3, 4],
+      ],
+      [[7]],
+    ])
+      expect(r.run!({ X } as never)).toEqual(value(json, { X }));
+    const X = [
+      [1, 2, 3],
+      [4, 5, 6],
+    ];
+    expect(value(json, { X })).toBe('error');
+    expect(() => r.run!({ X } as never)).toThrow(RangeError);
+  });
+
+  // A matrix of stated size beside one of run-time size: their lengths are
+  // compared.
+  test('X + K of a stated size', () => {
+    const json = ['Add', 'X', 'K'];
+    const r = run(json);
+    expect(checks(r.code)).toBe(2);
+    const K = [
+      [1, 0, 2],
+      [0, 1, 3],
+    ];
+    const X = [
+      [1, 2, 3],
+      [4, 5, 6],
+    ];
+    expect(r.run!({ X, K } as never)).toEqual(value(json, { X, K }));
+    for (const Y of [
+      [
+        [1, 2],
+        [3, 4],
+      ],
+      [[1, 2, 3]],
+    ]) {
+      expect(value(json, { X: Y, K })).toBe('error');
+      expect(() => r.run!({ X: Y, K } as never)).toThrow(RangeError);
+    }
+  });
+
+  // The kernels of a square matrix read the result: the check of the order
+  // follows the checks of the two sizes.
+  test.each([
+    ['Determinant(X − Y)', ['Determinant', ['Subtract', 'X', 'Y']]],
+    ['Inverse(X + Y)', ['Inverse', ['Add', 'X', 'Y']]],
+    ['Trace(X + Y)', ['Trace', ['Add', 'X', 'Y']]],
+  ])('%s', (_, json) => {
+    const r = run(json);
+    // prettier-ignore
+    for (const [X, Y] of [
+      [[[1, 2], [3, 4]], [[5, 6], [7, 9]]],
+      [[[7]], [[2]]],
+    ])
+      expect(agree(r.run!({ X, Y } as never), value(json, { X, Y }))).toBe(
+        true
+      );
+    // prettier-ignore
+    for (const [X, Y] of [
+      [[[1, 2, 3], [4, 5, 6]], [[1, 1, 1], [2, 2, 2]]],
+      [[[1, 2], [3, 4]], [[1, 2, 3], [4, 5, 6]]],
+      [[[1, 2], [3, 4]], [[1, 2], [3, 4], [5, 6]]],
+    ]) {
+      expect(value(json, { X, Y })).toBe('error');
+      expect(() => r.run!({ X, Y } as never)).toThrow(RangeError);
+    }
+  });
+
+  // A check throws only where the interpreter gives an error: an arm that
+  // is not taken, a loop of no pass.
+  // prettier-ignore
+  test.each([
+    ['If(x > 0, Trace(X + Y), 0)', ['If', ['Greater', 'x', 0], ['Trace', ['Add', 'X', 'Y']], 0], { x: -1 }, { x: 1 }],
+    ['Sum(i·Trace(X + Y), i, 1, n)', ['Sum', ['Multiply', 'i', ['Trace', ['Add', 'X', 'Y']]], ['Tuple', 'i', 1, 'n']], { n: 0 }, { n: 2 }],
+  ])('%s', (_, json, none, some) => {
+    const r = run(json);
+    const p = {
+      X: [
+        [1, 2],
+        [3, 4],
+      ],
+      Y: [
+        [1, 2],
+        [3, 4],
+        [5, 6],
+      ],
+    };
+    expect(r.run!({ ...p, ...none } as never)).toBe(
+      value(json, { ...p, ...none })
+    );
+    expect(value(json, { ...p, ...some })).toBe('error');
+    expect(() => r.run!({ ...p, ...some } as never)).toThrow(RangeError);
+  });
+
+  // A reader of no element and of no length of the result reads no check
+  // (a known limitation of `docs/COMPILATION-MODEL.md`).
+  test('Rank(X + Y) reads no check', () => {
+    const r = run(['Rank', ['Add', 'X', 'Y']]);
+    expect(checks(r.code)).toBe(0);
+    expect(r.run!({ X: [[1, 2]], Y: [[1, 2, 3]] } as never)).toBe(2);
+  });
+
+  // prettier-ignore
+  test.each([
+    // The matrix product and the matrix power of the interpreter.
+    ['X·Y', ['Multiply', 'X', 'Y'], /Multiply of a matrix with a matrix: the interpreter's value is the matrix product/],
+    ['X^x', ['Power', 'X', 'x'], /Power of a matrix as a base/],
+    ['X^Y', ['Power', 'X', 'Y'], /Power of a matrix as a base/],
+    // A matrix and a flat list: not the operation at each element.
+    ['X + v', ['Add', 'X', 'v'], /Add of a matrix and a list/],
+    ['X·v', ['Multiply', 'X', 'v'], /Multiply of a matrix and a list/],
+    // A comparison gives booleans.
+    ['X < Y', ['Less', 'X', 'Y'], /X of type matrix<real> other than in an element read/],
+    ['X < 1', ['Less', 'X', 1], /X of type matrix<real> other than in an element read/],
+    // Rows of different lengths, and a join of two matrices, whose rows
+    // have no length that the compiler knows.
+    ['G + G', ['Add', 'G', 'G'], /G of type list<list<real>> other than in an element read/],
+    ['2·G', ['Multiply', 2, 'G'], /G of type list<list<real>> other than in an element read/],
+    ['X + G', ['Add', 'X', 'G'], /G of type list<list<real>> other than in an element read/],
+    ['If(x > 0, X, Y) + 1', ['Add', ['If', ['Greater', 'x', 0], 'X', 'Y'], 1], /Add of a list of lists of run-time length \(its rows can have different lengths\)/],
+  ])('%s declines', (_, json, cause) => {
+    expect(mdeclines(json)).toMatch(cause);
+  });
+
+  test.each(['glsl', 'interval-js', 'bigint'])('%s declines the input', (to) => {
+    expect(
+      mdeclines(['Add', 'X', 'Y'], to === 'bigint' ? { mode: 'bigint' } : { to })
+    ).toMatch(/the input X of type matrix<real>/);
   });
 });

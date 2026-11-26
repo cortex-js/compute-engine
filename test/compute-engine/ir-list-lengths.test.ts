@@ -19,6 +19,8 @@ ce.declare('M', 'list<real>');
 ce.declare('N', 'list<real>');
 ce.declare('K', 'list<real>');
 ce.declare('n', 'integer');
+ce.declare('x', 'real');
+ce.declare('S', 'list<real^3>');
 ce.declare('h', '(real, real) -> real');
 ce.assign(
   'h',
@@ -484,6 +486,155 @@ describe('a selection at each position whose arm compares two lengths', () => {
         0,
       ])
     ).toMatch(/lists of two lengths in a selection at each position/);
+  });
+});
+
+// A list arm, or a later list condition, whose length is not proved equal
+// to the mask's: the two lengths are compared once, before the selection.
+// The interpreter gives `incompatible-dimensions` for a later list
+// condition that it evaluates, and for an arm of another length where a
+// position selects it.
+describe('a selection at each position of a list of another length', () => {
+  const G = ['Greater', 'N', 0];
+  // prettier-ignore
+  const PROGRAMS: [string, Json, string[], number][] = [
+    ['If(N > 0, L, 0)', ['If', G, 'L', 0], ['L', 'N'], 1],
+    ['If(N > 0, L, M)', ['If', G, 'L', 'M'], ['L', 'M', 'N'], 2],
+    ['If(N > 0, 2L, 0)', ['If', G, ['Multiply', 2, 'L'], 0], ['L', 'N'], 1],
+    ['Which(N > 0, L, True, 0)', ['Which', G, 'L', 'True', 0], ['L', 'N'], 1],
+    ['If(N > 0, L, 0) + 1', ['Add', ['If', G, 'L', 0], 1], ['L', 'N'], 1],
+    ['Sum(If(N > 0, L, 0))', ['Sum', ['If', G, 'L', 0]], ['L', 'N'], 1],
+    ['Length(If(N > 0, L, 0))', ['Length', ['If', G, 'L', 0]], ['L', 'N'], 1],
+    // Two selections of one mask and one arm: one check.
+    ['If(N > 0, L, 0) + If(N > 0, L, 1)', ['Add', ['If', G, 'L', 0], ['If', G, 'L', 1]], ['L', 'N'], 1],
+    // A later condition of another length.
+    ['Which(N > 0, 1, L > 0, 2, True, 0)', ['Which', G, 1, ['Greater', 'L', 0], 2, 'True', 0], ['L', 'N'], 1],
+    ['Which(N > 0, 1, L > 0, L, True, 0)', ['Which', G, 1, ['Greater', 'L', 0], 'L', 'True', 0], ['L', 'N'], 1],
+  ];
+
+  test.each(PROGRAMS)('%s', (_, json, names, count) => {
+    const r = compile(box(json), { fallback: false });
+    expect(r.success).toBe(true);
+    expect(checks(r.code)).toBe(count);
+    for (const values of [[1, -2, 4], [-1.5, 2, 0.5], [3, 3], []]) {
+      const equal = Object.fromEntries(names.map((k) => [k, values]));
+      const want = interpretedAt(json, equal);
+      expect(want).not.toBe('error');
+      expect(agree(r.run!(equal as never), want)).toBe(true);
+    }
+    // Each list in turn longer and shorter, a position selecting each arm
+    // (the mask `[1, −1]` with two arms, the arm at every position with
+    // one).
+    const mask = names.includes('M') ? [1, -1] : [1, 2];
+    for (const k of names)
+      for (const other of [[1, 2, 3], [1]]) {
+        const q = {
+          ...Object.fromEntries(names.map((m) => [m, [1, 2]])),
+          N: mask,
+          [k]: other,
+        };
+        expect(interpretedAt(json, q)).toBe('error');
+        expect(() => r.run!(q as never)).toThrow(
+          /^incompatible-dimensions: lists of lengths \d+ and \d+$/
+        );
+      }
+  });
+
+  // A mask of a stated length and an arm of a run-time length, and the
+  // reverse.
+  test.each([
+    ['If(N > 0, S, 0)', ['If', G, 'S', 0], 'N'],
+    ['If(S > 0, L, 0)', ['If', ['Greater', 'S', 0], 'L', 0], 'L'],
+  ])('%s: a stated length', (_, json, name) => {
+    const r = compile(box(json), { fallback: false });
+    expect(checks(r.code)).toBe(1);
+    const S = [1, 2, 3];
+    const equal = { S, [name]: [2, -1, 4] };
+    expect(r.run!(equal as never)).toEqual(interpretedAt(json, equal));
+    const q = { S, [name]: [1, 2] };
+    expect(interpretedAt(json, q)).toBe('error');
+    expect(() => r.run!(q as never)).toThrow(
+      /^incompatible-dimensions: lists of lengths (2 and 3|3 and 2)$/
+    );
+  });
+
+  test('the code of If(N > 0, L, 0)', () => {
+    const { code } = compile(box(['If', G, 'L', 0]), { fallback: false });
+    expect(code).toMatch(
+      /\n {2}const (v\d+) = _agree\(_\.N\.length, _\.L\.length\);\n {2}const (v\d+)_n = \(_\.N\.length \+ \1\);/
+    );
+  });
+
+  // The check moves out of a loop that can run no pass, under the guard
+  // that it runs one.
+  test('Sum(i · Sum(If(N > 0, L, 0)), i, 1, n)', () => {
+    const json = [
+      'Sum',
+      ['Multiply', 'i', ['Sum', ['If', G, 'L', 0]]],
+      ['Tuple', 'i', 1, 'n'],
+    ];
+    const r = compile(box(json), { fallback: false });
+    const p = { N: [1, -1, 1], L: [1, 2] };
+    expect(r.run!({ ...p, n: 0 } as never)).toBe(0);
+    expect(interpretedAt(json, { ...p, n: 0 })).toBe(0);
+    expect(() => r.run!({ ...p, n: 2 } as never)).toThrow(RangeError);
+  });
+
+  // The check is made once before the selection: it throws also where no
+  // position selects the arm, and where a scalar condition that holds comes
+  // before a later list condition, where the interpreter has a value
+  // (`docs/COMPILATION-MODEL.md`, the known limitations).
+  test.each([
+    ['If(N > 0, L, 0)', ['If', G, 'L', 0], { N: [-1, -2, -3], L: [1, 2] }],
+    ['If(N > 0, L, 0) of an empty mask', ['If', G, 'L', 0], { N: [], L: [1] }],
+    ['If(N > 0, L, M)', ['If', G, 'L', 'M'], { N: [1, 1], L: [1, 2], M: [3] }],
+    [
+      'Which(N > 0, 1, x > 0, 2, L > 0, 3, True, 0)',
+      ['Which', G, 1, ['Greater', 'x', 0], 2, ['Greater', 'L', 0], 3, 'True', 0],
+      { N: [1, -1, 1], L: [1, 2], x: 1 },
+    ],
+  ])('%s: no position selects the list', (_, json, p) => {
+    const r = compile(box(json), { fallback: false });
+    expect(interpretedAt(json, p)).not.toBe('error');
+    expect(() => r.run!(p as never)).toThrow(RangeError);
+  });
+
+  // An `If` with no else zips the mask with its arm, to the shorter
+  // length, as the interpreter: no check.
+  test('If(N > 0, L): a restriction', () => {
+    const json = ['If', G, 'L'];
+    const r = compile(box(json), { fallback: false });
+    expect(r.code).not.toMatch(/_agree/);
+    for (const p of [
+      { N: [1, -1, 1], L: [1, 2] },
+      { N: [1, -1], L: [1, 2, 3] },
+    ])
+      expect(agree(r.run!(p as never), interpretedAt(json, p))).toBe(true);
+  });
+
+  // Lengths that the compiler proves equal: no check.
+  test.each([
+    ['If(L > 0, L, 0)', ['If', ['Greater', 'L', 0], 'L', 0]],
+    ['If(L > 0, 2L, L)', ['If', ['Greater', 'L', 0], ['Multiply', 2, 'L'], 'L']],
+    ['If(S > 0, S, 0)', ['If', ['Greater', 'S', 0], 'S', 0]],
+  ])('%s: no check', (_, json) => {
+    const r = compile(box(json), { fallback: false });
+    expect(r.code).not.toMatch(/_agree/);
+  });
+
+  test('two stated lengths decline', () => {
+    expect(
+      declines(['If', ['Greater', ['List', 1, -1], 0], ['List', 1, 2, 3], 0])
+    ).toMatch(/incompatible-dimensions/);
+  });
+
+  test('interval-js and glsl decline the selection', () => {
+    expect(declines(['If', G, 'L', 0], { to: 'interval-js' })).toMatch(
+      /a selection at each position in the interval mode/
+    );
+    expect(declines(['If', G, 'L', 0], { to: 'glsl' })).toMatch(
+      /run-time length/
+    );
   });
 });
 

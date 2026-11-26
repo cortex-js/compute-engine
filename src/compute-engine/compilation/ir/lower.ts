@@ -1445,6 +1445,11 @@ function lowerOnce(
     const n = args.length;
     if (typeof r.arity === 'number' ? n !== r.arity : n < 2)
       decline(node, `${r.head} with ${n} operands`);
+    // A matrix of run-time size (the lane `rows`): the operation on the
+    // elements at each row and column (`elementwise()` of
+    // `lower-matrices.ts`).
+    if (r.threads && args.some((v) => type(v).lane === 'rows'))
+      return matrices.elementwise(node, r, args, (xs) => apply(node, r, xs));
     // `Abs` of a real proved `>= 0` (`nonnegative()`, also by the declared
     // range of an input) is its operand. Not in the interval mode, where a
     // value `>= 0` can have an enclosure that reaches below 0.
@@ -3884,9 +3889,16 @@ function lowerOnce(
     return apply(
       e,
       r,
-      e.ops.map((op) => value(op)!)
+      e.ops.map((op) => (r.threads ? operand(op) : value(op)!))
     );
   };
+
+  /** The value of `x`, an operand of an operation that threads. An operand
+   *  of a matrix type is read whole on JavaScript: a matrix of run-time
+   *  size is a value of the lane `rows` (`elementwise()` of
+   *  `lower-matrices.ts`). */
+  const operand = (x: Expression): V =>
+    lists.checks && x.type.matches('matrix') ? wholeRows(x) : value(x)!;
 
   /** The number of `x`: a literal (`literalNumber()`), or the value a free
    *  name holds. */
@@ -3922,7 +3934,7 @@ function lowerOnce(
       is.reduce(([m, n], i) => [m * rs[i]![0], n * rs[i]![1]], [1, 1]);
     if (!of(ks).every(Number.isSafeInteger)) ks = ks.slice(0, 1);
     const values = e.ops.map((x, i) =>
-      ks.includes(i) ? undefined : value(x)!
+      ks.includes(i) ? undefined : operand(x)
     );
     const rest = values.filter((v): v is V => v !== undefined);
     if (ks.length === 0 || rest.some((v) => type(v).lane === 'complex'))
@@ -5515,8 +5527,10 @@ function lowerOnce(
    *  accepts by its length. The first condition is a
    *  list: before it, a scalar condition that holds selects its arm whole,
    *  a value of another shape. Stated lengths that differ decline (the
-   *  interpreter gives `incompatible-dimensions`); run-time lengths that
-   *  differ give an unspecified value, as for an element-wise operation.
+   *  interpreter gives `incompatible-dimensions`); on JavaScript, a
+   *  run-time length is compared with the mask's once, before the build
+   *  (`agree()` of `lower-lists.ts`), and elsewhere lengths that differ
+   *  give an unspecified value, as for an element-wise operation.
    *  An `If` with no `otherwise` and a list arm is a restriction, which
    *  ends at the shorter of the mask and the arm. */
   const select = (
@@ -5716,27 +5730,24 @@ function lowerOnce(
       )!;
     };
     const masks = lists.listSource(conds[0]);
-    // An arm whose length reads a check of the lengths of its lists
-    // (`agree()` of `lower-lists.ts`), of another length than the mask: on
-    // JavaScript its length and the mask's are compared too, before the
-    // selection, and the length of the selection reads that check; the
-    // interpreter's value of an arm of another length is an error where a
-    // position selects it. Not for a restriction, which zips them.
+    // A list arm or a later list condition whose length is not proved equal
+    // to the mask's: on JavaScript the two lengths are compared once, before
+    // the selection (`agree()` of `lower-lists.ts`), and the length of the
+    // selection reads that check. The interpreter's value is
+    // `incompatible-dimensions` for a later list condition that it
+    // evaluates, and for an arm of another length where a position selects
+    // it; the check throws also where none does (`docs/COMPILATION-MODEL.md`,
+    // the known limitations). Not for a restriction, which zips them.
     let length = masks.length;
-    if (!restriction)
-      for (const v of values) {
+    if (!restriction && lists.checks)
+      for (const v of [...conds.slice(1), ...values]) {
         const n = type(v).shape[0];
-        if (
-          !listed(v) ||
-          typeof n === 'number' ||
-          unchecked(n) === n ||
-          same([unchecked(n)], [masked!])
-        )
-          continue;
-        const [k, m] = [lists.knownLength(length), lists.knownLength(n.v)];
+        if (!listed(v) || same([unchecked(n)], [masked!])) continue;
+        const w = typeof n === 'number' ? b.constant(n, 'integer') : n.v;
+        const [k, m] = [lists.knownLength(length), lists.knownLength(w)];
         if (k !== undefined && m !== undefined && k !== m)
           decline(node, 'lists of two lengths in a selection at each position');
-        length = lists.agreedLength(node, length, n.v) ?? length;
+        length = lists.agreedLength(node, length, w) ?? length;
       }
     return lists.over(
       node as Fn,

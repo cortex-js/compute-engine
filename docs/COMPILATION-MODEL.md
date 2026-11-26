@@ -237,13 +237,27 @@ interpreter's value. A line is removed when the case declines or is fixed.
   (`D, E: list<real>`) is read by the length of the result, so it does not
   run where nothing reads the result: `Block(D + E, 5)` at `D = [1, 2]`,
   `E = [1, 2, 3]` gives `5`, where the interpreter gives
+  `incompatible-dimensions`. The comparisons of the sizes of two matrices
+  of an element-wise operation are read by the two lengths of the result,
+  each by its own length: `Rank(M + A)`, which reads neither, gives `2` at
+  the `M` and `A` above, and `Length(M + A)`, which reads the number of
+  rows only, gives `2` at `M = [[1, 2], [3, 4]]`,
+  `A = [[1, 2, 3], [4, 5, 6]]`, where the interpreter gives
   `incompatible-dimensions`.
 - `javascript` (crafted): a selection at each position compares the lengths
-  of the lists of an element-wise arm once, before it selects. With
-  `L, M: list<real>`, `If(L > 0, L·M, 0)` at `L = [-1, -2]`, `M = [3, 4, 5]`
-  throws `RangeError: incompatible-dimensions: lists of lengths 2 and 3`;
-  no position selects the arm, and the interpreter gives `[0, 0]`
-  (`Sum(If(L > 0, L·M, 0))` gives `0`).
+  of the lists of an element-wise arm, and the length of the mask with the
+  length of each list arm and later list condition, once, before it
+  selects. With `L, M, N: list<real>` and `x: real`, `If(L > 0, L·M, 0)` at
+  `L = [-1, -2]`, `M = [3, 4, 5]` throws
+  `RangeError: incompatible-dimensions: lists of lengths 2 and 3`; no
+  position selects the arm, and the interpreter gives `[0, 0]`
+  (`Sum(If(L > 0, L·M, 0))` gives `0`). So does `If(N > 0, L, 0)` at
+  `N = [-1, -2, -3]`, `L = [1, 2]` (the interpreter gives `[0, 0, 0]`) and
+  at `N = []`, `L = [1]` (`[]`), `If(N > 0, L, Range(1, 1/x))` at
+  `N = [1]`, `L = [2]`, `x = 0` (`[2]`), and a later list condition after a
+  scalar condition that holds, which the interpreter does not evaluate:
+  `Which(N > 0, 1, x > 0, 2, L > 0, 3, True, 0)` at `N = [1, -1, 1]`,
+  `L = [1, 2]`, `x = 1` (`[1, 2, 1]`).
 - `javascript` (crafted): a structural tree that holds calls of one name
   boxed in two scopes. With `g(t) = t + 1` outside and `g(t) = 10t` in a
   pushed scope, `Add` (structural) of `g(x + 0.5)` boxed in each scope gives
@@ -1867,7 +1881,27 @@ result is read (`Length(Inverse(M))`, `Shape(MatrixPower(M, 2))`). At `M = [[1, 
 `RangeError: expected-square-matrix: a matrix of 2 rows and 3 columns`.
 `Inverse` of a singular matrix is a matrix of NaN, as for a matrix of
 stated order. `RowReduce`, `Reshape` and the transpose of such a list of
-rank 2 decline. A `list<list<…>>` input, a value after
+rank 2 decline.
+An element-wise operation of such a matrix compiles on `javascript`: with a
+scalar (`2·M`, `x·M`, `M/2`, `−M`, `M + 1`, `2^M`, `Sin(M)`), and with another
+matrix of run-time or stated size (`M + A`, `M − A`, `M/A`,
+`Arctan2(M, A)`). Its value is the matrix of the operation on the elements at
+each row and column, as the interpreter's, and the numbers of rows and the
+lengths of the rows of two matrices that the compiler does not prove equal
+are compared once, before the loops: `M + A` compares twice, `M + M` and
+`M + 1` not at all, `M + Transpose(M)` once (its two lengths). At
+`M = [[1, 2, 3], [4, 5, 6]]`, `M + 2·M` gives `[[3, 6, 9], [12, 15, 18]]`;
+at that `M` and `A = [[1, 0], [0, 1]]`, `M + A` throws
+`RangeError: incompatible-dimensions: lists of lengths 2 and 3`, where the
+interpreter gives `incompatible-dimensions`. The matrix operators read the
+result: `Transpose(M + 1)` gives `[[2, 5], [3, 6], [4, 7]]`,
+`Shape(M/2)` gives `(2, 3)`, and `Determinant(A − 2·A)` gives 1. The
+operations whose value is not computed element by element decline: the
+product of two matrices and a power of a matrix (`M·A`, `M^x`: the
+interpreter's matrix product, and its matrix power at an integer exponent),
+a matrix with a flat list (`M + L`, `M·L`), and a comparison, whose value
+is a matrix of booleans.
+A `list<list<…>>` input, a value after
 an `If` or a `Coalesce`, a value that a loop carries, the result of a call, a
 join and a literal decline, since their rows can have different lengths:
 with `g: list<list<integer>>`, `Transpose(g)` and
@@ -1888,7 +1922,20 @@ interpreter gives `incompatible-dimensions`, and at `M = [3, 4]` gives
 `[4, 6]`. A length proved equal to a constant by a comparison is that
 constant: `[1, 2, 3]·D + [4, 5]` declines, as two stated lengths do.
 `Map((x, y) ↦ x + y, L, M)` is over the shorter list, as the interpreter's,
-and compares nothing. In the interval mode, and for lists of points of
+and compares nothing. A selection at each position compares the length of
+its first condition (the mask) with the length of each list arm and of each
+later list condition that the compiler does not prove equal to it, once,
+before it selects: with `N: list<real>`, `If(N > 0, L, 0)` at
+`N = [1, -1, 1]`, `L = [1, 2]` throws
+`RangeError: incompatible-dimensions: lists of lengths 3 and 2`, where the
+interpreter gives `incompatible-dimensions`, and at `N = [1, -1]`,
+`L = [5, 6]` gives `[5, 0]`; so do `If(N > 0, L, M)` (two comparisons),
+`Which(N > 0, L, True, 0)`, `Which(N > 0, 1, L > 0, 2, True, 0)` and an arm
+or a mask of a stated length beside one of a run-time length.
+`If(L > 0, L, 0)` compares nothing. An `If` with no else and a list arm
+reads the shorter of the mask and the arm, as the interpreter, and compares
+nothing. The comparison runs also where no position selects the arm (a
+known limitation). In the interval mode, and for lists of points of
 run-time lengths (`P, Q: list<tuple<real, real>>`), the result is
 unspecified: `P + Q` at lengths that differ gives a list as long as `P` on
 `javascript`, or throws a `TypeError` when `Q` is the shorter list.

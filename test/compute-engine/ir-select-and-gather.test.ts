@@ -219,19 +219,43 @@ describe('If and Which of a list condition on JavaScript', () => {
     ['a Map arm of a list of indexes', ['Which', ['Equal', ['Mod', 'K', 2], 1], ['Map', ['Function', ['Multiply', 2, 'w'], 'w'], ['At', 'L', 'K']], 'True', 0], [{ L: [5, 6, 7], K: [1, 2, 3] }]],
     ['Range arms and a later Range condition', ['Which', ['Equal', ['Mod', ['Range', 1, 'x'], 3], 1], ['Range', 1, 'x'], ['Equal', ['Mod', ['Range', 1, 'x'], 3], 2], ['Range', 0, ['Add', 'x', -1]], 'True', 0], [{ x: 6 }, { x: 1 }]],
     ['a later condition that builds a list', ['Which', ['Less', 3, 'L'], 1, ['Less', 2, ['Range', 1, 'x']], 2, 'True', 0], [{ L: [5, 1, 1], x: 3 }]],
-    ['a Range arm that no position selects, of an infinite length', ['If', 'B', 0, ['Range', 1, ['Divide', 1, 'x']]], [{ B: [true], x: 0 }]],
-    ['a Range arm that no position selects, of 2^32 elements', ['Which', ['Less', 3, 'L'], ['Range', 1, 'x'], 'True', 0], [{ L: [1, 2], x: 2 ** 32 }]],
     ['a restriction to a Range', ['If', ['Less', 3, 'L'], ['Range', 1, 'x']], [{ L: [5, 1, 5], x: 2 }, { L: [5, 1], x: 4 }]],
   ];
   test.each(PROGRAMS)('%s', (_, json, at) => {
     check(json, at);
   });
 
-  test('lists of two run-time lengths give a list, never an arm whole (CE-1238)', () => {
-    // The interpreter gives `incompatible-dimensions`: the compiled value
-    // of conditions of two lengths is unspecified, a list as long as the
-    // first condition. A comparison of two lists compares their lengths
-    // first (a `RangeError`).
+  // A `Range` arm of another length than the mask is never built: its
+  // length is compared with the mask's before the selection, and the check
+  // throws also where no position selects the arm, where the interpreter
+  // has a value (`docs/COMPILATION-MODEL.md`, the known limitations).
+  test.each([
+    [
+      'of an infinite length',
+      ['If', 'B', 0, ['Range', 1, ['Divide', 1, 'x']]],
+      { B: [true], x: 0 },
+      [0],
+    ],
+    [
+      'of 2^32 elements',
+      ['Which', ['Less', 3, 'L'], ['Range', 1, 'x'], 'True', 0],
+      { L: [1, 2], x: 2 ** 32 },
+      [0, 0],
+    ],
+  ])('a Range arm that no position selects, %s', (_, json, p, want) => {
+    const r = js(json as Json);
+    expect(r).toMatchObject({ success: true });
+    expect(interpreted(json as Json, p as Point)).toEqual(want);
+    expect(() => r.run!(p as never)).toThrow(
+      /^incompatible-dimensions: lists of lengths \d+ and (\d+|Infinity)$/
+    );
+  });
+
+  test('lists of two run-time lengths are compared (CE-1238)', () => {
+    // The interpreter gives `incompatible-dimensions` for a later list
+    // condition of another length than the first: the lengths are compared
+    // before the selection (a `RangeError`), never an arm whole. A
+    // comparison of two lists compares their lengths first.
     const r = js([
       'Which',
       ['Less', 3, 'L'],
@@ -241,7 +265,9 @@ describe('If and Which of a list condition on JavaScript', () => {
       'True',
       0,
     ]);
-    expect(r.run!({ L: [2, 5, 1], K: [-1, 1] } as never)).toHaveLength(3);
+    expect(() => r.run!({ L: [2, 5, 1], K: [-1, 1] } as never)).toThrow(
+      /^incompatible-dimensions: lists of lengths 3 and 2$/
+    );
     const s = js(['Which', ['Less', 'K', 'L'], 1, 'True', 0]);
     expect(() => s.run!({ L: [2, 5], K: [3, 3, 3] } as never)).toThrow(
       RangeError
