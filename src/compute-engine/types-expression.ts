@@ -3676,6 +3676,101 @@ export interface ObjectInterface {
   _store(name: string, value: Expression): void;
 }
 
+/**
+ * The storage of the cells of a mutable array: a typed array for machine
+ * cells (four bytes for each cell of a tuple of four bytes), an array of
+ * evaluated expressions for every other cell type.
+ *
+ * @category Boxed Expression
+ */
+export type ArrayCells =
+  | Uint8Array
+  | Int8Array
+  | Uint16Array
+  | Int16Array
+  | Uint32Array
+  | Int32Array
+  | Float64Array
+  | Expression[];
+
+/**
+ * Narrowed interface for a **mutable array**, a value of type `array<T>`.
+ *
+ * Obtained via `isMutableArray()`. As for an object, the instance is the
+ * array: two arrays are equal only when they are the same instance, and the
+ * hash does not change when a cell changes.
+ *
+ * Design: `docs/plans/2026-11-25-mutable-arrays-spec.md`.
+ *
+ * @category Boxed Expression
+ */
+export interface ArrayInterface {
+  /** The storage, by reference. A typed array for machine cells, whose
+   * length is `4 × count` for a tuple cell, and a read-only array of
+   * expressions for expression cells. It is valid until the cells of the
+   * array are exchanged with those of another array: read it at each use. */
+  readonly cells:
+    | Uint8Array
+    | Int8Array
+    | Uint16Array
+    | Int16Array
+    | Uint32Array
+    | Int32Array
+    | Float64Array
+    | ReadonlyArray<Expression>;
+
+  /** The change signal: two reads at the same version saw the same cells. A
+   * larger version does not prove that a cell changed. */
+  readonly version: number;
+
+  /** The number of cells. */
+  readonly count: number;
+
+  /** The cell type: `T` for an `array<T>`. */
+  readonly cellType: BoxedType;
+
+  /** The storage kind that the cell type selects (`arrayStorageKind()`).
+   * @internal */
+  readonly _storage:
+    | 'uint8'
+    | 'int8'
+    | 'uint16'
+    | 'int16'
+    | 'uint32'
+    | 'int32'
+    | 'float64'
+    | 'expression';
+
+  /** True when the cell is the tuple of four bytes. @internal */
+  readonly _tuple: boolean;
+
+  /** For the tuple of four bytes: the head of the value of a cell, the name
+   * of the nominal cell type (`Pixel`) or `Tuple`. @internal */
+  readonly _tupleTag: string | undefined;
+
+  /** Per-array cache currency: incremented by every store that changes a
+   * cell, and by an exchange of cells. @internal */
+  readonly _version: number;
+
+  /** Per-engine construction serial, the sole input to the hash.
+   * @internal */
+  readonly _serial: number;
+
+  /** The cell at a 1-based index (a negative index counts from the end), or
+   * for an index that is 0, not an integer or out of range, what `At` gives
+   * for a list of the cell type. Records a read of the array. @internal */
+  _read(index: number): Expression;
+
+  /** The cell at the 0-based offset `i`, in range, with no read recorded:
+   * for serialization and display. @internal */
+  _peek(i: number): Expression;
+
+  /** Store an evaluated value at a 1-based index: `undefined` when the cell
+   * holds the value after the call, else the error (`out-of-range`,
+   * `incompatible-type`, or the value when it is an error). @internal */
+  _store(index: number, value: Expression): Expression | undefined;
+}
+
 /** Interface for dictionary-like structures.
  * Use `isDictionary()` to check if an expression is a dictionary.
  */

@@ -44,7 +44,7 @@ import { isWildcard, wildcardName } from './pattern-utils.js';
  * unreachable by orders of magnitude in any real session, so a program that
  * gets there has a runaway loop, not a workload.
  */
-const COUNTER_LIMIT = Number.MAX_SAFE_INTEGER;
+export const COUNTER_LIMIT = Number.MAX_SAFE_INTEGER;
 
 /**
  * The per-engine construction serial, from which identity hashes are drawn.
@@ -57,7 +57,7 @@ const COUNTER_LIMIT = Number.MAX_SAFE_INTEGER;
  */
 const _serialCounters = new WeakMap<object, number>();
 
-function nextSerial(ce: ComputeEngine): number {
+export function nextSerial(ce: ComputeEngine): number {
   const serial = _serialCounters.get(ce) ?? 0;
   if (serial >= COUNTER_LIMIT) {
     console.assert(false, 'Object serial counter exhausted');
@@ -138,7 +138,7 @@ export function _setNextObjectSerial(ce: ComputeEngine, serial: number): void {
  * Anything else keeps the identity test, so this is strictly more elision
  * than before and never less.
  */
-function isRedundantStore(
+export function isRedundantStore(
   current: Expression | undefined,
   next: Expression
 ): boolean {
@@ -605,7 +605,7 @@ export function makeObject(
  *   live pointer leaves reading through to the registry is the declared
  *   parameter list and the "is it an object type at all" answer.
  */
-function detachNominalType(t: BoxedType): BoxedType {
+export function detachNominalType(t: BoxedType): BoxedType {
   const ref = t.type;
   if (typeof ref !== 'object' || ref.kind !== 'reference') return t;
 

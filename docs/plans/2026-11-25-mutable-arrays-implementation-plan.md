@@ -180,6 +180,9 @@ About 250 lines with tests.
 - `index.ts` and `types-engine.ts`: `ce.array()` (with its refusals),
   `ce.arrayAllocation` and `ce.arrayCreated`.
 - `serialize.ts` and `types-serialization.ts`: the option `objects`.
+- The option `objects` is the public form of the internal hook that item 2a
+  added for `.latex` (the JSON walk writes an array of more than 16 cells as
+  its type and count there).
 - `src/compute-engine.ts` and `src/core.ts`: the exports.
 
 Tests: acceptance cases 8 (the `noteStore()` part), 10 (without the

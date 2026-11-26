@@ -14,6 +14,7 @@ import type {
   CollectionInterface,
   IndexedCollectionInterface,
   ObjectInterface,
+  ArrayInterface,
   BoxedValueDefinition,
   BoxedDefinition,
 } from '../global-types.js';
@@ -497,7 +498,30 @@ export function isObject(
 }
 
 /**
- * Is `expr` an object belonging to a DIFFERENT engine than `ce`?
+ * Is this expression a **mutable array**, a value of type `array<T>`?
+ *
+ * A `_kind` string check, never `instanceof`, as {@link isObject}.
+ */
+export function isMutableArray(
+  expr: Expression | null | undefined
+): expr is Expression & ArrayInterface {
+  return expr?._kind === 'array';
+}
+
+/**
+ * Is this expression an object or a mutable array: a value whose identity is
+ * the instance, compared by reference, never cached, and never rebuilt?
+ */
+export function isObjectOrArray(
+  expr: Expression | null | undefined
+): boolean {
+  const kind = expr?._kind;
+  return kind === 'object' || kind === 'array';
+}
+
+/**
+ * Is `expr` an object, or a mutable array, belonging to a DIFFERENT engine
+ * than `ce`?
  *
  * An object belongs to the engine that constructed it: its pinned type, its
  * state events and its cache-dependency records all speak to that engine, so
@@ -514,7 +538,7 @@ export function isForeignEngineObject(
   expr: Expression | null | undefined,
   ce: unknown
 ): boolean {
-  return expr?._kind === 'object' && expr.engine !== ce;
+  return isObjectOrArray(expr) && expr!.engine !== ce;
 }
 
 /**
@@ -566,7 +590,7 @@ function containsForeignEngineObject(
     if (e._kind === undefined) return false;
     const cached = memo.get(e);
     if (cached !== undefined) return cached;
-    if (isObject(e)) {
+    if (isObjectOrArray(e)) {
       const result = e.engine !== ce;
       memo.set(e, result);
       return result;

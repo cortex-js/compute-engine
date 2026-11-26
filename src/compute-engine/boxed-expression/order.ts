@@ -10,7 +10,7 @@ import {
   isFunction,
   isSymbol,
   isString,
-  isObject,
+  isObjectOrArray,
   numericValue,
 } from './type-guards.js';
 
@@ -409,7 +409,8 @@ function rank(expr: Expression): Rank {
   // unordered as a matter of semantics (`cmp()` answers `undefined` for
   // them), so the rank exists only to give a sort a deterministic, total
   // comparator — see the `'object'` arm of `order()`.
-  if (isObject(expr)) return 'object';
+  // A mutable array ranks with the objects.
+  if (isObjectOrArray(expr)) return 'object';
 
   return 'other';
 }
@@ -598,7 +599,12 @@ export function order(a: Expression, b: Expression): number {
   // sorted array unsort itself. Distinct objects never compare `0`, so a sort
   // of a list of objects is deterministic; `a === b` was answered at the top.
   if (rankA === 'object') {
-    if (isObject(a) && isObject(b)) return a._serial - b._serial;
+    // An array draws its serial from the same counter as an object.
+    if (isObjectOrArray(a) && isObjectOrArray(b))
+      return (
+        (a as Expression & { _serial: number })._serial -
+        (b as Expression & { _serial: number })._serial
+      );
     return 0;
   }
 

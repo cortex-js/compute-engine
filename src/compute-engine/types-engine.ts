@@ -42,7 +42,11 @@ import type { UnitEnvironment } from './binding-unit.js';
 import type { EpsilDebugHooks, EpsilDebugRun } from './types-debug.js';
 import type { StatementSources } from '../common/debug-hook.js';
 
-import type { Expression, ExpressionInput } from './types-expression.js';
+import type {
+  ArrayCells,
+  Expression,
+  ExpressionInput,
+} from './types-expression.js';
 import type { FunctionProperties } from './function-properties/types.js';
 import type { ContourInput, ContourIntegralResult } from './types-contour.js';
 export type * from './types-contour.js';
@@ -2170,6 +2174,34 @@ export interface IComputeEngine {
      * the call site solved for — is what the constructed value's type must be.
      * Ignored unless it names `typeName`. */
     pinnedType?: BoxedType
+  ): Expression;
+
+  /**
+   * Construct a **mutable array** whose cells have the type `cellType`
+   * (`docs/plans/2026-11-25-mutable-arrays-spec.md`), from one of:
+   *
+   * - `{ fill, count }`: `count` cells, each holding the evaluated `fill`;
+   * - `{ elements }`: one cell for each evaluated element, in order;
+   * - `{ adopt }`: the storage itself, of the kind that the cell type
+   *   selects (`arrayStorageKind()`), with no pass over its cells.
+   *
+   * Each value of `fill` and `elements` is checked and converted as the
+   * value of a store is. Returns the array (`isMutableArray()`), or the
+   * error of the first value that the cell type does not hold
+   * (`incompatible-type`), and then no array is made.
+   *
+   * Throws for a count that is not a non-negative integer, for an adopted
+   * storage of the wrong kind, and `object-foreign-engine` for a value of
+   * another engine.
+   *
+   * @internal
+   */
+  _array(
+    cellType: Type | TypeString | BoxedType,
+    source:
+      | { readonly fill: Expression; readonly count: number }
+      | { readonly elements: ReadonlyArray<Expression> }
+      | { readonly adopt: ArrayCells }
   ): Expression;
 
   /** @internal Compile a boxed expression. */

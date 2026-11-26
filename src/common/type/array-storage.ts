@@ -1,4 +1,6 @@
-import type { NumericType, Type } from './types.js';
+import type { NumericType, Type, TypeReference } from './types.js';
+import { aliasDefinitionAt } from './instantiate.js';
+import { declarationOf } from './reference.js';
 import { resolveTypeReference } from './subtype.js';
 
 /**
@@ -71,28 +73,66 @@ const EXPRESSION_CELLS: ArrayStorageKind = Object.freeze({
  *   a wider range, `rational`, `number`, `boolean`, `string`, a union, any
  *   other tuple, a list, an object type, an array type, `any`.
  *
- * A type reference (an alias, or a nominal type such as
- * `type Byte = integer<0..255>`) is read through its definition, at the cell
- * type and at each element of a tuple.
+ * A transparent alias (`type alias Byte = integer<0..255>`) is read through
+ * its definition, at the cell type and at each element of a tuple. A nominal
+ * type (`type Byte = integer<0..255>`, whose values are the tagged `Byte(1)`)
+ * is not: it has expression cells, and so has a tuple with an element of a
+ * nominal type. The one nominal type that is a machine cell is one whose
+ * definition, read through transparent aliases, is the tuple of four bytes
+ * above (`type Pixel = tuple<integer<0..255>, …>`): `uint8` with
+ * `tuple: true` (spec section 3, "Aliases and declared types").
  *
  * The interpreter, the compiler and the host interface call this function;
  * no other code decides a storage.
  */
 export function arrayStorageKind(cellType: Type): ArrayStorageKind {
-  const t = resolveTypeReference(cellType);
+  const t = throughTransparentAliases(cellType);
   if (t === undefined) return EXPRESSION_CELLS;
   if (t === 'real') return { storage: 'float64', tuple: false };
   if (typeof t === 'string') return EXPRESSION_CELLS;
+  if (t.kind === 'reference') {
+    // A nominal type: a machine cell only as the tuple of four bytes.
+    const def = throughTransparentAliases(aliasDefinitionAt(t));
+    return isByteTuple(def) ? { storage: 'uint8', tuple: true } : EXPRESSION_CELLS;
+  }
   if (t.kind === 'numeric') {
     if (t.type === 'real') return { storage: 'float64', tuple: false };
     const storage = integerStorage(t);
     return storage === undefined ? EXPRESSION_CELLS : { storage, tuple: false };
   }
-  if (
+  if (isByteTuple(t)) return { storage: 'uint8', tuple: true };
+  return EXPRESSION_CELLS;
+}
+
+/**
+ * `t` read through transparent aliases (`type alias Byte = integer<0..255>`):
+ * the first type that is not one, a nominal reference included. `undefined`
+ * for an alias with no definition, or a cycle of aliases.
+ */
+export function throughTransparentAliases(
+  t: Type | undefined
+): Type | undefined {
+  const seen = new Set<TypeReference>();
+  while (t !== undefined && typeof t === 'object' && t.kind === 'reference') {
+    if (t.alias !== true) return t;
+    const decl = declarationOf(t);
+    if (seen.has(decl)) return undefined;
+    seen.add(decl);
+    t = aliasDefinitionAt(t);
+  }
+  return t;
+}
+
+/** Is `t` a tuple of exactly four elements, each an integer type within
+ * 0..255 read through transparent aliases only? */
+function isByteTuple(t: Type | undefined): boolean {
+  return (
+    t !== undefined &&
+    typeof t === 'object' &&
     t.kind === 'tuple' &&
     t.elements.length === 4 &&
     t.elements.every((e) => {
-      const x = resolveTypeReference(e.type);
+      const x = throughTransparentAliases(e.type);
       return (
         x !== undefined &&
         typeof x !== 'string' &&
@@ -100,9 +140,7 @@ export function arrayStorageKind(cellType: Type): ArrayStorageKind {
         integerStorage(x) === 'uint8'
       );
     })
-  )
-    return { storage: 'uint8', tuple: true };
-  return EXPRESSION_CELLS;
+  );
 }
 
 /** The storage of the integer type `t` with finite bounds, or `undefined`

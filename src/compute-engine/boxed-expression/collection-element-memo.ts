@@ -10,7 +10,7 @@ import type {
 import {
   isDictionary,
   isFunction,
-  isObject,
+  isObjectOrArray,
   isSymbol,
   isFreeName,
   isFreeCallHead,
@@ -962,7 +962,8 @@ function snapshotDepsUnderChain(
     // the memo entry would keep the object alive for the engine's lifetime.
     // Neither the epoch key nor the symbol-dependency walk can express "this
     // object at this version", so an object operand is refused outright.
-    if (isObject(e)) {
+    // A mutable array is refused for the same reasons.
+    if (isObjectOrArray(e)) {
       if (DEBUG_DEPS) console.log('[deps] ineligible: object operand');
       eligible = false;
       return;

@@ -165,6 +165,10 @@ import {
 } from './boxed-expression/boxed-character.js';
 import { BoxedFunction } from './boxed-expression/boxed-function.js';
 import { makeObject } from './boxed-expression/boxed-object.js';
+import {
+  makeArray,
+  type ArraySource,
+} from './boxed-expression/boxed-array.js';
 import { _BoxedExpression } from './boxed-expression/abstract-boxed-expression.js';
 import './boxed-expression/init-lazy-refs.js';
 import { _BoxedOperatorDefinition } from './boxed-expression/boxed-operator-definition.js';
@@ -5135,6 +5139,18 @@ export class ComputeEngine implements IComputeEngine {
     pinnedType?: BoxedType
   ): Expression {
     return makeObject(this, typeName, slots, metadata, pinnedType);
+  }
+
+  /**
+   * Construct a mutable array whose cells have the type `cellType`. See
+   * {@link IComputeEngine._array}.
+   * @internal
+   */
+  _array(
+    cellType: Type | TypeString | BoxedType,
+    source: ArraySource
+  ): Expression {
+    return makeArray(this, this.type(cellType), source);
   }
 
   /**

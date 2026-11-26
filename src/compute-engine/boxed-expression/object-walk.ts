@@ -67,13 +67,66 @@
  */
 
 import type { MathJsonExpression } from '../../math-json/types.js';
-import type { Expression, ObjectInterface } from '../global-types.js';
+import type {
+  ArrayInterface,
+  Expression,
+  JsonSerializationOptions,
+  ObjectInterface,
+} from '../global-types.js';
 
 import { anyObjectExists } from './object-deps.js';
-import { isDictionary, isFunction, isObject } from './type-guards.js';
+import {
+  isDictionary,
+  isFunction,
+  isMutableArray,
+  isObject,
+  isObjectOrArray,
+} from './type-guards.js';
+
+/** A value with identity that the walk converts: an object or a mutable
+ * array. An array is an ancestor of the cells it holds, as an object is of
+ * its fields. */
+type Reference = ObjectInterface | (Expression & ArrayInterface);
 
 /**
- * Does `expr` transitively hold an object reference?
+ * A hook of the walk, given each object and each array that the walk reaches:
+ * the MathJSON to write in its place, or `undefined` to convert it as usual.
+ * The LaTeX path passes {@link displayReferenceJson}. @internal
+ */
+export type ReferenceJsonHook = (
+  value: Expression
+) => MathJsonExpression | undefined;
+
+/** The options of a JSON serialization, with the internal hook
+ * `_referenceJson`: `serializeJson()` asks it at each object and array, and
+ * the walk at each one it reaches. @internal */
+export type DisplayJsonSerializationOptions =
+  Partial<JsonSerializationOptions> & {
+    _referenceJson?: ReferenceJsonHook;
+  };
+
+/** An array of more cells is displayed as its type and count, and its display
+ * reads no cell (spec section 8 of
+ * `docs/plans/2026-11-25-mutable-arrays-spec.md`). */
+export const MAX_DISPLAYED_ARRAY_CELLS = 16;
+
+/**
+ * The {@link ReferenceJsonHook} of a display (`.latex`, `toLatex()`): an
+ * array of more than {@link MAX_DISPLAYED_ARRAY_CELLS} cells is the text
+ * `array<integer<0..255>> of 64000`, a MathJSON string, and no cell of it is
+ * read. Every other value is converted as usual.
+ */
+export function displayReferenceJson(
+  value: Expression
+): MathJsonExpression | undefined {
+  if (!isMutableArray(value) || value.count <= MAX_DISPLAYED_ARRAY_CELLS)
+    return undefined;
+  return `'${value.type.toString()} of ${value.count}'`;
+}
+
+/**
+ * Does `expr` transitively hold an object reference? A mutable array is a
+ * reference too, and answers `true`, as does a value that holds one.
  *
  * Used to decide whether a value can serialize through its own `.json` (the
  * common case, which preserves every kind's own serialization: number
@@ -141,7 +194,7 @@ function containsObjectWith(
   if (cached !== undefined) return cached;
 
   let result: boolean;
-  if (isObject(expr)) result = true;
+  if (isObjectOrArray(expr)) result = true;
   else if (isFunction(expr)) {
     result = expr.ops.some((op) => containsObjectWith(op, memo));
     containmentOfFunctionNode.set(expr, result);
@@ -161,10 +214,10 @@ function containsObjectWith(
  * memo described in the module header.
  */
 type WalkState = {
-  ancestors: ObjectInterface[];
+  ancestors: Reference[];
   /** Subwalks already completed on this walk, by object identity. Only
    * CYCLE-FREE ones are entered — see `markers`. */
-  done: Map<ObjectInterface, MathJsonExpression>;
+  done: Map<Reference, MathJsonExpression>;
   /** `containsObject` answers for the expressions this walk has scanned. */
   contains: Map<Expression, boolean>;
   /**
@@ -185,10 +238,15 @@ type WalkState = {
    * that carry the cycle; only its acyclic parts get the memo.
    */
   markers: number;
+  /** The hook of the caller, asked first at each object and array. */
+  hook: ReferenceJsonHook | undefined;
 };
 
-function newWalkState(ancestors: ObjectInterface[]): WalkState {
-  return { ancestors, done: new Map(), contains: new Map(), markers: 0 };
+function newWalkState(
+  ancestors: Reference[],
+  hook?: ReferenceJsonHook
+): WalkState {
+  return { ancestors, done: new Map(), contains: new Map(), markers: 0, hook };
 }
 
 /**
@@ -201,8 +259,11 @@ function newWalkState(ancestors: ObjectInterface[]): WalkState {
  * provenance head, never as an object; identity, sharing and conformances do
  * not survive.
  */
-export function objectJson(obj: ObjectInterface): MathJsonExpression {
-  return objectJsonWith(obj, newWalkState([]));
+export function objectJson(
+  obj: ObjectInterface,
+  hook?: ReferenceJsonHook
+): MathJsonExpression {
+  return objectJsonWith(obj, newWalkState([], hook));
 }
 
 /** {@link objectJson} continuing an in-progress walk: a nested object must
@@ -257,7 +318,7 @@ function objectJsonWith(
  */
 export function objectRecordJson(
   obj: ObjectInterface,
-  ancestors: ObjectInterface[]
+  ancestors: Reference[]
 ): MathJsonExpression {
   return objectRecordJsonWith(obj, newWalkState(ancestors));
 }
@@ -291,6 +352,67 @@ function objectRecordJsonWith(
 }
 
 /**
+ * The serialization of a mutable array:
+ * `["Object", ["List", …cells], "'array<T>'"]`, the snapshot of the cells
+ * under the provenance head (spec section 8). A cell that holds an object or
+ * an array is converted by the walk, with its cycle markers: an
+ * `array<any>` can hold itself. O(count).
+ */
+export function arrayJson(
+  arr: Expression & ArrayInterface,
+  hook?: ReferenceJsonHook
+): MathJsonExpression {
+  return arrayJsonWith(arr, newWalkState([], hook));
+}
+
+/** {@link arrayJson} continuing an in-progress walk. */
+function arrayJsonWith(
+  arr: Expression & ArrayInterface,
+  state: WalkState
+): MathJsonExpression {
+  const done = state.done.get(arr);
+  if (done !== undefined) return done;
+
+  const markersBefore = state.markers;
+  const cells: MathJsonExpression[] = [];
+  const count = arr.count;
+  // The cells are read with `_peek()`, which records no read, for the reason
+  // given in `objectRecordJsonWith()`: the result is never memoized.
+  if (arr._storage === 'expression') {
+    state.ancestors.push(arr);
+    try {
+      for (let i = 0; i < count; i++) {
+        const value = arr._peek(i);
+        cells.push(
+          walkValue(value, state, containsObjectWith(value, state.contains))
+        );
+      }
+    } finally {
+      state.ancestors.pop();
+    }
+  } else if (arr._tuple) {
+    for (let i = 0; i < count; i++) cells.push(arr._peek(i).json);
+  } else {
+    const numbers = arr.cells as ArrayLike<number>;
+    for (let i = 0; i < count; i++) cells.push(numbers[i]);
+  }
+
+  const result = [
+    'Object',
+    ['List', ...cells],
+    `'${referenceName(arr)}'`,
+  ] as MathJsonExpression;
+  if (state.markers === markersBefore) state.done.set(arr, result);
+  return result;
+}
+
+/** The name that a `CircularReference` marker and the provenance head carry:
+ * the type name of an object, the type of an array (`array<any>`). */
+function referenceName(x: Reference): string {
+  return 'typeName' in x ? x.typeName : x.type.toString();
+}
+
+/**
  * Serialize one slot value, converting every object it holds.
  *
  * `contains` is the caller's already-computed `containsObject(value)` answer.
@@ -304,7 +426,9 @@ function walkValue(
   contains: boolean
 ): MathJsonExpression {
   const ancestors = state.ancestors;
-  if (isObject(value)) {
+  if (isObject(value) || isMutableArray(value)) {
+    const replaced = state.hook?.(value);
+    if (replaced !== undefined) return replaced;
     // A BACK-EDGE — the value is an object already on the current path — is
     // the only cycle a tree representation cannot express. `n` counts how
     // many levels up the ancestor chain it points (1 = this very object), and
@@ -318,10 +442,12 @@ function walkValue(
       return [
         'CircularReference',
         ancestors.length - up,
-        `'${value.typeName}'`,
+        `'${referenceName(value)}'`,
       ] as MathJsonExpression;
     }
-    return objectJsonWith(value, state);
+    return isObject(value)
+      ? objectJsonWith(value, state)
+      : arrayJsonWith(value, state);
   }
 
   // A container holding an object must be rebuilt here rather than delegated

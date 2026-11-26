@@ -98,7 +98,8 @@ starts from a large finite number, not from `+∞`.
 
 **Tuple cells (decision U5).** One tuple type is a machine cell: a tuple of
 four elements, named or not, each an integer type whose range is within 0 to
-255, such as `type Pixel = tuple<r: Byte, g: Byte, b: Byte, a: Byte>`. It is
+255, such as `type Pixel = tuple<r: Byte, g: Byte, b: Byte, a: Byte>` with
+`type alias Byte = integer<0..255>`. It is
 stored flat: cell `i` holds its four bytes at the positions `4(i − 1)` to
 `4(i − 1) + 3` of one `Uint8Array`. An `array<Pixel>` of `n` cells is a
 `Uint8Array` of `4n` bytes, the bytes of an `ImageData` and of an RGBA
@@ -107,10 +108,24 @@ tuple, a value: `a[i].r` reads one byte, and `a[i] == live` compares two
 tuples. A store writes a whole tuple, each element checked as a store of its
 type is. A tuple is immutable, so `a[i].r = v` is
 `immutable-value-assignment`; the program writes `a[i] = Pixel(v, p.g, p.b,
-p.a)`. A read at an index out of range gives the tuple of `NaN`, as `At`
-gives for a list of points. Every other tuple type has expression cells (an
+p.a)`. A read at an index out of range gives a tuple of four `NaN`, a plain
+tuple also when the cell type is named (a list of points gives a point of
+`NaN` there; a list of values of a named tuple type gives `Missing`, and a
+tuple cell does not follow it). A cell of a named tuple type takes a value of
+that type: `Pixel(1, 2, 3, 4)`, not `(1, 2, 3, 4)`. Every other tuple type has expression cells (an
 array of points, `array<tuple<real, real>>`, for example), and compiled code
 declines it.
+
+**Aliases and declared types.** A cell type is read through a type alias
+(`type alias Byte = integer<0..255>` is the type `integer<0..255>`). A type
+declared with `type` is a distinct type whose values carry its name
+(`type Byte = integer<0..255>` makes `Byte(1)`, which is not a number, and
+`1` is not a `Byte`): as a cell type, or as an element of a tuple cell, it
+has expression cells. The one declared type that is a machine cell is the
+tuple of four bytes above: a read of an `array<Pixel>` gives `Pixel(r, g, b,
+a)`. The array keeps the definition of its cell type as it is at the
+construction: a later declaration of the same name does not change the
+storage or the checks of an array that exists.
 
 **The value of a store, in the interpreter.** A store evaluates the value,
 then:
@@ -170,7 +185,7 @@ A declaration with a type does not give the cell type to its initializer
 (decision C3): `let px: array<integer<0..255>> = arrayFrom(repeat(0, n))` is
 `incompatible-type` (an `array<number>` for an `array<integer<0..255>>`), and
 its message names the second operand of `arrayFrom`. A prelude names a cell
-type once with a type alias (`type Byte = integer<0..255>`).
+type once with a type alias (`type alias Byte = integer<0..255>`).
 
 ## 5. Reads
 
@@ -342,7 +357,8 @@ increments it at each store (section 10.5).
   there and sends the storage beside it. The values `'record'` and `'reject'`
   of Phase 3 of the objects plan are not part of this spec.
 - A display (`print`, the Epsil form of a value, the text of a result,
-  `toString()`) writes an array of 16 cells or fewer as its constructor
+  `toString()`, and `.latex`, also for a value that holds the array) writes
+  an array of 16 cells or fewer as its constructor
   (`arrayFrom([1, 2, 3], "integer<0..255>")`) and a longer one as its type and
   count: `array<integer<0..255>> of 64000`.
 

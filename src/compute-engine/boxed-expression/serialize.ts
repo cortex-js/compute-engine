@@ -54,11 +54,19 @@ import {
   isString,
   isCharacter,
   isFunction,
+  isMutableArray,
   isObject,
   isDictionary,
   containsContinuationOperand,
 } from './type-guards.js';
 import { isImaginaryPartFinite } from './imaginary-part.js';
+import {
+  arrayJson,
+  containsObject,
+  objectJson,
+  type DisplayJsonSerializationOptions,
+  type ReferenceJsonHook,
+} from './object-walk.js';
 import {
   hidesLibraryBinding,
   inSerializationScope,
@@ -1645,6 +1653,12 @@ function isRawExpression(expr: Expression): boolean {
   return !expr.isCanonical && !expr.isStructural;
 }
 
+function referenceJsonHook(
+  options: Readonly<JsonSerializationOptions>
+): ReferenceJsonHook | undefined {
+  return (options as DisplayJsonSerializationOptions)._referenceJson;
+}
+
 function serializeJsonExpression(
   ce: ComputeEngine,
   expr: Expression,
@@ -1667,7 +1681,14 @@ function serializeJsonExpression(
   // would recurse forever and re-trip its option-validation warnings.
   if (isDictionary(expr)) {
     if (options.shorthands.includes('dictionary')) {
-      const json = expr.json;
+      // With a hook, a dictionary that holds an object or an array is
+      // rebuilt entry by entry without its `.json`, which would convert
+      // every cell of an array inside it. Such a dictionary is not plain
+      // data, so `.json` would have chosen the operator form.
+      const json =
+        referenceJsonHook(options) !== undefined && containsObject(expr)
+          ? undefined
+          : expr.json;
       // `.json` serializes every entry with the default options, so the
       // entries are serialized again with THESE options, in the same shape
       // `.json` chose: the `{dict: …}` shorthand holds plain data only (no
@@ -1679,7 +1700,7 @@ function serializeJsonExpression(
       // value held by a `Tuple`: with the raw `.json`, `{"a" -> u ↦ u + 1}`
       // was written in LaTeX with the block marker, `u\mapsto u+1;`, which
       // does not parse back.
-      if (!Array.isArray(json)) return json;
+      if (json !== undefined && !Array.isArray(json)) return json;
       return [
         'Dictionary',
         ...expr.entries.map(
@@ -1714,7 +1735,22 @@ function serializeJsonExpression(
   // arm exists ahead of the `.json` fallback at the bottom because this is
   // where the serializer's `objects: 'record' | 'reject'` option will be
   // honored (`docs/TYPE_SYSTEM_ROADMAP.md` Appendix B, "Serialization").
-  if (isObject(expr)) return expr.json;
+  //
+  // The internal `_referenceJson` hook of the options (`ReferenceJsonHook`,
+  // `object-walk.ts`) is asked first, here and at each object and array that
+  // the walk reaches: the LaTeX path passes `displayReferenceJson()`.
+  const referenceJson = referenceJsonHook(options);
+  if (isObject(expr))
+    return referenceJson === undefined
+      ? expr.json
+      : (referenceJson(expr) ?? objectJson(expr, referenceJson));
+
+  // A mutable array: `["Object", ["List", …cells], "'array<T>'"]`, by the
+  // same walk (`arrayJson()`, `object-walk.ts`).
+  if (isMutableArray(expr))
+    return referenceJson === undefined
+      ? expr.json
+      : (referenceJson(expr) ?? arrayJson(expr, referenceJson));
 
   // Is it a string?
   if (isString(expr)) return serializeJsonString(expr.string, options);

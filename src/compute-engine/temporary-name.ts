@@ -4,6 +4,7 @@ import {
   isDictionary,
   isExpression,
   isFunction,
+  isMutableArray,
   isObject,
   isSymbol,
 } from './boxed-expression/type-guards.js';
@@ -126,6 +127,13 @@ function collectNames(
       // cache generation of the engine.
       recordObjectRead(e, e._version);
       for (const value of e._slots.values()) pending.push(value);
+    } else if (isMutableArray(e)) {
+      // The cells of an array, as the fields of an object. Machine cells
+      // hold numbers, which hold no name.
+      visited.add(e);
+      recordObjectRead(e, e._version);
+      if (e._storage === 'expression')
+        for (let i = 0; i < e.count; i++) pending.push(e._peek(i));
     }
   }
 }

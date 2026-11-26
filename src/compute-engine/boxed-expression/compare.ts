@@ -27,7 +27,7 @@ import {
   isString,
   isCharacter,
   isDictionary,
-  isObject,
+  isObjectOrArray,
   isUnorderedSet,
   integerRangeElements,
   isFreeName,
@@ -572,7 +572,8 @@ export function same(
   // `true` for two distinct objects with equal slots. Having already failed
   // the `a === b` fast path, the answer here is always `false`; it is written
   // as the identity comparison because that is the rule, not the outcome.
-  if (isObject(a) || isObject(b))
+  // A mutable array is compared the same way, for the same reason.
+  if (isObjectOrArray(a) || isObjectOrArray(b))
     return (a as Expression) === (b as Expression);
 
   // A symbol is compared as a symbol, never as its value: exactly one operand
@@ -894,7 +895,10 @@ function eqImpl(
   // The post-evaluation branch below is still needed and is not redundant
   // with this one: an operand that is a CONSTRUCTOR CALL is not an object
   // until it has been evaluated, and only that branch sees it.
-  if (isObject(a) || (typeof inputB !== 'number' && isObject(inputB)))
+  if (
+    isObjectOrArray(a) ||
+    (typeof inputB !== 'number' && isObjectOrArray(inputB))
+  )
     return (a as unknown) === (inputB as unknown);
 
   // A pair of values with a value of a value kind (a residue class, a
@@ -966,7 +970,7 @@ function eqImpl(
   // deferred `Equatable` protocol — would carve into this branch and the
   // pre-pass above, and nowhere else.)
   //
-  if (isObject(a) || isObject(b))
+  if (isObjectOrArray(a) || isObjectOrArray(b))
     return (a as Expression) === (b as Expression);
 
   // A pair with a kind value after the evaluation (see the dispatch at the
@@ -1519,7 +1523,8 @@ function cmpWithTolerance(
   // `.N()`s the difference on an operand that has no numeric view at all.
   // (`docs/TYPE-SYSTEM.md`, "Equality":
   // "`cmp()` keeps returning `undefined` (objects are unordered)".)
-  if (isObject(a) || (typeof b !== 'number' && isObject(b))) return undefined;
+  if (isObjectOrArray(a) || (typeof b !== 'number' && isObjectOrArray(b)))
+    return undefined;
 
   if (isNumber(a)) {
     //
@@ -3859,7 +3864,7 @@ export function orderOfNumbers(
 function valueOfOperand(x: number | Expression): BigDecimal | undefined {
   if (typeof x === 'number')
     return Number.isFinite(x) ? new BigDecimal(x) : undefined;
-  if (isObject(x)) return undefined;
+  if (isObjectOrArray(x)) return undefined;
   let v: Expression | undefined = x;
   if (isSymbol(x)) v = x.isConstant === true ? x.N() : x.value;
   if (v === undefined || !isNumber(v)) return undefined;

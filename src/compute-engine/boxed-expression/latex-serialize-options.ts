@@ -16,6 +16,7 @@ import {
 } from '../collection-utils.js';
 import { isNumberExpression, stringValue } from '../../math-json/utils.js';
 import { isFunction, isSymbol } from './type-guards.js';
+import { containsObject } from './object-walk.js';
 import { optionalParameterTarget } from './function-literal.js';
 import { mayBeMatrixPowerBase } from './matrix-operand.js';
 import { isFunctionSymbolName } from './implicit-variable-rule.js';
@@ -167,7 +168,9 @@ function countOperandSources(
   if (!expr.isCanonical && !expr.isStructural) return result;
   const visit = (e: Expression): void => {
     if (!isFunction(e)) return;
-    if (e.operator === 'Count' && e.nops === 1) {
+    // An operand that holds an object or an array has no key: its `.json`
+    // would read every cell of an array, and it is not a set or a string.
+    if (e.operator === 'Count' && e.nops === 1 && !containsObject(e.op1)) {
       const op = e.op1;
       const keys = [JSON.stringify(op.json)];
       if (jsonOptions !== undefined)
@@ -208,6 +211,10 @@ function tupleOperandSources(
     if (!isFunction(e)) return;
     if (e.operator === 'Tuple') {
       for (const op of e.ops) {
+        // An operand that holds an object or an array has no key: its
+        // `.json` would read every cell of an array (a display reads none of
+        // an array of more than 16 cells), and it is not a list of numbers.
+        if (containsObject(op)) continue;
         const keys = [JSON.stringify(op.json)];
         if (jsonOptions !== undefined)
           keys.push(JSON.stringify(op.toMathJson(jsonOptions)));
