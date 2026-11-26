@@ -372,20 +372,20 @@ The [Colors reference](/epsil/reference/colors/) has the full description and th
 | `asOklch` | `AsOklch` | `(color \| string \| tuple) -> color` | Convert any color to OKLCh |
 | `asRgb` | `AsRgb` | `(color \| string \| tuple) -> color` | Convert any color to sRGB (channels 0-1) |
 | `color` | `Color` | `(string) -> color` | Parse a CSS-style color string to an Oklch color |
-| `colorContrast` | `ColorContrast` | `(color \| string \| tuple, color \| string \| tuple) -> number` | APCA contrast ratio between two colors |
+| `colorContrast` | `ColorContrast` | `(background: color \| string \| tuple, foreground: color \| string \| tuple) -> number` | APCA contrast ratio between two colors |
 | `colorDelta` | `ColorDelta` | `(color \| string \| tuple, color \| string \| tuple) -> number` | Perceptual color difference (ΔE_OK) between two colors |
-| `colorFromColorspace` | `ColorFromColorspace` | `(color \| tuple, string) -> color` | Build a color from channel values in a named color space. |
-| `colorMix` | `ColorMix` | `(color \| string \| tuple, color \| string \| tuple, number?) -> color` | Mix two colors in OKLCh space |
-| `colorToColorspace` | `ColorToColorspace` | `(color \| string \| tuple, string) -> tuple` | Convert a color to components in a target color space |
-| `colorToString` | `ColorToString` | `(color \| string \| tuple, string?) -> string` | Convert a color to a string in the specified format: "hex" (the default), "rgb", "hsl", "oklch", "srgb" (the same as "hex") or "display-p3" (the CSS spelling `color(display-p3 r g b)`). |
+| `colorFromColorspace` | `ColorFromColorspace` | `(channels: color \| tuple, space: string) -> color` | Build a color from channel values in a named color space. |
+| `colorMix` | `ColorMix` | `(a: color \| string \| tuple, b: color \| string \| tuple, ratio: number?) -> color` | Mix two colors in OKLCh space |
+| `colorToColorspace` | `ColorToColorspace` | `(color: color \| string \| tuple, space: string) -> tuple` | Convert a color to components in a target color space |
+| `colorToString` | `ColorToString` | `(color: color \| string \| tuple, format: string?) -> string` | Convert a color to a string in the specified format: "hex" (the default), "rgb", "hsl", "oklch", "srgb" (the same as "hex") or "display-p3" (the CSS spelling `color(display-p3 r g b)`). |
 | `colormap` | `Colormap` | `(string, number?) -> color \| list<color>` | Sample colors from a named palette. |
-| `contrastingColor` | `ContrastingColor` | `(color \| string \| tuple, (color \| string \| tuple)?, (color \| string \| tuple)?) -> color` | Choose the foreground color with better APCA contrast against a background, answered as given: the interpreter keeps the color head the candidate was written with, and a compiled target answers the same color in its canonical form |
-| `gamutMap` | `GamutMap` | `(color \| string \| tuple, string?) -> color` | Map a color into a target gamut, "srgb" (the default) or "display-p3", with the CSS Color 4 gamut-mapping algorithm: the OKLCh chroma is reduced, at constant lightness and hue, until the color is inside the gamut or until clipping each… |
-| `hsl` | `Hsl` | `(number, number, number, number?) -> color` | HSL color (hue degrees, saturation/lightness 0-1, optional alpha) |
-| `hsv` | `Hsv` | `(number, number, number, number?) -> color` | HSV color (hue degrees, saturation/value 0-1, optional alpha) |
-| `oklab` | `Oklab` | `(number, number, number, number?) -> color` | OKLab color (L 0-1, a/b ~ -0.4..0.4, optional alpha) |
-| `oklch` | `Oklch` | `(number, number, number, number?) -> color` | OKLCh color (L 0-1, C 0-~0.4, hue degrees, optional alpha) |
-| `rgb` | `Rgb` | `(number, number, number, number?) -> color` | sRGB color (channels 0-1, optional alpha 0-1) |
+| `contrastingColor` | `ContrastingColor` | `(background: color \| string \| tuple, a: (color \| string \| tuple)?, b: (color \| string \| tuple)?) -> color` | Choose the foreground color with better APCA contrast against a background, answered as given: the interpreter keeps the color head the candidate was written with, and a compiled target answers the same color in its canonical form |
+| `gamutMap` | `GamutMap` | `(color: color \| string \| tuple, gamut: string?) -> color` | Map a color into a target gamut, "srgb" (the default) or "display-p3", with the CSS Color 4 gamut-mapping algorithm: the OKLCh chroma is reduced, at constant lightness and hue, until the color is inside the gamut or until clipping each… |
+| `hsl` | `Hsl` | `(h: number, s: number, l: number, alpha: number?) -> color` | HSL color (hue degrees, saturation/lightness 0-1, optional alpha) |
+| `hsv` | `Hsv` | `(h: number, s: number, v: number, alpha: number?) -> color` | HSV color (hue degrees, saturation/value 0-1, optional alpha) |
+| `oklab` | `Oklab` | `(l: number, a: number, b: number, alpha: number?) -> color` | OKLab color (L 0-1, a/b ~ -0.4..0.4, optional alpha) |
+| `oklch` | `Oklch` | `(l: number, c: number, h: number, alpha: number?) -> color` | OKLCh color (L 0-1, C 0-~0.4, hue degrees, optional alpha) |
+| `rgb` | `Rgb` | `(r: number, g: number, b: number, alpha: number?) -> color` | sRGB color (channels 0-1, optional alpha 0-1) |
 
 ## Regular expressions
 

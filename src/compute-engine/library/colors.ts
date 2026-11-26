@@ -523,8 +523,16 @@ function gamutMapColor(
 export const COLORS_LIBRARY: SymbolDefinitions = {
   Color: {
     description: 'Parse a CSS-style color string to an Oklch color',
+    examples: ['Color("#ff8000")', 'Color("hsl(120 100% 50%)")'],
     complexity: 8000,
     signature: '(string) -> color',
+    parameters: [
+      {
+        description:
+          'A CSS color: a hex code, an `rgb()`, `hsl()`, `oklch()` or `oklab()` spelling, or a color name; a string that is not a color is an `incompatible-type` error.',
+        sample: '"#ff8000"',
+      },
+    ],
     evaluate: (ops, { engine: ce }) => {
       const input = isString(ops[0]) ? ops[0].string : undefined;
       if (!input) return notAColor(ce, ops[0]);
@@ -545,8 +553,24 @@ export const COLORS_LIBRARY: SymbolDefinitions = {
       '4 gamut mapping: the OKLCh chroma is reduced at constant lightness ' +
       'and hue. The channels are not clipped one by one. The oklch format ' +
       'has no gamut and is not mapped',
+    examples: [
+      'ColorToString(Rgb(1, 0.5, 0))',
+      'ColorToString(Oklch(0.7, 0.15, 30), "oklch")',
+    ],
     complexity: 8000,
-    signature: '(color | string | tuple, string?) -> string',
+    signature: '(color: color | string | tuple, format: string?) -> string',
+    parameters: {
+      color: {
+        description:
+          'The color: a color head, a CSS color string or a tuple of sRGB channels in [0, 1].',
+        sample: 'rgb(1, 0.5, 0)',
+      },
+      format: {
+        description:
+          'The output format, "hex" when omitted: "hex", "rgb", "hsl", "oklch", "srgb" or "display-p3", in any case; another name is an `expected-value` error.',
+        sample: '"hsl"',
+      },
+    },
     evaluate: (ops, { engine: ce }) => {
       const rgb = extractRgb(ce, ops[0]);
       if (!rgb) return notAColor(ce, ops[0]);
@@ -585,8 +609,24 @@ export const COLORS_LIBRARY: SymbolDefinitions = {
       'outside [0, 1] (extended sRGB) for a color that is inside the ' +
       'Display-P3 gamut but outside the sRGB gamut. Color values themselves ' +
       'have no gamut: only this operator and the string output map a color',
+    examples: [
+      'GamutMap(Oklch(0.7, 0.4, 30))',
+      'GamutMap(Oklch(0.7, 0.4, 30), "display-p3")',
+    ],
     complexity: 8000,
-    signature: '(color | string | tuple, string?) -> color',
+    signature: '(color: color | string | tuple, gamut: string?) -> color',
+    parameters: {
+      color: {
+        description:
+          'The color to map: a color head, a CSS color string or a tuple of sRGB channels in [0, 1].',
+        sample: 'oklch(0.7, 0.4, 30)',
+      },
+      gamut: {
+        description:
+          'The target gamut, "srgb" when omitted, or "display-p3", in any case; another name is an `expected-value` error.',
+        sample: '"display-p3"',
+      },
+    },
     evaluate: (ops, { engine: ce }) => {
       let gamut: ColorGamut = 'srgb';
       if (ops.length >= 2 && ops[1] !== undefined) {
@@ -628,9 +668,29 @@ export const COLORS_LIBRARY: SymbolDefinitions = {
 
   ColorMix: {
     description: 'Mix two colors in OKLCh space',
+    examples: [
+      'ColorMix("#ff0000", "#0000ff")',
+      'ColorMix("#ff0000", "#0000ff", 0.25)',
+    ],
     complexity: 8000,
     signature:
-      '(color | string | tuple, color | string | tuple, number?) -> color',
+      '(a: color | string | tuple, b: color | string | tuple, ratio: number?) -> color',
+    parameters: {
+      a: {
+        description:
+          'The first color: a color head, a CSS color string or a tuple of sRGB channels in [0, 1].',
+        sample: '"#ff0000"',
+      },
+      b: {
+        description: 'The second color, in the same spellings.',
+        sample: '"#0000ff"',
+      },
+      ratio: {
+        description:
+          'The weight of the second color, from 0 (the first color) to 1 (the second color), clamped into that range; 0.5 when omitted.',
+        sample: '0.25',
+      },
+    },
     evaluate: (ops, { engine: ce }) => {
       let ratio = 0.5;
       if (ops.length >= 3 && ops[2] !== undefined) {
@@ -658,8 +718,23 @@ export const COLORS_LIBRARY: SymbolDefinitions = {
       'A categorical palette (such as "tycho11" or "tableau10") is a list of distinct colors and is never interpolated: ' +
       'n gives its first n colors, repeated from the start past the length of the palette, and t the nearest color, ' +
       'the color at index round(t × (length − 1))',
+    examples: ['Colormap("viridis", 0.5)', 'Colormap("tableau10", 3)'],
     complexity: 8000,
     signature: '(string, number?) -> color | list<color>',
+    // By position: the second argument is a count or a position depending
+    // on its value, so no one name fits it.
+    parameters: [
+      {
+        description:
+          'The name of the palette, such as "viridis", "tableau10" or "tycho11"; an unknown name is an `expected-value` error.',
+        sample: '"viridis"',
+      },
+      {
+        description:
+          'An integer n from 2 to 10000 gives a list of n colors (a larger n stays unevaluated); any other number is a position in [0, 1], clamped, and gives one color (1 is the last color, not a count).',
+        sample: '0.5',
+      },
+    ],
     evaluate: (ops, { engine: ce }) => {
       const name = isString(ops[0]) ? ops[0].string : undefined;
       if (!name) return ce.error('incompatible-type');
@@ -711,8 +786,24 @@ export const COLORS_LIBRARY: SymbolDefinitions = {
 
   ColorToColorspace: {
     description: 'Convert a color to components in a target color space',
+    examples: [
+      'ColorToColorspace(Rgb(1, 0.5, 0), "hsl")',
+      'ColorToColorspace(Oklab(0.7, 0.1, 0.1), "oklch")',
+    ],
     complexity: 8000,
-    signature: '(color | string | tuple, string) -> tuple',
+    signature: '(color: color | string | tuple, space: string) -> tuple',
+    parameters: {
+      color: {
+        description:
+          'The color: a color head, a CSS color string or a tuple of sRGB channels in [0, 1].',
+        sample: 'rgb(1, 0.5, 0)',
+      },
+      space: {
+        description:
+          'The target color space: "rgb", "hsl", "hsv", "oklab" (or "lab") or "oklch", in any case; another name is an `expected-value` error.',
+        sample: '"hsl"',
+      },
+    },
     evaluate: (ops, { engine: ce }) => {
       const space = isString(ops[1]) ? ops[1].string?.toLowerCase() : undefined;
       if (!space) return ce.error('incompatible-type');
@@ -779,8 +870,24 @@ export const COLORS_LIBRARY: SymbolDefinitions = {
       'is a color on every route — the color head of the named space when ' +
       "evaluated, the target's color value when compiled. To read the " +
       'channels back out, call ColorToColorspace(color, space)',
+    examples: [
+      'ColorFromColorspace((120, 1, 0.5), "hsl")',
+      'ColorFromColorspace((0.7, 0.15, 30, 0.5), "oklch")',
+    ],
     complexity: 8000,
-    signature: '(color | tuple, string) -> color',
+    signature: '(channels: color | tuple, space: string) -> color',
+    parameters: {
+      channels: {
+        description:
+          'Three channel values in the order of the space, and an optional alpha in [0, 1]; the channels of a color head are read as they are, ignoring its own space.',
+        sample: '(120, 1, 0.5)',
+      },
+      space: {
+        description:
+          'The color space of the channels: "rgb", "hsl", "hsv", "oklab" (or "lab") or "oklch", in any case; another name is an `expected-value` error.',
+        sample: '"hsl"',
+      },
+    },
     evaluate: (ops, { engine: ce }) => {
       const space = isString(ops[1]) ? ops[1].string?.toLowerCase() : undefined;
       if (!space) return ce.error('incompatible-type');
@@ -821,8 +928,24 @@ export const COLORS_LIBRARY: SymbolDefinitions = {
 
   ColorContrast: {
     description: 'APCA contrast ratio between two colors',
+    examples: [
+      'ColorContrast("#ffffff", "#000000")',
+      'ColorContrast("#000000", "#ffffff")',
+    ],
     complexity: 8000,
-    signature: '(color | string | tuple, color | string | tuple) -> number',
+    signature:
+      '(background: color | string | tuple, foreground: color | string | tuple) -> number',
+    parameters: {
+      background: {
+        description:
+          'The background color: a color head, a CSS color string or a tuple of sRGB channels in [0, 1]; APCA is not symmetric, so dark text on a light background gives a positive contrast and light text on a dark one a negative contrast.',
+        sample: '"#ffffff"',
+      },
+      foreground: {
+        description: 'The text color, in the same spellings.',
+        sample: '"#000000"',
+      },
+    },
     evaluate: (ops, { engine: ce }) => {
       const bgRgb = extractRgb(ce, ops[0]);
       const fgRgb = extractRgb(ce, ops[1]);
@@ -838,9 +961,30 @@ export const COLORS_LIBRARY: SymbolDefinitions = {
       'background, answered as given: the interpreter keeps the color head ' +
       'the candidate was written with, and a compiled target answers the ' +
       'same color in its canonical form',
+    examples: [
+      'ContrastingColor("#000080")',
+      'ContrastingColor("#000080", "#ffd700", "#800080")',
+    ],
     complexity: 8000,
     signature:
-      '(color | string | tuple, (color | string | tuple)?, (color | string | tuple)?) -> color',
+      '(background: color | string | tuple, a: (color | string | tuple)?, b: (color | string | tuple)?) -> color',
+    parameters: {
+      background: {
+        description:
+          'The background color: a color head, a CSS color string or a tuple of sRGB channels in [0, 1].',
+        sample: '"#000080"',
+      },
+      a: {
+        description:
+          'The first candidate foreground color; it is used only with `b`, and without both candidates the result is white or black.',
+        sample: '"#ffd700"',
+      },
+      b: {
+        description:
+          'The second candidate foreground color; on equal contrast the first candidate wins.',
+        sample: '"#800080"',
+      },
+    },
     evaluate: (ops, { engine: ce }) => {
       const bgRgb = extractRgb(ce, ops[0]);
       if (!bgRgb) return notAColor(ce, ops[0]);
@@ -890,35 +1034,126 @@ export const COLORS_LIBRARY: SymbolDefinitions = {
 
   Rgb: {
     description: 'sRGB color (channels 0-1, optional alpha 0-1)',
+    examples: ['Rgb(1, 0.5, 0)', 'ColorToString(Rgb(1, 0.5, 0, 0.5))'],
     complexity: 8000,
     broadcastable: true,
-    signature: '(number, number, number, number?) -> color',
+    signature: '(r: number, g: number, b: number, alpha: number?) -> color',
+    parameters: {
+      r: {
+        description:
+          'The red channel, from 0 to 1; a value outside [0, 1] is extended sRGB and is kept.',
+        sample: '1',
+      },
+      g: { description: 'The green channel, from 0 to 1.', sample: '0.5' },
+      b: { description: 'The blue channel, from 0 to 1.', sample: '0' },
+      alpha: {
+        description:
+          'The opacity, from 0 (transparent) to 1 (opaque, the default).',
+        sample: '0.5',
+      },
+    },
   },
   Hsv: {
     description:
       'HSV color (hue degrees, saturation/value 0-1, optional alpha)',
+    examples: ['AsRgb(Hsv(30, 1, 1))'],
     complexity: 8000,
     broadcastable: true,
-    signature: '(number, number, number, number?) -> color',
+    signature: '(h: number, s: number, v: number, alpha: number?) -> color',
+    parameters: {
+      h: { description: 'The hue, in degrees, read modulo 360.', sample: '30' },
+      s: {
+        description: 'The saturation, from 0 to 1; a value outside is clamped.',
+        sample: '1',
+      },
+      v: {
+        description:
+          'The value (brightness), from 0 to 1; a value outside is clamped.',
+        sample: '1',
+      },
+      alpha: {
+        description:
+          'The opacity, from 0 (transparent) to 1 (opaque, the default).',
+        sample: '0.5',
+      },
+    },
   },
   Hsl: {
     description:
       'HSL color (hue degrees, saturation/lightness 0-1, optional alpha)',
+    examples: ['AsRgb(Hsl(120, 1, 0.5))'],
     complexity: 8000,
     broadcastable: true,
-    signature: '(number, number, number, number?) -> color',
+    signature: '(h: number, s: number, l: number, alpha: number?) -> color',
+    parameters: {
+      h: {
+        description: 'The hue, in degrees, read modulo 360.',
+        sample: '120',
+      },
+      s: {
+        description: 'The saturation, from 0 to 1; a value outside is clamped.',
+        sample: '1',
+      },
+      l: {
+        description:
+          'The lightness, from 0 (black) to 1 (white); a value outside is clamped.',
+        sample: '0.5',
+      },
+      alpha: {
+        description:
+          'The opacity, from 0 (transparent) to 1 (opaque, the default).',
+        sample: '0.5',
+      },
+    },
   },
   Oklab: {
     description: 'OKLab color (L 0-1, a/b ~ -0.4..0.4, optional alpha)',
+    examples: ['AsOklch(Oklab(0.7, 0.1, 0.1))'],
     complexity: 8000,
     broadcastable: true,
-    signature: '(number, number, number, number?) -> color',
+    signature: '(l: number, a: number, b: number, alpha: number?) -> color',
+    parameters: {
+      l: {
+        description: 'The perceptual lightness, from 0 (black) to 1 (white).',
+        sample: '0.7',
+      },
+      a: {
+        description: 'The green-red axis, about -0.4 (green) to 0.4 (red).',
+        sample: '0.1',
+      },
+      b: {
+        description: 'The blue-yellow axis, about -0.4 (blue) to 0.4 (yellow).',
+        sample: '0.1',
+      },
+      alpha: {
+        description:
+          'The opacity, from 0 (transparent) to 1 (opaque, the default).',
+        sample: '0.5',
+      },
+    },
   },
   Oklch: {
     description: 'OKLCh color (L 0-1, C 0-~0.4, hue degrees, optional alpha)',
+    examples: ['ColorToString(Oklch(0.7, 0.15, 30))'],
     complexity: 8000,
     broadcastable: true,
-    signature: '(number, number, number, number?) -> color',
+    signature: '(l: number, c: number, h: number, alpha: number?) -> color',
+    parameters: {
+      l: {
+        description: 'The perceptual lightness, from 0 (black) to 1 (white).',
+        sample: '0.7',
+      },
+      c: {
+        description: 'The chroma, from 0 (gray) to about 0.4.',
+        sample: '0.15',
+      },
+      h: { description: 'The hue angle, in degrees.', sample: '30' },
+      alpha: {
+        description:
+          'The opacity, from 0 (transparent) to 1 (opaque, the default).',
+        sample: '0.5',
+      },
+    },
   },
 
   // ---------------------------------------------------------------------------
@@ -937,6 +1172,14 @@ export const COLORS_LIBRARY: SymbolDefinitions = {
   // ---------------------------------------------------------------------------
 
   AsRgb: {
+    examples: ['AsRgb(Hsl(120, 1, 0.5))', 'AsRgb("#ff8000")'],
+    parameters: [
+      {
+        description:
+          'The color: a color head, a CSS color string or a tuple of sRGB channels in [0, 1]; a list of colors gives a list.',
+        sample: 'hsl(120, 1, 0.5)',
+      },
+    ],
     description: 'Convert any color to sRGB (channels 0-1)',
     complexity: 8000,
     broadcastable: true,
@@ -962,6 +1205,14 @@ export const COLORS_LIBRARY: SymbolDefinitions = {
     },
   },
   AsHsv: {
+    examples: ['AsHsv(Rgb(1, 0.5, 0))'],
+    parameters: [
+      {
+        description:
+          'The color: a color head, a CSS color string or a tuple of sRGB channels in [0, 1]; a list of colors gives a list.',
+        sample: 'rgb(1, 0.5, 0)',
+      },
+    ],
     description: 'Convert any color to HSV (hue degrees, s/v 0-1)',
     complexity: 8000,
     broadcastable: true,
@@ -982,6 +1233,14 @@ export const COLORS_LIBRARY: SymbolDefinitions = {
     },
   },
   AsHsl: {
+    examples: ['AsHsl(Rgb(1, 0.5, 0))'],
+    parameters: [
+      {
+        description:
+          'The color: a color head, a CSS color string or a tuple of sRGB channels in [0, 1]; a list of colors gives a list.',
+        sample: 'rgb(1, 0.5, 0)',
+      },
+    ],
     description: 'Convert any color to HSL (hue degrees, s/l 0-1)',
     complexity: 8000,
     broadcastable: true,
@@ -1002,6 +1261,14 @@ export const COLORS_LIBRARY: SymbolDefinitions = {
     },
   },
   AsOklab: {
+    examples: ['AsOklab(Oklch(0.7, 0.15, 30))'],
+    parameters: [
+      {
+        description:
+          'The color: a color head, a CSS color string or a tuple of sRGB channels in [0, 1]; a list of colors gives a list.',
+        sample: 'oklch(0.7, 0.15, 30)',
+      },
+    ],
     description: 'Convert any color to OKLab',
     complexity: 8000,
     broadcastable: true,
@@ -1031,6 +1298,14 @@ export const COLORS_LIBRARY: SymbolDefinitions = {
     },
   },
   AsOklch: {
+    examples: ['AsOklch(Oklab(0.7, 0.1, 0.1))', 'AsOklch(Rgb(1, 0, 0))'],
+    parameters: [
+      {
+        description:
+          'The color: a color head, a CSS color string or a tuple of sRGB channels in [0, 1]; a list of colors gives a list.',
+        sample: 'oklab(0.7, 0.1, 0.1)',
+      },
+    ],
     description: 'Convert any color to OKLCh',
     complexity: 8000,
     broadcastable: true,
@@ -1076,7 +1351,24 @@ export const COLORS_LIBRARY: SymbolDefinitions = {
 
   ColorDelta: {
     description: 'Perceptual color difference (ΔE_OK) between two colors',
+    examples: [
+      'ColorDelta(Rgb(1, 0, 0), Rgb(0.9, 0, 0))',
+      'ColorDelta("#ffffff", "#000000")',
+    ],
     complexity: 8000,
+    // By position: the difference is symmetric.
+    parameters: [
+      {
+        description:
+          'The first color: a color head, a CSS color string or a tuple of sRGB channels in [0, 1].',
+        sample: 'rgb(1, 0, 0)',
+      },
+      {
+        description:
+          'The second color; the result is 0 for the same color and about 1 between white and black.',
+        sample: 'rgb(0.9, 0, 0)',
+      },
+    ],
     signature: '(color | string | tuple, color | string | tuple) -> number',
     evaluate: (ops, { engine: ce }) => {
       // Both inputs converge on OklchColor; distance is computed in OKLab so
