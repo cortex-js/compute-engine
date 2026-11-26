@@ -230,6 +230,7 @@ function collectFreeVariables(
     case 'collection':
     case 'indexed_collection':
     case 'broadcastable':
+    case 'array':
       collectFreeVariables(t.elements, bound, into);
       return;
     case 'tuple':
@@ -255,8 +256,17 @@ function collectFreeVariables(
       if (t.args !== undefined)
         for (const a of t.args) collectFreeVariables(a, bound, into);
       return;
-    default:
+    case 'value':
+    case 'numeric':
+    case 'symbol':
+    case 'expression':
       return;
+    default: {
+      // Every kind has an arm: a new kind fails the type check here.
+      const _exhaustive: never = t;
+      void _exhaustive;
+      return;
+    }
   }
 }
 
@@ -312,6 +322,7 @@ function hasFreeVariables(
     case 'collection':
     case 'indexed_collection':
     case 'broadcastable':
+    case 'array':
       return hasFreeVariables(t.elements, bound);
     case 'tuple':
       for (const el of t.elements)
@@ -329,8 +340,17 @@ function hasFreeVariables(
       if (t.args !== undefined)
         for (const a of t.args) if (hasFreeVariables(a, bound)) return true;
       return false;
-    default:
+    case 'value':
+    case 'numeric':
+    case 'symbol':
+    case 'expression':
       return false;
+    default: {
+      // Every kind has an arm: a new kind fails the type check here.
+      const _exhaustive: never = t;
+      void _exhaustive;
+      return false;
+    }
   }
 }
 
@@ -478,7 +498,8 @@ export function substituteTypeVariables(
     case 'set':
     case 'collection':
     case 'indexed_collection':
-    case 'broadcastable': {
+    case 'broadcastable':
+    case 'array': {
       const elements = substituteTypeVariables(t.elements, bindings);
       return elements === t.elements ? t : { ...t, elements };
     }
@@ -508,8 +529,17 @@ export function substituteTypeVariables(
       const args = substituteAll(t.args, bindings);
       return args === t.args ? t : withTypeArguments(t, args);
     }
-    default:
+    case 'value':
+    case 'numeric':
+    case 'symbol':
+    case 'expression':
       return t;
+    default: {
+      // Every kind has an arm: a new kind fails the type check here.
+      const _exhaustive: never = t;
+      void _exhaustive;
+      return t;
+    }
   }
 }
 
@@ -906,6 +936,7 @@ export function valueVariableNamesOf(t: Type): Set<string> {
       case 'collection':
       case 'indexed_collection':
       case 'broadcastable':
+      case 'array':
         visit(x.elements);
         return;
       case 'tuple':
@@ -932,8 +963,17 @@ export function valueVariableNamesOf(t: Type): Set<string> {
         });
         return;
       }
-      default:
+      case 'value':
+      case 'numeric':
+      case 'symbol':
+      case 'expression':
         return;
+      default: {
+        // Every kind has an arm: a new kind fails the type check here.
+        const _exhaustive: never = x;
+        void _exhaustive;
+        return;
+      }
     }
   };
   visit(t);
@@ -1047,6 +1087,7 @@ function walk(
     case 'collection':
     case 'indexed_collection':
     case 'broadcastable':
+    case 'array':
       walk(t.elements, declared, forbidden, into);
       return;
     case 'tuple':
@@ -1066,8 +1107,17 @@ function walk(
       if (t.args !== undefined)
         for (const a of t.args) walk(a, declared, forbidden, into);
       return;
-    default:
+    case 'value':
+    case 'numeric':
+    case 'symbol':
+    case 'expression':
       return;
+    default: {
+      // Every kind has an arm: a new kind fails the type check here.
+      const _exhaustive: never = t;
+      void _exhaustive;
+      return;
+    }
   }
 }
 
@@ -2113,6 +2163,14 @@ function skeleton(t: Type, covariant: boolean, membership: boolean): Type {
         elements[k] = skeleton(v, covariant, membership);
       return { ...t, elements };
     }
+    case 'array':
+      // A cell is an INVARIANT position: `array<any>` admits no array type
+      // but itself, and is disjoint from every other one, so a cell type
+      // with a variable cannot be skeletonized in place. The whole position
+      // reads as the top of the arrays, bare `array`, in a covariant
+      // position, and as `never` in a contravariant one, in both modes.
+      // (The walk reaches here only when the cell type has a free variable.)
+      return covariant ? 'array' : 'never';
     case 'union':
     case 'intersection':
       return {
@@ -2162,8 +2220,17 @@ function skeleton(t: Type, covariant: boolean, membership: boolean): Type {
         )
       );
     }
-    default:
+    case 'value':
+    case 'numeric':
+    case 'symbol':
+    case 'expression':
       return t;
+    default: {
+      // Every kind has an arm: a new kind fails the type check here.
+      const _exhaustive: never = t;
+      void _exhaustive;
+      return t;
+    }
   }
 }
 
@@ -2905,6 +2972,40 @@ function walkPattern(
       );
     }
 
+    case 'array': {
+      if (
+        phase === 'lower' &&
+        covariant &&
+        !algebra().isSubtype(actual, groundSkeleton(pattern, true))
+      )
+        return false;
+      if (typeof actual !== 'object' || actual.kind !== 'array') return true;
+      // The cell type is INVARIANT: it is walked in both polarities, so a
+      // variable in it gets the actual cell type as a lower and as an upper
+      // bound, and `array<T>` against `array<integer>` pins `T = integer`.
+      // Two arrays of different cell types at one variable then have no
+      // solution.
+      const lower = walkPattern(
+        s,
+        pattern.elements,
+        actual.elements,
+        index,
+        phase,
+        covariant,
+        false
+      );
+      const upper = walkPattern(
+        s,
+        pattern.elements,
+        actual.elements,
+        index,
+        phase,
+        !covariant,
+        false
+      );
+      return lower && upper;
+    }
+
     case 'record':
     // An object layout matches field-wise exactly as a record layout does; it
     // only matches ANOTHER object layout, never a record, because the two are
@@ -3143,9 +3244,20 @@ function walkPattern(
       return true;
     }
 
-    default:
+    case 'value':
+    case 'numeric':
+    case 'symbol':
+    case 'expression':
+    case 'intersection':
+    case 'negation':
       // A variable under an intersection or a negation is rejected at
       // declaration time (§7.2), so nothing else can carry one.
       return true;
+    default: {
+      // Every kind has an arm: a new kind fails the type check here.
+      const _exhaustive: never = pattern;
+      void _exhaustive;
+      return true;
+    }
   }
 }

@@ -316,6 +316,10 @@ export function typeToString(type: Type, precedence = 0): string {
         .join(', ')}}`;
       break;
 
+    case 'array':
+      result = `array<${typeToString(type.elements)}>`;
+      break;
+
     case 'dictionary':
       result = `dictionary<${typeToString(type.values)}>`;
       break;
@@ -413,9 +417,12 @@ export function typeToString(type: Type, precedence = 0): string {
       result = `(${argsList})${effects} -> ${typeToString(type.result)}${clause}`;
       break;
 
-    default:
+    default: {
+      // Every kind has an arm: a new kind fails the type check here.
+      const _exhaustive: never = type;
       // If type is not recognized, return an error
       result = 'error';
+    }
   }
 
   // Add parentheses if the current type's precedence is lower than the parent type's precedence
@@ -524,6 +531,8 @@ function getPrecedence(kind: string): number {
     case 'collection':
     case 'indexed_collection':
     case 'broadcastable':
+    // Delimited by its own `<…>`, like `collection<…>`.
+    case 'array':
       return COLLECTION_PRECEDENCE;
     case 'tuple':
       return TUPLE_PRECEDENCE;
@@ -573,7 +582,8 @@ function underLength(elements: Type, spelling: string): string {
         arm.kind === 'indexed_collection' ||
         arm.kind === 'tuple' ||
         arm.kind === 'dictionary' ||
-        arm.kind === 'record')
+        arm.kind === 'record' ||
+        arm.kind === 'array')
   );
   return collectionArm ? `(${spelling})` : spelling;
 }

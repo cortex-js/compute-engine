@@ -36,6 +36,7 @@ import type {
   DictionaryType,
   RecordType,
   ObjectType,
+  ArrayType,
   TypeReference,
 } from './types.js';
 import {
@@ -113,6 +114,9 @@ function reduceCompositeType(type: Exclude<Type, string>): Type {
     case 'object':
       return reduceObjectType(type);
 
+    case 'array':
+      return reduceArrayType(type);
+
     case 'dictionary':
       return reduceDictionaryType(type);
 
@@ -150,8 +154,11 @@ function reduceCompositeType(type: Exclude<Type, string>): Type {
     case 'variable':
       return type;
 
-    default:
+    default: {
+      // Every kind has an arm: a new kind fails the type check here.
+      const _exhaustive: never = type;
       throw new Error(`Unknown type kind: ${type}`);
+    }
   }
 }
 
@@ -1718,6 +1725,17 @@ function typesOverlapUncached(a: Type, b: Type): boolean {
     !b.dimensions
   )
     return true;
+  // Two array types share a value only when they are the same type: the
+  // cell type is invariant, and an array has one cell type, so
+  // `array<integer>` and `array<number>` share no array, not even an empty
+  // one. They are not compared argument-wise.
+  if (
+    typeof a === 'object' &&
+    typeof b === 'object' &&
+    a.kind === 'array' &&
+    b.kind === 'array'
+  )
+    return isSubtype(a.elements, b.elements) && isSubtype(b.elements, a.elements);
   const args = sameHeadArguments(a, b);
   if (args !== null)
     return args[0].every((t, i) => typesOverlap(t, args[1][i]));
@@ -1840,6 +1858,9 @@ function sameHeadArguments(a: Type, b: Type): [Type[], Type[]] | null {
       return [[a.elements], [other.elements]];
     }
 
+    // Two arrays are not compared argument-wise either: the cell type is
+    // invariant (`typesOverlapUncached()` decides the pair before this).
+    //
     // Two broadcastables are not compared argument-wise: `T | list<T>`
     // meets `U | list<U>` in the cross terms too (`broadcastable<integer>`
     // and `broadcastable<list<integer>>` share `[1, 2]`), which the meet
@@ -2023,6 +2044,18 @@ function reduceObjectType(type: ObjectType): Type {
   if (Object.values(reducedElements).some((t) => t === 'error')) return 'error';
 
   return decorate({ ...type, elements: reducedElements });
+}
+
+/**
+ * An array type is opaque, as an object type is: only its cell type is
+ * reduced, and an `error` cell type propagates. `array<any>` is kept (it is
+ * not the bare `array`), and so is `array<never>` and `array<nothing>`: the
+ * cell type selects the storage and each is a type of its own.
+ */
+function reduceArrayType(type: ArrayType): Type {
+  const elements = reduceType(type.elements);
+  if (elements === 'error') return 'error';
+  return decorate({ ...type, elements });
 }
 
 function reduceDictionaryType(type: DictionaryType): Type {

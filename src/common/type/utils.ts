@@ -1561,6 +1561,7 @@ function namesMissingInDeclaration(
     case 'collection':
     case 'indexed_collection':
     case 'broadcastable':
+    case 'array':
       return names(t.elements);
     case 'tuple':
       return t.elements.some((e) => names(e.type));
@@ -1581,8 +1582,19 @@ function namesMissingInDeclaration(
       read.add(key);
       return namesMissingInDeclaration(unfolded.type, unfolded.seen, read);
     }
-    default:
+    case 'value':
+    case 'numeric':
+    case 'symbol':
+    case 'expression':
+    case 'variable':
+    case 'negation':
       return false;
+    default: {
+      // Every kind has an arm: a new kind fails the type check here.
+      const _exhaustive: never = t;
+      void _exhaustive;
+      return false;
+    }
   }
 }
 
@@ -1780,6 +1792,8 @@ export function typeCouldHoldMissing(
         'tuple',
         'collection',
         'indexed_collection',
+        // Bare `array`: its cells can have any type.
+        'array',
       ].includes(p),
     seen
   );
@@ -1821,6 +1835,7 @@ function containsPrimitive(
     case 'collection':
     case 'indexed_collection':
     case 'broadcastable':
+    case 'array':
       return contains(t.elements);
     case 'tuple':
       return t.elements.some((e) => contains(e.type));
@@ -1863,8 +1878,20 @@ function containsPrimitive(
       if (key !== undefined) memo.set(key, result);
       return result;
     }
-    default:
+    case 'value':
+    case 'numeric':
+    case 'symbol':
+    case 'expression':
+    case 'variable':
+    case 'negation':
+    case 'signature':
       return false;
+    default: {
+      // Every kind has an arm: a new kind fails the type check here.
+      const _exhaustive: never = t;
+      void _exhaustive;
+      return false;
+    }
   }
 }
 
@@ -4077,6 +4104,7 @@ function containsArm(
     case 'collection':
     case 'indexed_collection':
     case 'broadcastable':
+    case 'array':
       return containsArm(t.elements, visited);
     case 'tuple':
       return t.elements.some((e) => containsArm(e.type, visited));

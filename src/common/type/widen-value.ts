@@ -312,6 +312,10 @@ function widenNode(
     // built from a literal.
     case 'object':
     case 'record':
+    // The cell type of an array is invariant (an `inout` position), so a
+    // widened cell type would not be a supertype: left by identity, as an
+    // `inout` argument of a reference is.
+    case 'array':
     case 'variable':
     case 'symbol':
     case 'expression':

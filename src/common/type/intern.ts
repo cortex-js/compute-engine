@@ -111,7 +111,8 @@ function flatSize(t: Exclude<Type, string>): number | undefined {
     case 'list':
     case 'set':
     case 'collection':
-    case 'indexed_collection': {
+    case 'indexed_collection':
+    case 'array': {
       const s = leafSize(t.elements);
       return s === undefined ? undefined : total + s;
     }
@@ -127,8 +128,25 @@ function flatSize(t: Exclude<Type, string>): number | undefined {
       }
       return total;
     }
-    default:
+    case 'value':
+    case 'numeric':
+    case 'symbol':
+    case 'expression':
+    case 'variable':
+    case 'union':
+    case 'intersection':
+    case 'negation':
+    case 'signature':
+    case 'object':
+    case 'broadcastable':
+    case 'reference':
       return undefined;
+    default: {
+      // Every kind has an arm: a new kind fails the type check here.
+      const _exhaustive: never = t;
+      void _exhaustive;
+      return undefined;
+    }
   }
 }
 

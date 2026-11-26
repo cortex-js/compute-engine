@@ -1586,6 +1586,32 @@ expressions, mutation increments the object version, and equality is identity
 unless an explicit protocol supplies other semantics. Objects are references,
 not structural records, and do not gain structural subtyping.
 
+`array<T>` is the type of a mutable array whose cells hold values of type `T`
+(`docs/plans/2026-11-25-mutable-arrays-spec.md`). In the type AST it is
+`{ kind: 'array', elements }`; bare `array`, a primitive, is the type of an
+array of any cell type. The rules:
+
+- The cell type is invariant, as a field of an object is: `array<S>` is a
+  subtype of `array<T>` only when `S` and `T` are subtypes of each other, so
+  an `array<integer>` is not an `array<number>`. A type parameter used as a
+  cell type is an `inout` position.
+- Every `array<T>` is a subtype of bare `array`. `array<any>` is not bare
+  `array`: it is the type of an array whose cells accept every value, one
+  more invariant instance. The join of two array types of different cell
+  types is bare `array`.
+- An array type is disjoint from `list`, `tuple`, `record`, `dictionary`,
+  `object`, `collection` and `indexed_collection`. An array is not a
+  collection and is not broadcast over: `collectionElementType()` gives no
+  element type for it, and `arrayCellType()` gives its cell type.
+- A code path that makes a type smaller or wider must not rewrite the cell
+  type of an array: it keeps the array type whole or widens it to bare
+  `array` (the size limit of `common/type/size-cap.ts` does the second).
+- `arrayStorageKind()` (`common/type/array-storage.ts`) gives the storage of
+  the cells from the cell type alone: a typed array of JavaScript for a
+  bounded integer type, for `real` and for a tuple of four bytes, and
+  evaluated expressions for every other type. No other code decides a
+  storage.
+
 ## The type of a name with no explicit type
 
 Boxing (`ce.parse()`, `ce.box()`, `ce.expr()`, `ce.function()`) declares no

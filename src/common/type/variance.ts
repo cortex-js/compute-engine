@@ -136,6 +136,7 @@ function forEachApplication(t: Type, cb: (ref: TypeReference) => void): void {
     case 'collection':
     case 'indexed_collection':
     case 'broadcastable':
+    case 'array':
       forEachApplication(t.elements, cb);
       return;
     case 'dictionary':
@@ -158,8 +159,18 @@ function forEachApplication(t: Type, cb: (ref: TypeReference) => void): void {
       cb(t);
       for (const a of t.args) forEachApplication(a, cb);
       return;
-    default:
+    case 'value':
+    case 'numeric':
+    case 'symbol':
+    case 'expression':
+    case 'variable':
       return;
+    default: {
+      // Every kind has an arm: a new kind fails the type check here.
+      const _exhaustive: never = t;
+      void _exhaustive;
+      return;
+    }
   }
 }
 
@@ -372,6 +383,13 @@ export function analyzeVariance(
           visit(v, 'inout', step(path, k), shadowed, deferredVia);
         return;
 
+      // A CELL of an array is a read/write position, as a stored field is:
+      // a type variable in the cell type verifies only as `inout`
+      // (`docs/plans/2026-11-25-mutable-arrays-spec.md`, section 2).
+      case 'array':
+        visit(t.elements, 'inout', step(path, '(cell)'), shadowed, deferredVia);
+        return;
+
       case 'reference': {
         if (t.args === undefined) return;
         const decl = declarationOf(t);
@@ -408,8 +426,17 @@ export function analyzeVariance(
         return;
       }
 
-      default:
+      case 'value':
+      case 'numeric':
+      case 'symbol':
+      case 'expression':
         return;
+      default: {
+        // Every kind has an arm: a new kind fails the type check here.
+        const _exhaustive: never = t;
+        void _exhaustive;
+        return;
+      }
     }
   };
 

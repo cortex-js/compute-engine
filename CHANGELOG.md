@@ -22,6 +22,16 @@
 
 ### New Features
 
+- **`array<T>` is a type: the type of a mutable array.** The type parses,
+  prints and takes part in the type checks; no operator makes an array yet.
+  The cell type is invariant: an `array<integer>` is not an `array<number>`,
+  because a store of `1.5` through the wider type would break the narrower
+  one. Every `array<T>` is a subtype of bare `array`, the type of an array of
+  any cell type. An array type is not a collection type: it is not a subtype
+  of `list`, `collection` or `indexed_collection`, and it is never broadcast
+  over. `array` is now the name of a primitive type, and an array type has
+  the new kind `'array'` in a type read by its `kind`.
+
 - **The Epsil editor functions document each parameter, and the keys of an
   options dictionary** (CE-1812). A parameter of `epsilSignatureHelp()` has
   a `documentation`, a `sample` (one line of Epsil, which an editor can show

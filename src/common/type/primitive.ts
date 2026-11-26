@@ -253,6 +253,11 @@ export const VALUE_TYPES: PrimitiveType[] = [
   // B6). Keeping it out of `COLLECTION_TYPES` is what makes `object` and
   // `record` disjoint in the primitive lattice.
   'object',
+  // `array` (any mutable array) sits beside `object` for the same reason: a
+  // value that is deliberately not a collection, so it stays out of
+  // `COLLECTION_TYPES` and is disjoint from `list`
+  // (`docs/plans/2026-11-25-mutable-arrays-spec.md`, section 2).
+  'array',
   ...COLLECTION_TYPES,
   ...SCALAR_TYPES,
 ] as const as PrimitiveType[];
@@ -357,6 +362,7 @@ export function hasOptionalWithVariadic(t: Type): boolean {
     case 'collection':
     case 'indexed_collection':
     case 'broadcastable':
+    case 'array':
       return hasOptionalWithVariadic(t.elements);
     case 'dictionary':
       return hasOptionalWithVariadic(t.values);
@@ -364,8 +370,18 @@ export function hasOptionalWithVariadic(t: Type): boolean {
       return t.elements.some((e) => hasOptionalWithVariadic(e.type));
     case 'reference':
       return t.args?.some(hasOptionalWithVariadic) ?? false;
-    default:
+    case 'value':
+    case 'numeric':
+    case 'symbol':
+    case 'expression':
+    case 'variable':
       return false;
+    default: {
+      // Every kind has an arm: a new kind fails the type check here.
+      const _exhaustive: never = t;
+      void _exhaustive;
+      return false;
+    }
   }
 }
 
@@ -388,6 +404,7 @@ export function isValidType(t: any): t is Readonly<Type> {
     t.kind === 'list' ||
     t.kind === 'record' ||
     t.kind === 'object' ||
+    t.kind === 'array' ||
     t.kind === 'dictionary' ||
     t.kind === 'set' ||
     t.kind === 'broadcastable' ||

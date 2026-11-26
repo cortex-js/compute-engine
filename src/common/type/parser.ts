@@ -15,6 +15,7 @@ import {
   RecordTypeNode,
   RecordEntryNode,
   ObjectTypeNode,
+  ArrayTypeNode,
   DictionaryTypeNode,
   SetTypeNode,
   BroadcastableTypeNode,
@@ -1158,6 +1159,7 @@ export class Parser {
       this.parseTupleType() ||
       this.parseRecordType() ||
       this.parseObjectType() ||
+      this.parseArrayType() ||
       this.parseDictionaryType() ||
       this.parseSetType() ||
       this.parseBroadcastableType() ||
@@ -2427,6 +2429,42 @@ export class Parser {
       );
 
     return this.createNode<ObjectTypeNode>('object', { entries });
+  }
+
+  /**
+   * `array<T>`: a mutable array whose cells have the type `T`. It takes
+   * exactly one type argument and no dimensions: an array has one dimension
+   * and its type states no length, so `array<integer^3>` and
+   * `array<integer, real>` are refused. Bare `array` (no `<`) is left to the
+   * primitive parser.
+   *
+   * Spec: `docs/plans/2026-11-25-mutable-arrays-spec.md`, section 2.
+   */
+  private parseArrayType(): ArrayTypeNode | undefined {
+    if (this.current.type !== 'IDENTIFIER' || this.current.value !== 'array')
+      return undefined;
+    if (this.lexer.peekToken().type !== '<') return undefined;
+
+    this.advance(); // consume 'array'
+    this.expect('<');
+
+    const elementType = this.parseUnionType();
+    if (!elementType) this.error('Expected the cell type of `array<T>`');
+
+    if ((this.current as Token).type === '^')
+      this.error(
+        'An array type states no dimensions: write `array<T>`',
+        'An array has one dimension and its length is not part of its type'
+      );
+    if ((this.current as Token).type === ',')
+      this.error(
+        '`array<T>` takes exactly one type argument, the cell type',
+        'For example `array<integer<0..255>>`'
+      );
+
+    this.expect('>');
+
+    return this.createNode<ArrayTypeNode>('array', { elementType });
   }
 
   private parseRecordEntry(): RecordEntryNode | undefined {

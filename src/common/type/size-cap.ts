@@ -67,6 +67,9 @@ export function boundTypeSize(
   limit: number = TYPE_SIZE_LIMIT
 ): Type {
   if (typeSizeUpTo(t, limit) <= limit) return t as Type;
+  // The cell type of an array is invariant: `array<any>` is not a supertype
+  // of `array<T>`, so an array too large to keep widens to the bare `array`.
+  if (typeof t === 'object' && t.kind === 'array') return 'array';
   return mapComponents(t, flattenComponent);
 }
 
@@ -94,6 +97,7 @@ export function typeSizeUpTo(t: Readonly<Type>, limit: number): number {
       case 'collection':
       case 'indexed_collection':
       case 'broadcastable':
+      case 'array':
         visit(x.elements);
         return;
       case 'dictionary':
@@ -116,9 +120,19 @@ export function typeSizeUpTo(t: Readonly<Type>, limit: number): number {
       case 'reference':
         for (const a of x.args ?? []) visit(a);
         return;
-      default:
+      case 'value':
+      case 'numeric':
+      case 'symbol':
+      case 'expression':
+      case 'variable':
         // `value`, `numeric`, `symbol`, `expression`, `variable`: leaves.
         return;
+      default: {
+        // Every kind has an arm: a new kind fails the type check here.
+        const _exhaustive: never = x;
+        void _exhaustive;
+        return;
+      }
     }
   };
   visit(t);
@@ -139,6 +153,7 @@ function mapComponents(t: Readonly<Type>, f: (x: Type) => Type): Type {
     case 'collection':
     case 'indexed_collection':
     case 'broadcastable':
+    case 'array':
       return { ...t, elements: f(t.elements) };
     case 'dictionary':
       return { ...t, values: f(t.values) };
@@ -176,8 +191,18 @@ function mapComponents(t: Readonly<Type>, f: (x: Type) => Type): Type {
       };
     case 'reference':
       return t.args ? { ...t, args: t.args.map(f) } : (t as Type);
-    default:
+    case 'value':
+    case 'numeric':
+    case 'symbol':
+    case 'expression':
+    case 'variable':
       return t as Type;
+    default: {
+      // Every kind has an arm: a new kind fails the type check here.
+      const _exhaustive: never = t;
+      void _exhaustive;
+      return t as Type;
+    }
   }
 }
 
@@ -219,6 +244,12 @@ function flattenComponent(t: Readonly<Type>): Type {
       return isCompound((t as { type: Type }).type) ? 'any' : (t as Type);
     case 'signature':
       return 'function';
+    case 'array':
+      // The cell type is invariant, so it is never rewritten: an array with a
+      // leaf cell is kept whole, any other widens to the bare `array`.
+      return isCompound((t as { elements: Type }).elements)
+        ? 'array'
+        : (t as Type);
     default:
       return mapComponents(t, () => 'any');
   }

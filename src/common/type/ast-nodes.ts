@@ -137,6 +137,13 @@ export interface ObjectTypeNode extends ASTNode {
   entries: RecordEntryNode[];
 }
 
+/** The parse of `array<T>`, a mutable array of cells of type `T`. Bare
+ * `array` is a primitive type and has no node of its own. */
+export interface ArrayTypeNode extends ASTNode {
+  kind: 'array';
+  elementType: TypeNode;
+}
+
 export interface DictionaryTypeNode extends ASTNode {
   kind: 'dictionary';
   valueType: TypeNode;
@@ -240,6 +247,7 @@ export type TypeNode =
   | TupleTypeNode
   | RecordTypeNode
   | ObjectTypeNode
+  | ArrayTypeNode
   | DictionaryTypeNode
   | SetTypeNode
   | BroadcastableTypeNode
@@ -266,6 +274,7 @@ export interface ASTVisitor<T> {
   visitTupleType(node: TupleTypeNode): T;
   visitRecordType(node: RecordTypeNode): T;
   visitObjectType(node: ObjectTypeNode): T;
+  visitArrayType(node: ArrayTypeNode): T;
   visitDictionaryType(node: DictionaryTypeNode): T;
   visitSetType(node: SetTypeNode): T;
   visitBroadcastableType(node: BroadcastableTypeNode): T;
@@ -308,6 +317,8 @@ export function visitNode<T>(node: TypeNode, visitor: ASTVisitor<T>): T {
       return visitor.visitRecordType(node);
     case 'object':
       return visitor.visitObjectType(node);
+    case 'array':
+      return visitor.visitArrayType(node);
     case 'dictionary':
       return visitor.visitDictionaryType(node);
     case 'set':

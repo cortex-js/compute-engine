@@ -79,6 +79,7 @@ const SCALAR_DISJOINT_KINDS: ReadonlySet<string> = new Set([
   'indexed_collection',
   'signature',
   'object',
+  'array',
 ]);
 
 /** For each key, *all* the primitive subtypes of the type corresponding to that key */
@@ -148,6 +149,10 @@ const PRIMITIVE_SUBTYPES: Record<PrimitiveType, PrimitiveType[]> = {
   // ruling B6). Declared object types reach `object` through the nominal rule
   // in `isSubtype`, not through this table.
   object: [],
+  // Bare `array` ("any array") has no primitive subtypes and is disjoint from
+  // every collection and from `object`. Every `array<T>` reaches it through
+  // the array rule in `isSubtype`, not through this table.
+  array: [],
   // A record is a dictionary with statically known keys.
   dictionary: ['record'],
   function: [],
@@ -668,11 +673,21 @@ function cycleNodeStructure(t: Exclude<Type, string>): string {
     case 'collection':
     case 'indexed_collection':
     case 'broadcastable':
+    case 'array':
       return `${t.kind}(${cycleTypeKey(t.elements)})`;
-    default:
+    case 'numeric':
+    case 'symbol':
+    case 'expression':
+    case 'variable':
       // `numeric`, `symbol`, `expression` and `variable` nodes hold data
       // only (bounds, names), no nested type.
       return `${t.kind}${cycleDataKey({ ...t, kind: undefined })}`;
+    default: {
+      // Every kind has an arm: a new kind fails the type check here.
+      const _exhaustive: never = t;
+      const u: { kind: string } = _exhaustive;
+      return `${u.kind}${cycleDataKey({ ...u, kind: undefined })}`;
+    }
   }
 }
 
@@ -1083,6 +1098,20 @@ function provablyDisjointRules(a: Type, b: Type): boolean {
       return true;
   }
 
+  // Two array types. The cell type is invariant and an array has one cell
+  // type, so two array types share a value only when each is a subtype of
+  // the other, which the subtype test above has refuted. The "an empty
+  // collection inhabits both" caveat below does not apply: an array of no
+  // cell still has its cell type (`array<integer>` and `array<number>` share
+  // no array).
+  if (
+    typeof a === 'object' &&
+    a.kind === 'array' &&
+    typeof b === 'object' &&
+    b.kind === 'array'
+  )
+    return true;
+
   // Category test: every type sits in a primitive "bucket" the lattice knows
   // about (`list`, `tuple`, `string`, `function`, …). If two buckets have an
   // empty meet, no value can be in both — a `list<integer>` is not a `string`,
@@ -1132,6 +1161,8 @@ function typeCategory(t: Type): PrimitiveType | undefined {
       return 'record';
     case 'object':
       return 'object';
+    case 'array':
+      return 'array';
     case 'dictionary':
       return 'dictionary';
     case 'collection':
@@ -1146,12 +1177,24 @@ function typeCategory(t: Type): PrimitiveType | undefined {
       return 'expression';
     case 'numeric':
       return t.type;
-    default:
+    case 'value':
+    case 'variable':
+    case 'union':
+    case 'intersection':
+    case 'negation':
+    case 'broadcastable':
+    case 'reference':
       // `union` and `value` are handled by the caller. A `broadcastable<T>` is
       // `T | list<T>` — it spans two buckets. A `negation` or
       // `intersection` is not a bucket at all, and a `reference`'s meaning is
       // resolver-dependent (`declareType` patches `.def` after construction).
       return undefined;
+    default: {
+      // Every kind has an arm: a new kind fails the type check here.
+      const _exhaustive: never = t;
+      void _exhaustive;
+      return undefined;
+    }
   }
 }
 
@@ -1451,11 +1494,19 @@ function inhabitationWalk(
     case 'indexed_collection':
     case 'dictionary':
     case 'broadcastable':
+    case 'array':
       // Each holds a value: the literal, a symbol, an expression, a function,
-      // the empty collection.
+      // the empty collection, an array of no cell.
       return 'inhabited';
-    default:
+    case 'variable':
+    case 'object':
       return 'unknown';
+    default: {
+      // Every kind has an arm: a new kind fails the type check here.
+      const _exhaustive: never = t;
+      void _exhaustive;
+      return 'unknown';
+    }
   }
 }
 
@@ -1848,6 +1899,12 @@ function couldMatchStructure(a: Type, b: Type): boolean {
     ) {
       const elements = (b as SetType | CollectionType).elements;
       if (couldMatchWithin(a.elements, elements)) return true;
+    } else if (a.kind === 'array' && b.kind === 'array') {
+      // The cell type is invariant and an array has one cell type, so two
+      // array types share a value only when each is a subtype of the other.
+      // Their cell types overlapping is not enough: `array<integer>` and
+      // `array<number>` share no array.
+      return isSubtype(a, b) && isSubtype(b, a);
     } else if (a.kind === 'dictionary' && b.kind === 'dictionary') {
       if (couldMatchWithin(a.values, b.values)) return true;
     } else if (a.kind === 'record' && b.kind === 'record') {
@@ -2056,6 +2113,7 @@ function typeTreeSize(t: Type, limit: number): number {
       case 'collection':
       case 'indexed_collection':
       case 'broadcastable':
+      case 'array':
         return visit(u.elements);
       case 'dictionary':
         return visit(u.values);
@@ -2095,8 +2153,18 @@ function typeTreeSize(t: Type, limit: number): number {
           onPath.delete(record);
         }
       }
-      default:
+      case 'value':
+      case 'numeric':
+      case 'symbol':
+      case 'expression':
+      case 'variable':
         return true;
+      default: {
+        // Every kind has an arm: a new kind fails the type check here.
+        const _exhaustive: never = u;
+        void _exhaustive;
+        return true;
+      }
     }
   };
   visit(t);
@@ -3233,6 +3301,10 @@ function isSubtypeRules(
     // B, ruling B6).
     if (rhs === 'object') return isObjectType(lhs);
 
+    // Bare `array` means "any array": every `array<T>` is a subtype of it,
+    // `array<any>` included, as every declared object type is of `object`.
+    if (rhs === 'array') return isArrayType(lhs);
+
     // The bare dictionary family has unrestricted values.
     if (rhs === 'dictionary')
       return isSubtype(lhs, BARE_DICTIONARY_STRUCTURAL_TYPE);
@@ -3693,6 +3765,23 @@ function isSubtypeRules(
   if (lhs.kind === 'object' || rhs.kind === 'object') return false;
 
   //
+  // Handle array types
+  //
+  // Every cell is a read/write position, so the cell type is INVARIANT, as
+  // an object field is: `array<S> <: array<T>` only when `S` and `T` are
+  // mutual subtypes. `array<integer>` is not an `array<number>`: a store of
+  // `1.5` through the wider view would break the narrower one. An array type
+  // is a subtype of no other composite type: an array is not a collection
+  // (`docs/plans/2026-11-25-mutable-arrays-spec.md`, section 2).
+  //
+  if (lhs.kind === 'array' && rhs.kind === 'array')
+    return (
+      isSubtype(lhs.elements, rhs.elements) &&
+      isSubtype(rhs.elements, lhs.elements)
+    );
+  if (lhs.kind === 'array' || rhs.kind === 'array') return false;
+
+  //
   // Handle dictionaries
   //
 
@@ -4119,6 +4208,24 @@ export function isObjectType(type: Type, seen?: Set<TypeReference>): boolean {
   return false;
 }
 
+/** Whether `type` is an array type: bare `array`, an `array<T>`, or a
+ * nominal type whose definition is one (as `isObjectType()` reads a declared
+ * object type). */
+function isArrayType(type: Type, seen?: Set<TypeReference>): boolean {
+  if (type === 'array') return true;
+  if (typeof type === 'string') return false;
+  if (type.kind === 'array') return true;
+  if (type.kind === 'reference') {
+    const decl = declarationOf(type);
+    if (seen === undefined) seen = new Set();
+    if (seen.has(decl)) return false;
+    seen.add(decl);
+    const def = decl.def;
+    return def === undefined ? false : isArrayType(def, seen);
+  }
+  return false;
+}
+
 function isCollection(type: Type): boolean {
   if (isIndexedCollection(type)) return true;
   if (typeof type === 'string')
@@ -4224,6 +4331,9 @@ function fitsBroadcastOrIndexed(
       return fits(lhs.elements);
     case 'list':
       return fits(listElementType(lhs));
+    // An array is one value, never read by its cells: it is not broadcast
+    // over and is not an indexed collection.
+    case 'array':
     default:
       return fits(lhs);
   }
@@ -4244,6 +4354,7 @@ function isValue(type: Type): boolean {
     isScalar(type) ||
     isCollection(type) ||
     isObjectType(type) ||
+    isArrayType(type) ||
     valueKindDeclaration(type) !== undefined
   );
 }
@@ -5071,6 +5182,9 @@ const SUPERTYPE_PROBE_ORDER: PrimitiveType[] = [
   'list',
   'record',
   'object',
+  // Two different array types join to bare `array`, which is not lossy: an
+  // array of either cell type is an `array`.
+  'array',
   'dictionary',
   'set',
   'tuple',

@@ -38,6 +38,8 @@
  *              e.g. `tuple<number, boolean>`, `tuple<x: number, y: boolean>`.
  *           - `string`: a string of characters, i.e. an indexed collection of
  *              `character`. A sibling of `list<character>`, not a subtype.
+ *    - `array`: a mutable array, e.g. `array<integer<0..255>>`. Not a
+ *       collection.
  *
  *
  *
@@ -63,6 +65,10 @@ export type PrimitiveType =
   | 'dictionary'
   | 'record'
   | 'object'
+  // Any mutable array, whatever its cell type: the bound every `array<T>` is
+  // a subtype of. Not a collection, as bare `object` is not
+  // (`docs/plans/2026-11-25-mutable-arrays-spec.md`, section 2).
+  | 'array'
   | 'tuple'
   | 'value'
   | 'scalar'
@@ -555,6 +561,28 @@ export type ObjectType = {
   elements: Record<string, Type>;
 };
 
+/**
+ * `array<T>` is the type of a mutable array whose cells hold values of type
+ * `T`.
+ *
+ * Every cell is a read/write position, so the cell type is **invariant**, as
+ * the field type of an object is: `array<S>` is a subtype of `array<T>` only
+ * when `S` and `T` are mutual subtypes, and a type variable in the cell type
+ * verifies only as `inout`. Every `array<T>` is a subtype of the bare
+ * primitive `'array'`; `array<any>` is one more invariant instance, not the
+ * bare type.
+ *
+ * An array type is disjoint from every collection type and from `object`: an
+ * array is not a collection and is never broadcast over. The cell type alone
+ * selects the storage (`arrayStorageKind()`).
+ *
+ * Spec: `docs/plans/2026-11-25-mutable-arrays-spec.md`, sections 2 and 3.
+ */
+export type ArrayType = {
+  kind: 'array';
+  elements: Type;
+};
+
 /** A dictionary is a collection of key-value pairs.
  *
  * The keys are strings. The set of keys is also not defined as part of the
@@ -851,6 +879,7 @@ export type Type =
   | BroadcastableType
   | RecordType
   | ObjectType
+  | ArrayType
   | DictionaryType
   | TupleType
   | SymbolType

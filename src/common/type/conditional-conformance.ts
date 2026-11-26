@@ -1,4 +1,5 @@
 import type {
+  ArrayType,
   CollectionType,
   DictionaryType,
   ListType,
@@ -135,6 +136,20 @@ function matchHead(
         bindings
       );
 
+    // A cell type is invariant, and a match binds a clause variable to the
+    // subject's cell type exactly, so `array<T>` matches `array<integer>`
+    // with `T = integer`. The cell match is covariant below its top level
+    // (a ground part is decided by `isSubtype`), so the instantiated cell
+    // type must also equal the subject's: `array<tuple<T, real>>` does not
+    // match `array<tuple<integer, integer>>`.
+    case 'array': {
+      const cell = (subject as ArrayType).elements;
+      if (!matchHead(pattern.elements, cell, variables, bindings))
+        return false;
+      const instantiated = substituteTypeVariables(pattern.elements, bindings);
+      return isSubtype(cell, instantiated) && isSubtype(instantiated, cell);
+    }
+
     case 'dictionary':
       return matchHead(
         pattern.values,
@@ -179,8 +194,23 @@ function matchHead(
       });
     }
 
-    default:
+    case 'value':
+    case 'numeric':
+    case 'symbol':
+    case 'expression':
+    case 'union':
+    case 'intersection':
+    case 'negation':
+    case 'signature':
+    case 'object':
+    case 'record':
       return false;
+    default: {
+      // Every kind has an arm: a new kind fails the type check here.
+      const _exhaustive: never = pattern;
+      void _exhaustive;
+      return false;
+    }
   }
 }
 

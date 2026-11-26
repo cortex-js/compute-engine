@@ -16,6 +16,7 @@ import {
   TupleTypeNode,
   RecordTypeNode,
   ObjectTypeNode,
+  ArrayTypeNode,
   DictionaryTypeNode,
   SetTypeNode,
   BroadcastableTypeNode,
@@ -537,6 +538,12 @@ export class TypeBuilder implements ASTVisitor<Type> {
       elements[entry.key] = this.buildType(entry.valueType);
 
     return { kind: 'object', elements };
+  }
+
+  /** `array<T>`. Bare `array` is the primitive and never reaches here, so
+   * `array<any>` keeps its object form: it is not the bare type. */
+  visitArrayType(node: ArrayTypeNode): Type {
+    return { kind: 'array', elements: this.buildType(node.elementType) };
   }
 
   visitDictionaryType(node: DictionaryTypeNode): Type {

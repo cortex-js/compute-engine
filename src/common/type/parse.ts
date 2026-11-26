@@ -550,6 +550,7 @@ function containsObjectLayout(t: Type): boolean {
     case 'collection':
     case 'indexed_collection':
     case 'broadcastable':
+    case 'array':
       return containsObjectLayout(t.elements);
     case 'dictionary':
       return containsObjectLayout(t.values);
@@ -565,8 +566,18 @@ function containsObjectLayout(t: Type): boolean {
       );
     case 'reference':
       return t.args?.some(containsObjectLayout) ?? false;
-    default:
+    case 'value':
+    case 'numeric':
+    case 'symbol':
+    case 'expression':
+    case 'variable':
       return false;
+    default: {
+      // Every kind has an arm: a new kind fails the type check here.
+      const _exhaustive: never = t;
+      void _exhaustive;
+      return false;
+    }
   }
 }
 
