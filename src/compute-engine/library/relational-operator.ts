@@ -1353,6 +1353,20 @@ export const RELOP_LIBRARY: SymbolDefinitions = {
   Congruent: {
     description: 'Indicate that two expressions are congruent modulo a number',
     keywords: ['congruence'],
+    examples: ['Congruent(17, 5, 3)', 'Congruent(-1, 6, 7)'],
+    parameters: [
+      {
+        description:
+          'One side of the congruence, an integer, or an integer expression such as `2^(3^20)` that is reduced without being computed; a symbolic side leaves the call unevaluated.',
+        sample: '17',
+      },
+      { description: 'The other side of the congruence.', sample: '5' },
+      {
+        description:
+          'The modulus; its sign does not count, and 0 leaves the call unevaluated.',
+        sample: '3',
+      },
+    ],
     complexity: 11000,
     // `modulo` is `number` (not `integer`) so a symbolic modulus expression
     // such as `p^{k+1}` (statically typed `number`, not `integer`) is
@@ -1389,6 +1403,15 @@ export const RELOP_LIBRARY: SymbolDefinitions = {
 
   IsSame: {
     description: 'Compare two expressions for structural equality',
+    examples: ['IsSame(x + 1, x + 1)', 'IsSame(x + 1, 1 + x)'],
+    parameters: [
+      {
+        description:
+          'One expression, compared as written, before it is put in canonical form.',
+        sample: 'x + 1',
+      },
+      { description: 'The other expression.', sample: '1 + x' },
+    ],
     lazy: true,
     signature: '(any, any) -> boolean',
 
@@ -1548,6 +1571,15 @@ export const RELOP_LIBRARY: SymbolDefinitions = {
     description: [
       'Identity comparison (`\\equiv`).',
       'True iff the operands are equal for every value of their free variables.',
+    ],
+    examples: ['IdenticallyEqual((x + 1)^2, x^2 + 2x + 1)'],
+    parameters: [
+      {
+        description:
+          'One side; a list is compared as a whole, not element by element.',
+        sample: '(x + 1)^2',
+      },
+      { description: 'The other side.', sample: 'x^2 + 2x + 1' },
     ],
     complexity: 11000,
 

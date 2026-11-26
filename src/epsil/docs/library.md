@@ -183,7 +183,7 @@ The [Control structures reference](/epsil/reference/control-structures/) has the
 | — | `Comprehension` | `(body: expression, iterators: expression+) -> list` | Value-producing comprehension: evaluate `body` in nested iteration over one or more `Element` clauses and collect the results into a list. |
 | — | `Condition` | `(expression, symbol?) -> boolean` | Test whether a value satisfies one or more conditions. |
 | — | `Continue` | `() -> nothing` | Skip to the next iteration of the enclosing loop. |
-| `fixedPoint` | `FixedPoint` | `(function, initial: any, maxIterations: integer?) -> unknown` | Apply a function repeatedly, starting from an initial value, until two successive values are the same: `fixedPoint(f, x)` is the first of `f(x)`, `f(f(x))`, … that `f` maps to itself. |
+| `fixedPoint` | `FixedPoint` | `(f: function, initial: any, maxIterations: integer?) -> unknown` | Apply a function repeatedly, starting from an initial value, until two successive values are the same: `fixedPoint(f, x)` is the first of `f(x)`, `f(f(x))`, … that `f` maps to itself. |
 | — | `If` | `(expression, expression, expression?) -> any` | `If(c, e1, e2)` evaluates to `e1` when `c` is `True` and to `e2` otherwise; without `e2` it is the absent value of the domain of `e1` when `c` is `False`: `NaN` for a number, `missing` otherwise, as for a restriction `e1\{c\}`, which… |
 | — | `Loop` | `(body: expression, iterators: expression*) -> any` | Imperative loop, evaluated **for effect**. |
 | — | `Match` | `(expression, expression+) -> unknown` | Structural pattern match. |
@@ -552,8 +552,8 @@ The [Fractals reference](/epsil/reference/fractals/) has the full description an
 
 | Epsil | MathJSON | Signature | Summary |
 |:------|:---------|:----------|:--------|
-| `julia` | `Julia` | `(complex, complex, integer) -> real` | Smooth escape-time value for a Julia set with parameter c. |
-| `mandelbrot` | `Mandelbrot` | `(complex, integer) -> real` | Smooth escape-time value for the Mandelbrot set. |
+| `julia` | `Julia` | `(z: complex, c: complex, maxIterations: integer) -> real` | Smooth escape-time value for a Julia set with parameter c. |
+| `mandelbrot` | `Mandelbrot` | `(c: complex, maxIterations: integer) -> real` | Smooth escape-time value for the Mandelbrot set. |
 
 ## Trigonometry
 

@@ -1110,6 +1110,14 @@ export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
     ParallelDomain: {
       description:
         'The domain of the passes of a parallel loop (engine-internal).',
+      examples: ['ParallelDomain([1, 2, 3])'],
+      parameters: {
+        collection: {
+          description:
+            'The collection that the loop iterates; the value of the call is this collection.',
+          sample: '[1, 2, 3]',
+        },
+      },
       // `random`: inside a frame, the loop consumes one draw index of it, so
       // the node is not pure, and constant folding keeps it (a folded domain
       // would lose the pass frames).
@@ -1525,7 +1533,21 @@ export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
       // the result type of the function is the type of the result, which the
       // signature grammar cannot relate to the initial value. The type
       // handler reads it instead.
-      signature: '(function, initial: any, maxIterations: integer?) -> unknown',
+      signature:
+        '(f: function, initial: any, maxIterations: integer?) -> unknown',
+      parameters: {
+        f: {
+          description:
+            'The function applied at each step, a function of one argument.',
+          sample: 'x => (x + 2 / x) / 2',
+        },
+        initial: { description: 'The starting value.', sample: '1.0' },
+        maxIterations: {
+          description:
+            'The maximum number of applications, a positive integer; when it is reached, the last value is returned.',
+          sample: '20',
+        },
+      },
       // The result is a value of the function (the loop applies it at least
       // once), so its type is the function's result type. A function whose
       // result type is not known gives the declared `unknown`. `widen` is

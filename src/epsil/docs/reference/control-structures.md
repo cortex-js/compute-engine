@@ -59,7 +59,11 @@ Skip to the next iteration of the enclosing loop. A `Continue` that reaches the 
 
 ### fixedPoint
 
-MathJSON `FixedPoint` · `(function, initial: any, maxIterations: integer?) -> unknown`
+MathJSON `FixedPoint` · `(f: function, initial: any, maxIterations: integer?) -> unknown`
+
+- `f` — The function applied at each step, a function of one argument. Sample: `x => (x + 2 / x) / 2`.
+- `initial` — The starting value. Sample: `1.0`.
+- `maxIterations` — The maximum number of applications, a positive integer; when it is reached, the last value is returned. Sample: `20`.
 
 Apply a function repeatedly, starting from an initial value, until two successive values are the same: `fixedPoint(f, x)` is the first of `f(x)`, `f(f(x))`, … that `f` maps to itself.
 
@@ -114,7 +118,13 @@ Parallel comprehension: `ParallelComprehension(body, Element(x, xs), …)` is th
 
 MathJSON `ParallelDomain` · `(collection: any) random -> any`
 
+- `collection` — The collection that the loop iterates; the value of the call is this collection. Sample: `[1, 2, 3]`.
+
 The domain of the passes of a parallel loop (engine-internal).
+
+```epsil
+parallelDomain([1, 2, 3])
+```
 
 ### ParallelLoop
 

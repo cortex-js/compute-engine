@@ -43,7 +43,21 @@ Approximately-not-equal relation.
 
 MathJSON `Congruent` · `(number, number, modulo: number) -> boolean`
 
+- argument 1 — One side of the congruence, an integer, or an integer expression such as `2^(3^20)` that is reduced without being computed; a symbolic side leaves the call unevaluated. Sample: `17`.
+- argument 2 — The other side of the congruence. Sample: `5`.
+- `modulo` — The modulus; its sign does not count, and 0 leaves the call unevaluated. Sample: `3`.
+
 Indicate that two expressions are congruent modulo a number
+
+```epsil
+congruent(17, 5, 3)
+// ➔ true
+```
+
+```epsil
+congruent(-1, 6, 7)
+// ➔ true
+```
 
 ### Equal
 
@@ -67,15 +81,36 @@ Greater-than-or-equal comparison (greater than or equal to).
 
 MathJSON `IdenticallyEqual` · `(any, any) -> boolean`
 
+- argument 1 — One side; a list is compared as a whole, not element by element. Sample: `(x + 1)^2`.
+- argument 2 — The other side. Sample: `x^2 + 2x + 1`.
+
 Identity comparison (`\equiv`).
 
 True iff the operands are equal for every value of their free variables.
+
+```epsil
+identicallyEqual((x + 1)^2, x^2 + 2x + 1)
+// ➔ true
+```
 
 ### isSame
 
 MathJSON `IsSame` · `(any, any) -> boolean`
 
+- argument 1 — One expression, compared as written, before it is put in canonical form. Sample: `x + 1`.
+- argument 2 — The other expression. Sample: `1 + x`.
+
 Compare two expressions for structural equality
+
+```epsil
+isSame(x + 1, x + 1)
+// ➔ true
+```
+
+```epsil
+isSame(x + 1, 1 + x)
+// ➔ false
+```
 
 ### Less
 

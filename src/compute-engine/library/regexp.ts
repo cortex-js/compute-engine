@@ -482,6 +482,22 @@ export const REGEXP_LIBRARY: SymbolDefinitions = {
     // already the value, and stays inert like a `Tuple` of its operands.
     invokes: false,
     signature: '(pattern: string, flags: string?) -> regexp',
+    examples: [
+      'RegExp("[a-z]+", "i")',
+      'RegExp("a", "im") == RegExp("a", "mi")',
+    ],
+    parameters: {
+      pattern: {
+        description:
+          'The pattern, in the JavaScript dialect; a literal pattern that is not valid is an error where it is written.',
+        sample: '"[0-9]+"',
+      },
+      flags: {
+        description:
+          'The flags, any of `d`, `i`, `m`, `s`, `u` and `v`, each at most once and not both `u` and `v`; `g` and `y` are refused, and `u` is implied when neither `u` nor `v` is given.',
+        sample: '"i"',
+      },
+    },
     // Validate a LITERAL pattern at canonicalization so a typo surfaces where
     // it was written; a computed pattern can only be checked when it has a
     // value, and is validated by the operators that consume it. The literal
@@ -567,6 +583,20 @@ export const REGEXP_LIBRARY: SymbolDefinitions = {
 
   IsMatch: {
     description: 'Whether a string contains a match for a regular expression.',
+    examples: [
+      'IsMatch("abc123", RegExp("[0-9]+"))',
+      'IsMatch("abc", RegExp("^A", "i"))',
+    ],
+    parameters: {
+      subject: {
+        description: 'The string to search.',
+        sample: '"abc123"',
+      },
+      pattern: {
+        description: 'The regular expression, made with `RegExp`.',
+        sample: 'regExp("[0-9]+")',
+      },
+    },
     complexity: 8200,
     // A character subject is accepted wherever a string one is: a character
     // and the one-character string with the same content are the same value.
@@ -590,6 +620,17 @@ export const REGEXP_LIBRARY: SymbolDefinitions = {
       'The first match of a regular expression in a string, as a record.',
       'The record holds `match`, `range`, `groups` and `names`; the result is `Nothing` when there is no match.',
     ],
+    examples: ['StringMatch("abc123def", RegExp("[0-9]+"))'],
+    parameters: {
+      subject: {
+        description: 'The string to search.',
+        sample: '"abc123"',
+      },
+      pattern: {
+        description: 'The regular expression, made with `RegExp`.',
+        sample: 'regExp("[0-9]+")',
+      },
+    },
     complexity: 8200,
     signature:
       '(subject: string | character, pattern: regexp) -> record | nothing',
@@ -611,6 +652,19 @@ export const REGEXP_LIBRARY: SymbolDefinitions = {
       'Every non-overlapping match of a regular expression in a string, as a list of records.',
       'Each record has the same shape as `StringMatch`.',
     ],
+    examples: ['StringMatchAll("a1b22c333", RegExp("[0-9]+"))'],
+    parameters: {
+      subject: {
+        description:
+          'The string to search; the result is an empty list when nothing matches.',
+        sample: '"a1b22c333"',
+      },
+      pattern: {
+        description:
+          'The regular expression, made with `RegExp`; an empty match advances by one character.',
+        sample: 'regExp("[0-9]+")',
+      },
+    },
     complexity: 8200,
     signature: '(subject: string | character, pattern: regexp) -> list<record>',
     evaluate: ([subject, pattern], { engine: ce }) => {
