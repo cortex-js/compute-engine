@@ -331,6 +331,13 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
       // `+∞`, `NaN` at `−∞` and `~oo`. The value is complex on the
       // whole negative axis (Im = π⌊x⌋), so the claim is the top numeric type.
       signature: '(complex | infinity) -> number',
+      parameters: [
+        {
+          description:
+            'The argument; the value is `+oo` at the poles of Γ, the non-positive integers.',
+          sample: '5',
+        },
+      ],
       examples: ['LogGamma(5)', 'N(LogGamma(-2.5 + 1.5i))'],
       nanBehavior: 'propagate',
       type: (_ops, context) =>
@@ -431,6 +438,13 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
       // negative axis). The value is real on the real axis, but its sign
       // alternates and a pole-free `real` claim is not made: top numeric type.
       signature: '(complex | infinity) -> number',
+      parameters: [
+        {
+          description:
+            'The argument; the value is 0 at the non-positive integers.',
+          sample: '5',
+        },
+      ],
       examples: ['BarnesG(5)', 'N(BarnesG(1/2))'],
       nanBehavior: 'propagate',
       type: (_ops, context) =>
@@ -486,6 +500,13 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
       broadcastable: true,
       // As `BarnesG`; `−∞` at the zeros, so the carrier of the answer is every number.
       signature: '(complex | infinity) -> number',
+      parameters: [
+        {
+          description:
+            'The argument; the value is `-oo` at the non-positive integers.',
+          sample: '5',
+        },
+      ],
       examples: ['LogBarnesG(5)', 'N(LogBarnesG(-1/2))'],
       nanBehavior: 'propagate',
       type: (_ops, context) =>
@@ -548,6 +569,14 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
       // No `canonical` handler, so a proven off-carrier operand is
       // rejected at boxing.
       signature: '(complex | infinity) -> number',
+      parameters: [
+        {
+          description:
+            'The parameter m = k²; the value is real for m < 1, `+oo` at m = 1 and complex for m > 1.',
+          sample: '1/2',
+        },
+      ],
+      examples: ['EllipticK(0)', 'N(EllipticK(1/2))'],
       nanBehavior: 'propagate',
       // Real for m < 1, the +∞ pole at m = 1 (mirroring the `evaluate`
       // special case below), and a finite complex value for m > 1
@@ -605,6 +634,18 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
       // `E(~oo) = ~oo` (the modulus grows without bound in every
       // direction). The incomplete form stays symbolic at an infinite operand (`symbolicAtInfinity`).
       signature: '(complex | infinity, (complex | infinity)?) -> number',
+      parameters: [
+        {
+          description:
+            'Alone, the parameter m = k² of the complete integral; with a second argument, the amplitude φ, in radians.',
+          sample: '1/2',
+        },
+        {
+          description: 'The parameter m = k² of the incomplete integral.',
+          sample: '1/2',
+        },
+      ],
+      examples: ['N(EllipticE(1/2))', 'N(EllipticE(Pi/4, 1/2))'],
       nanBehavior: 'propagate',
       // Complete E(m): real on m ≤ 1 (E(1) = 1), finite complex for m > 1.
       // Incomplete E(φ|m): the value is complex whenever m·sin²φ > 1, a
@@ -677,7 +718,16 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
       // (explicit: the carrier is not a subtype of `complex`); no
       // `canonical` handler, so a proven off-carrier operand is rejected
       // at boxing.
-      signature: '(complex | infinity, complex | infinity) -> number',
+      signature: '(phi: complex | infinity, m: complex | infinity) -> number',
+      parameters: {
+        phi: {
+          description:
+            'The amplitude φ, in radians; the value is 0 at φ = 0, and N gives K(m) at φ = π/2.',
+          sample: 'pi / 4',
+        },
+        m: { description: 'The parameter m = k².', sample: '1/2' },
+      },
+      examples: ['N(EllipticF(Pi/4, 1/2))'],
       nanBehavior: 'propagate',
       // `number` is the honest top for every operand pair, so the claim is
       // constant. Two things defeat a narrower one. Incomplete F(φ|m) is
@@ -721,6 +771,23 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
       // at boxing.
       signature:
         '(complex | infinity, complex | infinity, (complex | infinity)?) -> number',
+      parameters: [
+        {
+          description:
+            'The characteristic n; N of the complete integral is `+oo` at n = 1.',
+          sample: '1/2',
+        },
+        {
+          description:
+            'With two arguments, the parameter m = k² of the complete integral; with three, the amplitude φ, in radians.',
+          sample: '1/2',
+        },
+        {
+          description: 'The parameter m = k² of the incomplete integral.',
+          sample: '1/2',
+        },
+      ],
+      examples: ['N(EllipticPi(1/2, 1/2))', 'N(EllipticPi(1/2, Pi/4, 1/2))'],
       nanBehavior: 'propagate',
       // `number` is the honest top for every operand triple, so the claim is
       // constant. Π has a +∞ pole at the characteristic n = 1 (`Π(1|m)`), so
@@ -771,6 +838,19 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
       // of `complex`); no `canonical` handler, so a proven off-carrier
       // operand is rejected at boxing.
       signature: '(complex | infinity, (complex | infinity)?) -> number',
+      parameters: [
+        {
+          description:
+            'The first number, or z in AGM(1, z) when it is the only argument; the value is 0 when either number is 0.',
+          sample: '1',
+        },
+        {
+          description:
+            'The second number; a negative number gives the complex AGM.',
+          sample: '2',
+        },
+      ],
+      examples: ['N(AGM(1, 2))', 'AGM(3, 3)'],
       nanBehavior: 'propagate',
       // Real and finite for non-negative real operands; a negative operand
       // takes the complex AGM (`AGM(1, −2) = −0.4229… + 0.6612…i`).
@@ -820,7 +900,21 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
       // `canonical` handler, so a proven off-carrier operand is rejected
       // at boxing.
       signature:
-        '(complex | infinity, complex | infinity, complex | infinity, complex | infinity) -> number',
+        '(a: complex | infinity, b: complex | infinity, c: complex | infinity, z: complex | infinity) -> number',
+      parameters: {
+        a: { description: 'The first numerator parameter.', sample: '1' },
+        b: { description: 'The second numerator parameter.', sample: '1' },
+        c: { description: 'The denominator parameter.', sample: '2' },
+        z: {
+          description:
+            'The argument; the value is 1 at z = 0, and complex on the cut z > 1.',
+          sample: '1/2',
+        },
+      },
+      examples: [
+        'N(Hypergeometric2F1(1, 1, 2, 1/2))',
+        'Hypergeometric2F1(1, 2, 2, x)',
+      ],
       nanBehavior: 'propagate',
       type: (ops, context) =>
         BoxedType.forResult(
@@ -884,7 +978,24 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
       // `canonical` handler, so a proven off-carrier operand is rejected
       // at boxing.
       signature:
-        '(complex | infinity, complex | infinity, complex | infinity, complex | infinity, complex | infinity, complex | infinity) -> number',
+        '(a: complex | infinity, b1: complex | infinity, b2: complex | infinity, c: complex | infinity, x: complex | infinity, y: complex | infinity) -> number',
+      parameters: {
+        a: { description: 'The parameter a.', sample: '1' },
+        b1: { description: 'The parameter b₁, paired with x.', sample: '1' },
+        b2: { description: 'The parameter b₂, paired with y.', sample: '1' },
+        c: { description: 'The denominator parameter c.', sample: '2' },
+        x: {
+          description:
+            'The first argument, |x| < 1; outside the disk the call stays unevaluated.',
+          sample: '1/2',
+        },
+        y: {
+          description:
+            'The second argument, |y| < 1; outside the disk the call stays unevaluated.',
+          sample: '1/4',
+        },
+      },
+      examples: ['N(AppellF1(1, 1, 1, 2, 1/2, 1/4))'],
       nanBehavior: 'propagate',
       type: (ops, context) =>
         BoxedType.forResult(
@@ -923,7 +1034,16 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
       // ∞/(1 − ∞)` into `NaN`); `NaN` propagates (explicit: the carrier is
       // not a subtype of `complex`); no `canonical` handler, so a proven
       // off-carrier operand is rejected at boxing.
-      signature: '(complex | infinity, complex | infinity) -> number',
+      signature: '(s: complex | infinity, z: complex | infinity) -> number',
+      parameters: {
+        s: { description: 'The order s.', sample: '2' },
+        z: {
+          description:
+            'The argument; the value is 0 at z = 0, ζ(s) at z = 1 when s > 1, and complex on the cut z > 1.',
+          sample: '1/2',
+        },
+      },
+      examples: ['PolyLog(2, 1)', 'N(PolyLog(2, 1/2))'],
       nanBehavior: 'propagate',
       // Liₛ(1) = ζ(s) is finite for s > 1 but a pole (value `~oo`, only
       // representable by `number`) for s ≤ 1; likewise Li₀/Li₋₁ at z = 1.
@@ -1036,7 +1156,19 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
       ],
       complexity: 8700,
       broadcastable: true,
-      signature: '(integer, number?) -> number',
+      signature: '(n: integer, a: number?) -> number',
+      parameters: {
+        n: {
+          description:
+            'The index n, at least 0; a negative index stays unevaluated.',
+          sample: '1',
+        },
+        a: {
+          description:
+            'The shift a, 1 by default; the value is `~oo` at a non-positive integer.',
+          sample: '1/2',
+        },
+      },
       nanBehavior: 'propagate',
       evaluate: (ops, { numericApproximation, engine }) => {
         const [n, a] = ops;
@@ -1114,7 +1246,18 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
       broadcastable: true,
       // Cl₁(θ) = −ln|2 sin(θ/2)| is +∞ at θ ≡ 0, so the result is `real`
       // only for a literal order ≥ 2. A non-real θ stays symbolic.
-      signature: '(integer, real) -> number',
+      signature: '(n: integer, theta: real) -> number',
+      parameters: {
+        n: {
+          description:
+            'The order n, at least 1; a smaller order stays unevaluated.',
+          sample: '2',
+        },
+        theta: {
+          description: 'The angle θ, in radians; Cl₁ is `+oo` at θ = 0.',
+          sample: 'pi / 2',
+        },
+      },
       examples: ['[ClausenCl(2, 1), ClausenCl(3, 0), N(ClausenCl(2, 1))]'],
       nanBehavior: 'propagate',
       type: ([n, theta], context) => {
@@ -1240,7 +1383,16 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
       // `canonical` handler, so a proven off-carrier operand is rejected
       // at boxing.
       signature:
-        '(complex | infinity, complex | infinity, complex | infinity) -> number',
+        '(a: complex | infinity, b: complex | infinity, z: complex | infinity) -> number',
+      parameters: {
+        a: { description: 'The numerator parameter.', sample: '1' },
+        b: { description: 'The denominator parameter.', sample: '2' },
+        z: {
+          description: 'The argument; the value is 1 at z = 0.',
+          sample: '1',
+        },
+      },
+      examples: ['N(Hypergeometric1F1(1, 2, 1))', 'Hypergeometric1F1(2, 2, x)'],
       nanBehavior: 'propagate',
       type: (ops, context) =>
         BoxedType.forResult(
@@ -1291,7 +1443,29 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
       // `complex`); no `canonical` handler, so a proven off-carrier
       // operand is rejected at boxing.
       signature:
-        '(number, complex | infinity, complex | infinity, number?) -> number',
+        '(j: number, z: complex | infinity, tau: complex | infinity, r: number?) -> number',
+      parameters: {
+        j: {
+          description:
+            'The index j of the function, 1, 2, 3 or 4; another value stays unevaluated.',
+          sample: '3',
+        },
+        z: {
+          description: 'The argument z; θ₃ and θ₄ have period 1 in z.',
+          sample: '0',
+        },
+        tau: {
+          description:
+            'The lattice parameter τ, with Im(τ) > 0; the nome is q = e^{iπτ}.',
+          sample: 'i',
+        },
+        r: {
+          description:
+            'The order of the derivative in z; only 0 is implemented, another order stays unevaluated.',
+          sample: '0',
+        },
+      },
+      examples: ['N(JacobiTheta(3, 0, i))'],
       nanBehavior: 'propagate',
       // The handler itself stays: deleting it would activate the
       // no-handler fallback, which derives a NARROWER type than this
@@ -1366,6 +1540,14 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
       // do. `NaN` propagates (explicit: the carrier is not a subtype of `complex`); no `canonical`
       // handler, so a proven off-carrier operand is rejected at boxing.
       signature: '(complex | infinity) -> number',
+      parameters: [
+        {
+          description:
+            'The point τ of the upper half-plane; a τ with Im(τ) ≤ 0 stays unevaluated.',
+          sample: 'i',
+        },
+      ],
+      examples: ['N(DedekindEta(i))'],
       nanBehavior: 'propagate',
       // The handler itself stays: deleting it would activate the
       // no-handler fallback, which derives a NARROWER type than this
@@ -1423,7 +1605,20 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
       // `NaN` propagates (explicit); no
       // `canonical` handler, so a proven off-carrier operand is rejected
       // at boxing.
-      signature: '(number, complex | infinity) -> number',
+      signature: '(s: number, tau: complex | infinity) -> number',
+      parameters: {
+        s: {
+          description:
+            'The weight s, an even integer at least 2; another value stays unevaluated.',
+          sample: '4',
+        },
+        tau: {
+          description:
+            'The point τ of the upper half-plane; a τ with Im(τ) ≤ 0 stays unevaluated.',
+          sample: 'i',
+        },
+      },
+      examples: ['N(EisensteinE(4, i))'],
       nanBehavior: 'propagate',
       // The handler itself stays: deleting it would activate the
       // no-handler fallback, which derives a NARROWER type than this
@@ -1464,6 +1659,14 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
       // of `complex`); no `canonical` handler, so a proven off-carrier
       // operand is rejected at boxing.
       signature: '(complex | infinity) -> number',
+      parameters: [
+        {
+          description:
+            'The argument; the value is `-oo` at 0, `+oo` at `+oo` and 0 at `-oo`.',
+          sample: '1',
+        },
+      ],
+      examples: ['N(ExpIntegralEi(1))', 'ExpIntegralEi(0)'],
       nanBehavior: 'propagate',
       // An argument on the EXTENDED real line maps to a value on the
       // extended real line: `Ei(0) = −∞` and `Ei(+∞) = +∞` are infinite, so
@@ -1538,6 +1741,14 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
       // subtype of `complex`); no `canonical` handler, so a proven
       // off-carrier operand is rejected at boxing.
       signature: '(complex | infinity) -> number',
+      parameters: [
+        {
+          description:
+            'The argument; the value is 0 at 0 and `-oo` at 1, and a negative or non-real number stays unevaluated.',
+          sample: '10',
+        },
+      ],
+      examples: ['N(LogIntegral(10))', 'LogIntegral(1)'],
       nanBehavior: 'propagate',
       // li is real-valued only on the NON-NEGATIVE real axis, and there it
       // can be infinite: li(0) = 0, li(1) = −∞ (the pole), li(+∞) = +∞. So
@@ -1601,32 +1812,42 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
     ChebyshevT: orthogonalPolynomialDefinition(
       'ChebyshevT',
       'Chebyshev polynomial of the first kind Tₙ(x), with Tₙ(cos θ) = cos(nθ). ' +
-        'T₋ₙ = Tₙ. Example: ChebyshevT(3, x) → 4x³ − 3x',
-      'Q620196'
+        'T₋ₙ = Tₙ.',
+      'Q620196',
+      'The degree n; a negative degree gives T₋ₙ = Tₙ.',
+      ['ChebyshevT(3, x)', 'ChebyshevT(3, 1/2)']
     ),
     ChebyshevU: orthogonalPolynomialDefinition(
       'ChebyshevU',
       'Chebyshev polynomial of the second kind Uₙ(x), with Uₙ(cos θ) = sin((n+1)θ)/sin θ. ' +
-        'U₋₁ = 0 and U₋ₙ = −Uₙ₋₂. Example: ChebyshevU(2, x) → 4x² − 1',
-      'Q620196'
+        'U₋₁ = 0 and U₋ₙ = −Uₙ₋₂.',
+      'Q620196',
+      'The degree n; a negative degree gives U₋₁ = 0 and U₋ₙ = −Uₙ₋₂.',
+      ['ChebyshevU(2, x)']
     ),
     LegendreP: orthogonalPolynomialDefinition(
       'LegendreP',
       'Legendre polynomial Pₙ(x), with P₀ = 1, P₁ = x and (n+1)Pₙ₊₁ = (2n+1)x Pₙ − n Pₙ₋₁. ' +
-        'P₋ₙ = Pₙ₋₁. Example: LegendreP(2, x) → (3x² − 1)/2',
-      'Q215405'
+        'P₋ₙ = Pₙ₋₁.',
+      'Q215405',
+      'The degree n; a negative degree gives P₋ₙ = Pₙ₋₁.',
+      ['LegendreP(2, x)']
     ),
     HermiteH: orthogonalPolynomialDefinition(
       'HermiteH',
       "Hermite polynomial Hₙ(x) of the physicists' convention, with H₀ = 1, H₁ = 2x and Hₙ₊₁ = 2x Hₙ − 2n Hₙ₋₁. " +
-        'A negative degree stays unevaluated. Example: HermiteH(2, x) → 4x² − 2',
-      'Q1047256'
+        'A negative degree stays unevaluated.',
+      'Q1047256',
+      'The degree n, at least 0; a negative degree stays unevaluated.',
+      ['HermiteH(2, x)']
     ),
     LaguerreL: orthogonalPolynomialDefinition(
       'LaguerreL',
       'Laguerre polynomial Lₙ(x) = Σₖ (−1)ᵏ C(n, k) xᵏ/k!. ' +
-        'A negative degree stays unevaluated. Example: LaguerreL(2, x) → x²/2 − 2x + 1',
-      'Q1366960'
+        'A negative degree stays unevaluated.',
+      'Q1366960',
+      'The degree n, at least 0; a negative degree stays unevaluated.',
+      ['LaguerreL(2, x)']
     ),
   },
 ];
@@ -1647,14 +1868,25 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
 function orthogonalPolynomialDefinition(
   kind: OrthogonalPolynomial,
   description: string,
-  wikidata: string
+  wikidata: string,
+  degreeDescription: string,
+  examples: string[]
 ): OperatorDefinition {
   return {
     description,
     wikidata,
     complexity: 8000,
     broadcastable: true,
-    signature: '(degree: integer, complex) -> number',
+    signature: '(degree: integer, x: complex) -> number',
+    parameters: {
+      degree: { description: degreeDescription, sample: '3' },
+      x: {
+        description:
+          'The point; a number gives the value, a symbol or an expression the expanded polynomial in it.',
+        sample: '1/2',
+      },
+    },
+    examples,
     nanBehavior: ['reject', 'propagate'],
     type: (ops, context) =>
       BoxedType.forResult(
