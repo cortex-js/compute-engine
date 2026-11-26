@@ -450,6 +450,15 @@
 
 ### Resolved Issues
 
+- **The negation of a value whose type is an alias of a range has the
+  reflected range** (CE-1873). With `type alias Byte = integer<0..255>` and
+  `b: Byte`, the type of `-b` was `Byte` and the type of `255 - b` was
+  `integer<255..510>`, so `Pixel(255 - p.r, 255 - p.g, 255 - p.b, p.a)` did
+  not compile ("does not prove Byte"). The type of `-b` is now
+  `integer<-255..0>` and the type of `255 - b` is `integer<0..255>`, as for
+  `b: integer<0..255>`. An alias keeps its name when its negation is its
+  definition: `-m` for `m` of an alias of `real` is still of that alias.
+
 - **A call of `Complex` that names its arguments gives the complex number**
   (CE-1689). `Complex(imaginary: 2, real: 1)`, and `complex(real: 1,
   imaginary: 2)` or `complex(1, imaginary: 2)` in Epsil, gave an

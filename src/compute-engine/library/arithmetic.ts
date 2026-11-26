@@ -13470,8 +13470,10 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // A transparent alias of a SHAPE is unfolded before the echo, so `-L`
       // for `L: nums` (an alias of `list<number>`) is `list<number>` — the
       // alias policy of the broadcast lift — while a scalar alias keeps its
-      // name (`-m` for `m: meters` is `meters`, like `m + 1`). A function or
-      // string arm of a union operand is dropped first, as for `Add`
+      // name when its negation is its definition (`-m` for `m: meters` is
+      // `meters`, like `m + 1`) and is reflected otherwise (`-b` for
+      // `b: Byte`, an alias of `integer<0..255>`, is `integer<-255..0>`). A
+      // function or string arm of a union operand is dropped first, as for `Add`
       // (`withoutNonArithmeticArms`): a negation never yields one.
       type: ([x], context) =>
         BoxedType.forResult(

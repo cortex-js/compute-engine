@@ -206,6 +206,64 @@ describe('alias lift: a scalar alias is not a lift and keeps its name', () => {
   });
 });
 
+//
+// The negation of a scalar alias whose definition carries a range reflects
+// the range, as the definition written in full does: `-b` for `b: Byte`, an
+// alias of `integer<0..255>`, is `integer<-255..0>`. The alias keeps its name
+// only when the reflection is its definition again. Each row is stated
+// against the control `c`, declared with the body.
+//
+describe('alias negation: a ranged scalar alias reflects its range', () => {
+  const ce = new ComputeEngine();
+  ce.declareType('Byte', 'integer<0..255>', { alias: true });
+  ce.declareType('Unit', 'real<0..1>', { alias: true });
+  ce.declareType('Sym', 'integer<-5..5>', { alias: true });
+  ce.declareType('Len', 'real', { alias: true });
+  ce.declare('b', 'Byte');
+  ce.declare('c', 'integer<0..255>');
+  ce.declare('u', 'Unit');
+  ce.declare('v', 'real<0..1>');
+  ce.declare('s', 'Sym');
+  ce.declare('r', 'Len');
+  ce.declare('cond', 'boolean');
+
+  const sub = (e: unknown, from: string, to: string): unknown =>
+    e === from
+      ? to
+      : Array.isArray(e)
+        ? e.map((x) => sub(x, from, to))
+        : e;
+
+  test.each([
+    [['Negate', 'b'], 'integer<-255..0>'],
+    [['Subtract', 255, 'b'], 'integer<0..255>'],
+    [['Subtract', 'b', 1], 'integer<-1..254>'],
+    [['Add', 'b', 1], 'integer<1..256>'],
+    [['Multiply', 2, 'b'], 'integer<0..510>'],
+    [['Multiply', -1, 'b'], 'integer<-255..0>'],
+    [['Abs', 'b'], 'integer<0..255>'],
+    [['Abs', ['Negate', 'b']], 'integer<0..255>'],
+    [['Min', 'b', 10], 'integer<0..10>'],
+    [['If', 'cond', 'b', ['Negate', 'b']], 'integer'],
+  ])('%j for b: Byte is %s', (expr, type) => {
+    expect(ce.box(expr as any).type.toString()).toBe(type);
+    expect(ce.box(sub(expr, 'b', 'c') as any).type.toString()).toBe(type);
+  });
+
+  test.each([
+    [['Negate', 'u'], 'real<-1..0>'],
+    [['Subtract', 1, 'u'], 'real<0..1>'],
+  ])('%j for u: Unit is %s', (expr, type) => {
+    expect(ce.box(expr as any).type.toString()).toBe(type);
+    expect(ce.box(sub(expr, 'u', 'v') as any).type.toString()).toBe(type);
+  });
+
+  test('an alias whose negation is its definition keeps its name', () => {
+    expect(ce.box(['Negate', 'r']).type.toString()).toBe('Len');
+    expect(ce.box(['Negate', 's']).type.toString()).toBe('Sym');
+  });
+});
+
 describe('alias lift: a NOMINAL collection type still refuses', () => {
   const ce = new ComputeEngine();
   ce.declareType('nlist', 'list<integer>');

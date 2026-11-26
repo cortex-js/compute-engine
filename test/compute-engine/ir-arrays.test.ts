@@ -973,3 +973,18 @@ let k = (i: integer) => h(a, i)`);
     expect(declined(ce, 'k')).toMatch(/the bare type array/);
   });
 });
+
+describe('THE INVERSE OF A PIXEL', () => {
+  // `255 - p.r` for `p.r: Byte`, an alias of `integer<0..255>`, is
+  // `integer<0..255>`, so it proves `Byte` and the pixel compiles.
+  const source = `function invert(p: Pixel) -> Pixel { Pixel(255 - p.r, 255 - p.g, 255 - p.b, p.a) }
+let px = arrayFrom([Pixel(1, 2, 3, 4)], "Pixel")
+let f = (i: integer) => invert(px[i]).r
+`;
+
+  test('the inverse of a channel is a byte, in both runs', () => {
+    const { ce } = engine(source);
+    expect(compiled(ce, 'f').run(1)).toBe(254);
+    expect(interpreted(engine(source).ce, 'f', 1)).toBe(254);
+  });
+});
