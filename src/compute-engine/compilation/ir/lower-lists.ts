@@ -327,6 +327,99 @@ export function listLowering(cx: Lowering) {
     return cx.region('build', [length], [k], () => [f(k)], site)[0];
   };
 
+  /** JavaScript outside the interval and the bigint modes: the target
+   *  where two lengths are compared at run time (`agree()`). */
+  const checks = cx.runtimeLengths && !cx.interval && !cx.bigint;
+  /** The checks that `agree()` made: the lengths that each one proves
+   *  equal (`members`), while the region where it is made is open. */
+  const agreed: {
+    check: 'rows.agree' | 'rows.square';
+    base: V;
+    zero: V;
+    members: Set<V>;
+    region: Region;
+  }[] = [];
+
+  /** Two lengths `x` and `y` that an operation reads, which must be equal:
+   *  of two lists that an element-wise operation, a call mapped over lists
+   *  or `Dot` reads at each index, the inner lengths of `MatrixMultiply`,
+   *  and the two lengths of the matrix of `Trace` (`check` is
+   *  `rows.square`). The one place that decides what happens when they are
+   *  not one value or equal constants: on JavaScript, the check `check`,
+   *  whose value is 0 and which throws a `RangeError` where they differ, as
+   *  the interpreter's value is an error (user decision 2026-11-25). It is
+   *  made where the operation is, before its loops; a check `check` of the
+   *  same lengths in an open region has proved them equal, and is read
+   *  again.
+   *  `base` is the length to read (the constant, when one of them is one),
+   *  and `zero` the value 0 of the check: the initial value of a sum, so
+   *  that `dce` keeps the check and a sum of a constant length stays
+   *  written out (a build reads `agreedLength()`). Where `x` and `y` are
+   *  one value or equal constants, `x` and no check. Elsewhere,
+   *  `undefined`: the callers keep their behaviour there. Two constants
+   *  that differ are the callers' decline. */
+  const agree = (
+    x: V,
+    y: V,
+    check: 'rows.agree' | 'rows.square' = 'rows.agree'
+  ): { base: V; zero?: V } | undefined => {
+    if (
+      x === y ||
+      (cx.constant(x) !== undefined && cx.constant(x) === cx.constant(y))
+    )
+      return { base: x };
+    if (!checks) return undefined;
+    const open = agreed.filter((a) => b.isOpen(a.region));
+    const known = open.find(
+      (a) => a.check === check && a.members.has(x) && a.members.has(y)
+    );
+    if (known !== undefined) return known;
+    let zero = b.op(check, [x, y], scalarType('integer'));
+    // The lengths that the checks of `x` or `y` proved equal to them. The
+    // value 0 reads the value 0 of those checks too, so that a reader that
+    // relies on one of their equalities keeps each of them (`dce`).
+    const members = new Set([x, y]);
+    for (const a of open)
+      if (a.members.has(x) || a.members.has(y)) {
+        a.members.forEach((m) => members.add(m));
+        zero = b.op('add.int', [zero, a.zero], scalarType('integer'));
+      }
+    const base =
+      cx.constant(x) !== undefined || cx.constant(y) === undefined ? x : y;
+    const made = { check, base, zero, members, region: b.current() };
+    agreed.push(made);
+    return made;
+  };
+
+  /** The constant that the length `n` is: its value, or a constant that a
+   *  check of an open region proved it equal to (`agree()`), so that two
+   *  constants that differ decline as they did before the check: the length
+   *  of `List(1, 2, 3)·L` is 3. */
+  const knownLength = (n: V): number | undefined => {
+    const c = cx.constant(n);
+    if (c !== undefined) return c;
+    for (const a of agreed)
+      if (b.isOpen(a.region) && a.members.has(n))
+        for (const m of a.members)
+          if (cx.constant(m) !== undefined) return cx.constant(m);
+    return undefined;
+  };
+
+  /** The length of a build that reads, at each index, two lists of the
+   *  lengths `x` and `y` (`agree()`): `x` where they are one value or equal
+   *  constants; on JavaScript, the length plus the value 0 of the check, so
+   *  that the build, and each reader of its length, reads the check;
+   *  elsewhere `undefined`. */
+  const agreedLength = (site: Expression, x: V, y: V): V | undefined => {
+    const a = agree(x, y);
+    if (a?.zero === undefined) return a?.base;
+    const made = agreed.find((m) => m.zero === a.zero)!;
+    // A pure operation: one value while its region is open.
+    const length = cx.apply(site, 'Add', [made.base, made.zero]);
+    made.members.add(length);
+    return length;
+  };
+
   /** The list `e` as a source; with `scalars`, a scalar is its value. A
    *  tuple is a source only with `tuple` (`Length`, `Sum`, `Max`: the
    *  value on a tuple is the value on the list of its elements). */
@@ -1404,9 +1497,10 @@ export function listLowering(cx: Lowering) {
     return l;
   };
 
-  /** The sum from 0 of `f` at each index of the length `n`. */
-  const sumOf = (e: Fn, n: V, f: (k: V) => V): V =>
-    reduce(e, rowOfHead(cx.rows, 'Add')!, [{ length: n, at: f }], integer(0));
+  /** The sum from `zero` (the integer 0, or the value 0 of a check of
+   *  `agree()`) of `f` at each index of the length `n`. */
+  const sumOf = (e: Fn, n: V, f: (k: V) => V, zero = integer(0)): V =>
+    reduce(e, rowOfHead(cx.rows, 'Add')!, [{ length: n, at: f }], zero);
 
   /** `Dot(u, v)` of two vectors of real numbers (lists of numbers or
    *  points): the sum from 0 of the products of the elements. A list of
@@ -1430,11 +1524,18 @@ export function listLowering(cx: Lowering) {
       );
     const inner = (a: V, c: V): V => {
       const [sa, sc] = [listSource(a), listSource(c)];
-      const [na, nc] = [cx.constant(sa.length), cx.constant(sc.length)];
+      const [na, nc] = [knownLength(sa.length), knownLength(sc.length)];
       if (na !== undefined && nc !== undefined && na !== nc)
         decline(e, 'Dot of vectors of two lengths');
-      return sumOf(e, sa.length, (k) =>
-        cx.apply(e, 'Multiply', [sa.at(k), sc.at(k)])
+      // Lengths that can differ are compared (`agree()`).
+      const { base, zero } = agree(sa.length, sc.length) ?? {
+        base: sa.length,
+      };
+      return sumOf(
+        e,
+        base,
+        (k) => cx.apply(e, 'Multiply', [sa.at(k), sc.at(k)]),
+        zero
       );
     };
     if (ku === 'vector' && kv === 'vector') return inner(u, v);
@@ -1447,14 +1548,20 @@ export function listLowering(cx: Lowering) {
       decline(e, 'Dot of a list of points and a value that is not a point');
     const [su, sv] = [listSource(u), listSource(v)];
     if (ku === 'points' && kv === 'points') {
-      const [nu, nv] = [cx.constant(su.length), cx.constant(sv.length)];
+      const [nu, nv] = [knownLength(su.length), knownLength(sv.length)];
       if (nu !== undefined && nv !== undefined && nu !== nv)
         decline(e, 'Dot of lists of points of two lengths');
     }
     const s = ku === 'points' ? su : sv;
+    // Two lists of points pair by pair: lengths that can differ are
+    // compared (`agree()`).
+    const length =
+      (ku === 'points' && kv === 'points'
+        ? agreedLength(e, su.length, sv.length)
+        : undefined) ?? s.length;
     return over(
       e,
-      { length: s.length, at: (k) => k },
+      { length, at: (k) => k },
       '',
       (_x, k) =>
         inner(ku === 'points' ? su.at(k) : u, kv === 'points' ? sv.at(k) : v),
@@ -3546,6 +3653,10 @@ export function listLowering(cx: Lowering) {
     chunks,
     listSource,
     built,
+    checks,
+    agree,
+    agreedLength,
+    knownLength,
     reduce,
     reduction,
     build,

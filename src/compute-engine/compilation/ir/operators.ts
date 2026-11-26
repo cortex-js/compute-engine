@@ -504,12 +504,15 @@ export const OPERATORS: readonly OperatorRow[] = Object.freeze([
   // The length of the rows of a value of a matrix type (`matrix<real>`),
   // whose rows have one length: that of its first row, 0 of no row.
   row(undefined,      1,          [[['rows'], I, 'rows.width']], list),
-  // Two lengths that the matrix operators read, which the lowering does not
-  // prove equal (`lower-matrices.ts`, `agree()`): 0 where they are equal, a
-  // `RangeError` where they differ, the interpreter's
-  // `incompatible-dimensions` (`MatrixMultiply`) or `expected-square-matrix`
+  // Two lengths that an operation reads, which the lowering does not prove
+  // equal (`lower-lists.ts`, `agree()`): of two flat lists of an
+  // element-wise operation, of a call mapped over lists or of `Dot`, the
+  // inner lengths of `MatrixMultiply` and the two lengths of the matrix of
+  // `Trace`. 0 where they are equal, a `RangeError` where they differ, the
+  // interpreter's `incompatible-dimensions` or `expected-square-matrix`
   // (`Trace`). The value 0 is the initial value of each sum of the
-  // operator, so that the check is kept and runs once before them.
+  // operation, or is added to the length of its build, so that the check
+  // is kept and runs once before them.
   row(undefined,      2,          [[[I, I], I, 'rows.agree']], { ...list, effect: 'may-fail' }),
   row(undefined,      2,          [[[I, I], I, 'rows.square']], { ...list, effect: 'may-fail' }),
   // The order of a square matrix of the lane `rows` whose two lengths the
@@ -1004,8 +1007,10 @@ export function resultType(
   const shape = lists[0]?.shape ?? [];
   // The outer axis: a run-time length fits any length, and the result has
   // the shape of the first list (two lengths are an error of the
-  // interpreter that the static type does not show). The inner axes (a
-  // list of points) are the same.
+  // interpreter that the static type does not show; on JavaScript, flat
+  // lists of lengths not proved equal are a build whose length compares
+  // them instead, `apply()` of `lower.ts`). The inner axes (a list of
+  // points) are the same.
   const fits = ([n, ...rest]: readonly Length[]) =>
     shape.length === rest.length + 1 &&
     sameShape(rest, shape.slice(1)) &&

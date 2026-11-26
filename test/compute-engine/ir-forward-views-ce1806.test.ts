@@ -365,8 +365,9 @@ describe('a view that stays a list', () => {
   });
 
   test('a loop over the length of another list (Dot)', () => {
-    // `Dot` reads its second list over the length of the first: a read past
-    // the end of the array is NaN, which the callback must not replace.
+    // `Dot` reads its second list over the length of the first, after it
+    // compares the two lengths: lengths that differ throw a `RangeError`,
+    // the interpreter's `incompatible-dimensions`.
     const ce = new ComputeEngine();
     ce.declare('A', 'list<real>');
     ce.declare('B', 'list<real>');
@@ -376,7 +377,7 @@ describe('a view that stays a list', () => {
         { to: 'javascript', fallback: false } as any
       );
       expect(arrays(dot.code)).toBe(1);
-      expect(dot.run!({ A: [1, 2, 3], B: [5] })).toBeNaN();
+      expect(() => dot.run!({ A: [1, 2, 3], B: [5] })).toThrow(RangeError);
       expect(dot.run!({ A: [1, 2], B: [5, -1] })).toBe(body === 1 ? 3 : 5);
     }
   });

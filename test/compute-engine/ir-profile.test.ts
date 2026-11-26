@@ -1706,6 +1706,28 @@ describe('a list argument of a user function of scalar parameters: the function 
     expect(new Set(one).size).toBe(1);
   });
 
+  test('lists of lengths that are not one value: compared once at run time', () => {
+    // The interpreter's value of two lengths is `incompatible-dimensions`:
+    // the compiled code throws a `RangeError` (`agree()` of
+    // `lower-lists.ts`), before the build of the calls.
+    for (const json of [
+      ['h', 'D', 'G'],
+      ['h', 'V', 'D'],
+    ]) {
+      const r = againstInterpreter(e, json, [
+        { D: [0.5, 2, 3], G: [1, 2, 0.5], V: [1, 2, 3] },
+      ]);
+      expect(r.code.match(/_agree\(/g)).toHaveLength(1);
+      expect(() =>
+        (r.run as (x: unknown) => unknown)({ D: [0.5, 2], G: [1], V: [1, 2, 3] })
+      ).toThrow(/^incompatible-dimensions: lists of lengths/);
+    }
+    // Other targets compare no length: they decline.
+    expect(message(['h', 'D', 'G'], { to: 'interval-js' })).toMatch(
+      /list arguments of h whose lengths are not one value/
+    );
+  });
+
   test('on GLSL a list of a constant length is the list of the calls', () => {
     const glsl = (json: Json) =>
       compile(box(json, e), {
@@ -1727,8 +1749,6 @@ describe('a list argument of a user function of scalar parameters: the function 
   // prettier-ignore
   test.each([
     ['lists of two stated lengths (the interpreter: incompatible-dimensions)', ['h', ['List', 2, 4], ['List', 1, 2, 3]], /list arguments of h whose lengths are not one value/],
-    ['two lists of run-time lengths that are not one value', ['h', 'D', 'G'], /list arguments of h whose lengths are not one value/],
-    ['a list of a stated length and one of a run-time length', ['h', 'V', 'D'], /list arguments of h whose lengths are not one value/],
     ['a nested list (the interpreter maps to the leaves)', ['f', ['List', ['List', 1.5, 2.25], ['List', 3.5, 'x']]], /a list argument of f that is not a flat list/],
     ['a tuple, bound whole', ['twice', ['Tuple', 1.5, 'x']], /a list argument of twice \(the interpreter maps the function over the list\)/],
     ['a list of points', ['twice', ['List', ['Tuple', 1, 'x'], ['Tuple', 3, 4]]], /a list argument of twice \(the interpreter maps the function over the list\)/],
@@ -3322,9 +3342,11 @@ describe('equal sub-expressions written as separate nodes are lowered once', () 
 
   test('the points of five levels: one build per distinct sub-tree', () => {
     const json = nest(pointStep, ['PointList', 'D', 'E', 'D'], 5);
-    // The `PointList` of each level and its `PointX` and `PointY`, and the
-    // innermost `PointList`: 16, where each copy was lowered (7,811).
-    expect(counts(json).regions).toBe(16);
+    // The `PointList` of each level and its `PointX` and `PointY`, the
+    // innermost `PointList`, and at each level the build of `D` minus a
+    // list of the length of the `PointList` (whose lengths are compared at
+    // run time): 21, where each copy was lowered (7,811).
+    expect(counts(json).regions).toBe(21);
     againstInterpreter(ce, nest(pointStep, ['PointList', 'D', 'E', 'D'], 2), [
       point,
     ]);

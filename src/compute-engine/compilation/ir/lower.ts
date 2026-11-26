@@ -1623,6 +1623,42 @@ function lowerOnce(
       });
       const t = resultType(signature, operands.map(type), same);
       if (t === undefined) decline(node, 'lists of different lengths or ranks');
+      // Flat lists whose lengths are not one value or equal constants: on
+      // JavaScript, a build of the operation at each index, whose length
+      // reads the check of their lengths (`agree()` of `lower-lists.ts`);
+      // the interpreter's value of two lengths is `incompatible-dimensions`.
+      // Elsewhere, and of lists of points, the result has the shape of the
+      // first list (`resultType()`).
+      const flat = given.filter((v) => type(v).shape.length > 0);
+      if (
+        lists.checks &&
+        r.threads &&
+        !lanes.includes('list') &&
+        tuple === undefined &&
+        flat.length > 1 &&
+        flat.every((v) => type(v).shape.length === 1) &&
+        flat.some((v) => !same(type(v).shape, type(flat[0]).shape))
+      ) {
+        const sources = flat.map((v) => lists.listSource(v));
+        // Two constants that a check proved the lengths equal to.
+        const known = new Set(
+          sources
+            .map((s) => lists.knownLength(s.length))
+            .filter((n) => n !== undefined)
+        );
+        if (known.size > 1)
+          decline(node, 'lists of different lengths or ranks');
+        let length = sources[0].length;
+        for (const s of sources.slice(1))
+          length = lists.agreedLength(node, length, s.length)!;
+        const at = (k: V) =>
+          operation(
+            given.map((v) => (type(v).shape.length > 0 ? elementAt(v, k) : v))
+          );
+        const out = lists.built(node, length, at);
+        elementsOf.set(out, at);
+        return out;
+      }
       const out = b.op(signature[2], operands, t);
       return tuple === undefined
         ? out
@@ -1631,6 +1667,39 @@ function lowerOnce(
     if (typeof r.arity === 'number' || r.arity === 'chain')
       return operation(args);
     return args.slice(1).reduce((x, y) => operation([x, y]), args[0]);
+  };
+
+  /** The element at each index of a build of `apply()` of lists whose
+   *  lengths are compared at run time (`agree()` of `lower-lists.ts`). */
+  const elementsOf = new Map<V, (k: V) => V>();
+  /** The element at the index `k` of the flat list `v`, an operand of such
+   *  a build: of an element-wise operation of lists of its length (a row
+   *  that threads, with no effect), or of such a build, the operation on
+   *  the elements at `k`, so that the build computes each element once, as
+   *  one element-wise operation does with the operations of its shape that
+   *  it reads (`fuses()` of `print.ts`); of another list, its element. */
+  const elementAt = (v: V, k: V): V => {
+    const made = elementsOf.get(v);
+    if (made !== undefined) return made(k);
+    const d = b.defs.get(v);
+    const row = d === undefined ? undefined : rowOfOp(rows, d.op)?.row;
+    if (
+      d === undefined ||
+      row?.threads !== true ||
+      row.effect !== 'pure' ||
+      tuples.has(v) ||
+      !d.args.every(
+        (a) =>
+          type(a).shape.length === 0 ||
+          (!tuples.has(a) && same(type(a).shape, type(v).shape))
+      )
+    )
+      return lists.listSource(v).at(k);
+    return b.op(
+      d.op,
+      d.args.map((a) => (type(a).shape.length > 0 ? elementAt(a, k) : a)),
+      elementType(type(v))
+    );
   };
 
   /** `x` is a string and `y` a value that the interpreter never finds
@@ -5249,18 +5318,46 @@ function lowerOnce(
       decline(node, 'a selection at each position that writes a name');
     // The length of the mask, which exists: below 2^32.
     const masked = type(first).shape[0];
+    // The value 0 of a check of lengths (`agree()` of `lower-lists.ts`), and
+    // the length `n` without such values added (`agreedLength()`).
+    const isZero = (z: V): boolean => {
+      const d = b.defs.get(z);
+      return (
+        d !== undefined &&
+        (d.op === 'rows.agree' ||
+          d.op === 'rows.square' ||
+          (d.op === 'add.int' && d.args.every(isZero)))
+      );
+    };
+    const unchecked = (n: Length): Length => {
+      if (typeof n === 'number') return n;
+      let v = n.v;
+      let d = b.defs.get(v);
+      while (d?.op === 'add.int' && isZero(d.args[1]))
+        d = b.defs.get((v = d.args[0]));
+      return v === n.v ? n : (constant(v) ?? { v });
+    };
     // `x` lowered, which declines when it emits an instruction that is not
-    // pure, other than a `build` of a length that `safe()` accepts: a build
-    // fails only for a length of 2^32 or more.
-    const eager = (x: Expression, safe: (n: Length, v: V) => boolean): V => {
+    // pure, other than a `build` of a length that `safe()` accepts (a build
+    // fails only for a length of 2^32 or more), and a check of two lengths
+    // that an element-wise operation reads: made once before the selection,
+    // it throws where they differ also where no position selects the arm
+    // (`docs/COMPILATION-MODEL.md`, the known limitations).
+    // `checked`: the length of the build reads such a check.
+    const eager = (
+      x: Expression,
+      safe: (n: Length, v: V, checked: boolean) => boolean
+    ): V => {
       const start = b.impure.length;
       const v = value(x)!;
+      const ok = (n: Length) => safe(unchecked(n), v, unchecked(n) !== n);
       for (const i of b.impure.slice(start))
         if (
-          i.k !== 'region' ||
-          i.op !== 'build' ||
-          masked === undefined ||
-          !safe(type(i.outs[0]).shape[0], v)
+          !(i.k === 'op' && i.op === 'rows.agree') &&
+          (i.k !== 'region' ||
+            i.op !== 'build' ||
+            masked === undefined ||
+            !ok(type(i.outs[0]).shape[0]))
         )
           decline(
             node,
@@ -5293,7 +5390,7 @@ function lowerOnce(
     const arm = (a: Expression): V => {
       // A `Range` of number literals is a literal list of a stated length.
       if (!isFunction(a, 'Range') || !isLibrary(a) || a.ops.every(isNumber))
-        return eager(a, (n) => same([n], [masked!]));
+        return eager(a, (n, _v, checked) => checked || same([n], [masked!]));
       const start = b.impure.length;
       const s = lists.source(a);
       // The type of an element, from a read in a region that is not
@@ -5401,6 +5498,28 @@ function lowerOnce(
       )!;
     };
     const masks = lists.listSource(conds[0]);
+    // An arm whose length reads a check of the lengths of its lists
+    // (`agree()` of `lower-lists.ts`), of another length than the mask: on
+    // JavaScript its length and the mask's are compared too, before the
+    // selection, and the length of the selection reads that check; the
+    // interpreter's value of an arm of another length is an error where a
+    // position selects it. Not for a restriction, which zips them.
+    let length = masks.length;
+    if (!restriction)
+      for (const v of values) {
+        const n = type(v).shape[0];
+        if (
+          !listed(v) ||
+          typeof n === 'number' ||
+          unchecked(n) === n ||
+          same([unchecked(n)], [masked!])
+        )
+          continue;
+        const [k, m] = [lists.knownLength(length), lists.knownLength(n.v)];
+        if (k !== undefined && m !== undefined && k !== m)
+          decline(node, 'lists of two lengths in a selection at each position');
+        length = lists.agreedLength(node, length, n.v) ?? length;
+      }
     return lists.over(
       node as Fn,
       restriction
@@ -5411,7 +5530,7 @@ function lowerOnce(
               lists.listSource(arms[0]),
             ]),
           }
-        : masks,
+        : { ...masks, length },
       '',
       (_x, k) => pick(0, k),
       false,

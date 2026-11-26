@@ -749,6 +749,40 @@ const inline = (
   });
 };
 
+/** The checks of lengths that `guard()` made. */
+const guards = new WeakSet<Instr>();
+
+/** A check that two lengths are equal (`rows.agree`, `rows.square`), whose
+ *  value is 0: alone, or under the guard of a loop (`guard()`). */
+const lengthCheck = (x: Instr): boolean =>
+  (x.k === 'op' && (x.op === 'rows.agree' || x.op === 'rows.square')) ||
+  guards.has(x);
+
+/** The check of lengths `x`, made only where `passes` is true: its value
+ *  is 0 elsewhere. The interpreter compares the lengths only where the loop
+ *  runs a pass, and a loop that runs none is no error. */
+function guard(p: Program, x: Instr, passes: V): Instr {
+  const out = outsOf(x)[0];
+  const [made, zero] = [fresh(p, p.types[out]), fresh(p, p.types[out])];
+  const inner: Instr =
+    x.k === 'op'
+      ? { ...x, out: made }
+      : { ...(x as Instr & { k: 'if' }), outs: [made] };
+  const g: Instr = {
+    k: 'if',
+    outs: [out],
+    cond: passes,
+    then: { params: [], body: [inner], yields: [made] },
+    else: {
+      params: [],
+      body: [{ k: 'const', out: zero, value: { lane: 'integer', value: 0 } }],
+      yields: [zero],
+    },
+  };
+  guards.add(g);
+  return g;
+}
+
 /**
  * An instruction at the top level of a repeated body that reads no
  * parameter of the body and no value of the body that stays moves to just
@@ -761,7 +795,11 @@ const inline = (
  *   pass if it fails before the loop;
  * - out of a loop that can run no pass, a build with a pure body over the
  *   elements of a list that exists, and with `listLoops` a loop over them:
- *   each runs once, no longer than the list took to make.
+ *   each runs once, no longer than the list took to make;
+ * - out of a loop that can run no pass (not a `Loop`, at the same place as
+ *   the one that can fail), a check of lengths (`lengthCheck()`), under the
+ *   guard that the loop runs a pass (`guard()`): the pure sum or build that
+ *   reads its value then moves too.
  */
 const invariants = (
   p: Program,
@@ -776,6 +814,7 @@ const invariants = (
   const indices = new Set<V>();
   // The lengths of the lists that exist where the length is visible.
   const lengths = new Set<V>();
+  const zeros = new Set<V>();
   const ofLists = (vs: V[]) =>
     vs.forEach((v) =>
       lengthValues(p.types[v]).forEach((n) => {
@@ -793,6 +832,14 @@ const invariants = (
         i.args.every((a) => lengths.has(a))
       )
         lengths.add(i.out);
+      // Such a length plus the value 0 of a check of lengths
+      // (`agreedLength()` of `lower-lists.ts`).
+      if (lengthCheck(i)) zeros.add(outsOf(i)[0]);
+      if (i.k === 'op' && i.op === 'add.int') {
+        const [a, b] = i.args;
+        if (zeros.has(a) && zeros.has(b)) zeros.add(i.out);
+        if (lengths.has(a) && zeros.has(b)) lengths.add(i.out);
+      }
       const body = repeated(i);
       if (body !== undefined) indices.add(body.params[0]);
       regionsOf(i).forEach(index);
@@ -843,19 +890,46 @@ const invariants = (
     let effect = false;
     const moved: Instr[] = [];
     const kept: Instr[] = [];
+    // Where the loop can run no pass: whether it runs one, for a check of
+    // lengths that moves out under it (`guarded`).
+    let passes: V | undefined;
+    const runsOne = (): V | undefined => {
+      if (passes !== undefined) return passes;
+      let lo: V, hi: V;
+      if (loop.k === 'loop') {
+        if (loop.exit !== undefined || loop.window !== undefined) return;
+        [lo, hi] = [loop.lo, loop.hi];
+      } else if (loop.k === 'region' && loop.op === 'build') {
+        lo = fresh(p, scalarType('integer'));
+        moved.push({
+          k: 'const',
+          out: lo,
+          value: { lane: 'integer', value: 1 },
+        });
+        hi = loop.args[0];
+      } else return;
+      passes = fresh(p, scalarType('boolean'));
+      moved.push({ k: 'op', out: passes, op: 'le', args: [lo, hi] });
+      return passes;
+    };
     for (const x of body.body) {
       const e = fx.of(x);
       const free = !some(x, reads);
       const risky = some(x, hazard);
+      const failing =
+        free &&
+        e !== 'effectful' &&
+        !effect &&
+        !counted &&
+        !some(x, (y) => y.k === 'call' && cyclic.has(y.fn));
       const ok =
         free &&
         ((e === 'pure' && !risky) ||
-          (e !== 'effectful' &&
-            !effect &&
-            !counted &&
-            !some(x, (y) => y.k === 'call' && cyclic.has(y.fn)) &&
+          (failing &&
             (runs || (overList(x) && !risky && regionsOf(x).every(pure)))));
       if (ok) moved.push(x);
+      else if (failing && lengthCheck(x) && runsOne() !== undefined)
+        moved.push(guard(p, x, passes!));
       else {
         kept.push(x);
         outsOf(x).forEach((o) => variant.add(o));
@@ -930,6 +1004,7 @@ const dce: Pass = (p, rows) => {
  *  refused (`guardFor()`). */
 function boundedLengths(p: Program): Set<V> {
   const bounded = new Set<V>();
+  const zeros = new Set<V>();
   const walk = (r: Region) =>
     r.body.forEach((i) => {
       if (
@@ -948,6 +1023,14 @@ function boundedLengths(p: Program): Set<V> {
         i.args.every((a) => bounded.has(a))
       )
         bounded.add(i.out);
+      // The value 0 of a check of lengths, and a length plus it (the
+      // length of a build that `agreedLength()` of `lower-lists.ts` makes).
+      if (lengthCheck(i)) zeros.add(outsOf(i)[0]);
+      if (i.k === 'op' && i.op === 'add.int') {
+        const [a, b] = i.args;
+        if (zeros.has(a) && zeros.has(b)) zeros.add(i.out);
+        if (bounded.has(a) && zeros.has(b)) bounded.add(i.out);
+      }
       regionsOf(i).forEach(walk);
     });
   for (const f of p.functions) {

@@ -1999,7 +1999,6 @@ export function functionLowering(
   ): V => {
     if (recursive)
       decline(e, `a list argument of a recursive call of ${e.operator}`);
-    const lengths = new Set<string | number>();
     const sources = args.map((v, i) => {
       const t = type(v);
       const how = maps(i);
@@ -2009,17 +2008,26 @@ export function functionLowering(
           e,
           `a list argument of ${e.operator} that is not a flat list (the interpreter maps the function to the leaves of a nested list)`
         );
-      lengths.add(
-        typeof t.shape[0] === 'number' ? t.shape[0] : `${t.shape[0].v}`
-      );
       return lists.listSource(v);
     });
-    if (lengths.size > 1)
-      decline(
-        e,
-        `list arguments of ${e.operator} whose lengths are not one value (lists of different lengths give incompatible-dimensions)`
+    // Lengths that are not one value are compared at run time
+    // (`agree()`); two constants that differ, and other targets, decline.
+    const length = sources
+      .filter((s) => s !== undefined)
+      .map((s) => s.length)
+      .reduce(
+        (n, m) =>
+          (lists.knownLength(n) !== undefined &&
+          lists.knownLength(m) !== undefined &&
+          lists.knownLength(n) !== lists.knownLength(m)
+            ? undefined
+            : lists.agreedLength(e, n, m)) ??
+          decline(
+            e,
+            `list arguments of ${e.operator} whose lengths are not one value (lists of different lengths give incompatible-dimensions)`
+          )
       );
-    const index = { length: sources.find((s) => s)!.length, at: (k: V) => k };
+    const index = { length, at: (k: V) => k };
     return lists.over(
       e,
       index,

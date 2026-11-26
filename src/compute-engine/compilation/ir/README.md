@@ -631,10 +631,11 @@ list operand gives the list of the colours of its elements, a scalar operand is
 read at every element, and lists are zipped (`Hsv(210, Range(1, 10)/40, 1)`,
 `Rgb(D, D, 0.5)`, `AsOklab(Hsv(0, 0, D))`, also of a nested list), by the
 element-wise operation of the lists of numbers ("Lists"): lists of two stated
-lengths decline (the interpreter gives `incompatible-dimensions`); lists of
-run-time lengths that differ give an unspecified result, a list as long as the
-first one whose colours past the end of a shorter list have NaN channels
-(`Rgb(D, E, 0.5)` with 3 and 1 elements). A conversion reads a tuple of three
+lengths decline (the interpreter gives `incompatible-dimensions`); of
+run-time lengths, the JavaScript code compares them (`Rgb(D, E, 0.5)` with 3
+and 1 elements throws a `RangeError`, "Lists"), and the interval mode gives a
+list as long as the first one whose colours past the end of a shorter list
+have NaN channels. A conversion reads a tuple of three
 numbers, a literal or an input of type `tuple<real, real, real>`, as the sRGB
 colour of its channels, as the interpreter does (`AsOklab((1, 0, 0))` is
 `AsOklab(Rgb(1, 0, 0))`). Every other tuple operand declines: a tuple of four
@@ -1752,12 +1753,30 @@ stays a parameter of the entry: the loop reads it too; `ElementMax` and
 `ElementMin` are rows that thread (`ElementMax(D, 0.3)` is a list). An
 element-wise operation of lists of rank 1 has the length of its first list and
 reads the others at the same index. Lengths that are numbers and differ decline
-(`List(1, 2, 3)·D + List(4, 5)`); a length that is a value fits any length, also
-one that happens to be a constant (the count of `Range(1, 2)`). When the lengths
-differ, the result is unspecified: with `D` and `E` of two lengths, `D + E` is
-an error of the interpreter that the static type (`list<real>`) does not show,
-and the compiled value is a list as long as `D`, NaN where `E` has no element;
-`Range(1, 2) + List(1, 2, 3)` gives `[2, 4]`. Lists of rank 2 or more read their
+(`List(1, 2, 3)·D + List(4, 5)`, below); a length that is a value fits any
+length (`resultType()`). On JavaScript, outside the bigint and interval modes,
+flat lists whose lengths are not one value or equal constants (`D + E`, an error
+of the interpreter that the static type `list<real>` does not show) are a build
+of the operation at each index (`apply()` of `lower.ts`), whose length is
+`agreedLength()` of `lower-lists.ts`: the first length plus the value 0 of the
+check `rows.agree` of the two lengths (`agree()`, "Matrices"), a `RangeError`
+where they differ. The build reads the check, and so does every reader of its
+length (a reduction, `Length`, `At`), so `dce` keeps it; it is made once, where
+the operation is, before the loop. A check of two lengths in an open region has
+proved them equal: a later operation on them, or on the length of the build,
+reads it again (`(D + E)·(D − E)` makes one; a check of another kind,
+`rows.square`, is not read for `rows.agree`). A check of a length that an open
+check proved equal to another proves those equal too, and its value 0 reads the
+value 0 of that check, so that a reader that relies on both equalities keeps
+both checks (`(D + E)·(E − F)` makes two, and the build reads the second only).
+`knownLength()` gives the
+constant a length was proved equal to, so `List(1, 2, 3)·D + List(4, 5)` still
+declines. An operand that is an element-wise operation of its own length, or
+such a build, is read at the index as the operation on its elements
+(`elementAt()`), so the build computes each element once, as one element-wise
+operation does with the operations of its shape (`fuses()` of `print.ts`). In
+the interval mode the result is unspecified: a list as long as `D`, NaN where
+`E` has no element. Lists of rank 2 or more read their
 outer length the same way, and their inner lengths must be the same (`P + Q` of
 two inputs of type `list<tuple<real, real>>`, CE-1537); when the outer lengths
 differ, the JavaScript code gives a list as long as the first list, or throws a
@@ -2102,10 +2121,10 @@ list and a scalar (`L[K = 1]`; of two lists the interpreter compares the lists,
 one boolean, `equality()` below; a chain of three operands with a list
 declines), and `Not`, `And` and `Or` of lists, with a scalar broadcast
 (`And(False, M)` is a list of false); an `And` or an `Or` of a list lowers every
-operand, and one with an effect declines. One exception to "only true and
-false": an `And` or an `Or` of lists whose run-time lengths differ (an
-`incompatible-dimensions` error of the interpreter, so unspecified) has the
-first operand's length, with `undefined` past the shorter list. `Not` of a tuple
+operand, and one with an effect declines. Lists of two run-time lengths are
+compared at run time ("Lists"): a `RangeError` where they differ, the
+interpreter's `incompatible-dimensions`. In the interval mode such an `And` or
+`Or` has the first operand's length. `Not` of a tuple
 of booleans (`Not(Tuple(p, q))`) is the tuple of the negations, as the
 interpreter's. A mask or a base of a mask with an effect declines: the
 interpreter reads a lazy base at the kept positions only
@@ -2202,7 +2221,18 @@ another declines). Stated lengths that differ decline (the canonical form
 already gives `incompatible-dimensions` for most); lists of two run-time lengths
 are an error of the interpreter (`incompatible-dimensions` for `Which` and for
 `If` with an `else`), so the value is unspecified: a list as long as the first
-condition, never an arm whole (CE-1238). On GLSL a stated length writes the
+condition, never an arm whole (CE-1238). A condition or an arm that is an
+element-wise operation of two lists of run-time lengths compares them
+("Lists") once, before the selection, and its build is accepted
+(`If(L > 0, L·M, 0)`). Such an arm of another length than the mask (except in
+a restriction, which zips them) is compared with the mask by the same `agree()`,
+and the length of the selection reads that check: `If(N > 0, L·M, 0)` makes two
+checks, and `If(L > 0, L + List(1, 2, 3), 0)` reads the one of the arm; a mask
+and an arm of two stated lengths decline. A check throws also where no position
+selects the arm, where the interpreter has a value (a known limitation). An
+arm that compares no length (`If(N > 0, L, 0)`) is not compared with the mask.
+A condition after the first that compares lengths is accepted only when its
+length, without the check, is the mask's. On GLSL a stated length writes the
 selection out (`vec3` of three conditionals); a run-time length declines. The
 interval mode declines it.
 
@@ -2330,7 +2360,17 @@ interpreter's value for every length, also 0:
 - `Dot(u, v)` of two lists of real numbers or points of one length is the sum
   from 0 of the products of their elements (of two stated lengths that differ it
   declines); of a list of points and a point, or of two lists of points pair by
-  pair, the list of those sums, as the interpreter broadcasts. `Norm(x)` of a
+  pair, the list of those sums, as the interpreter broadcasts. Two lengths that
+  are not one value are compared by `agree()` ("Matrices") on JavaScript: the
+  sum starts from the value 0 of the check, and a stated length beside a
+  run-time one keeps the sum written out (`Dot(L, List(1, 2, 3))`). Out of a
+  loop that can run no pass (the body of a `Map` over a list, a `Sum` to `n`),
+  `invariants` moves the check under the guard that the loop runs a pass, its
+  value 0 elsewhere, and the sum that reads it after it, so that
+  `Map(x ↦ x·Dot(L, M), L)` and `Sum(i·Dot(L, M), i, 1, n)` compute the sum
+  once; a loop of no pass gives the interpreter's value, whatever the lengths.
+  A check in an arm of a conditional or of a short circuit stays there.
+  `Norm(x)` of a
   real or a complex scalar is `Abs(x)`; of a point or a list of points, `Abs`
   (the Euclidean norm); of a list of real numbers, of the order 2 (by default)
   the square root of the sum of the squares (the interpreter's sum of squares;
@@ -2617,13 +2657,16 @@ its `Min(rows, columns)` diagonal elements; `Determinant`, `Inverse` and
 Two lengths that must be equal (the inner lengths of
 `MatrixMultiply`, the numbers of rows and of columns of `Trace`) and that
 `same()` does not prove equal (one value, or equal constants) are compared
-once at run time on JavaScript, in one place, `agree()` of
-`lower-matrices.ts` (user decision 2026-11-25): the operation `rows.agree` or
-`rows.square` (`may-fail`; `_agree`, `_square` of the JavaScript printer),
-made once before the builds, gives 0, the initial value of each sum of the
-operator, so `dce` keeps it and no count or length changes (a sum of a
-constant length stays written out), and it throws a `RangeError` (`incompatible-dimensions: …`,
-`expected-square-matrix: …`) where they differ, the interpreter's error.
+once at run time on JavaScript, in one place, `agree()` of `lower-lists.ts`
+(user decision 2026-11-25), which the element-wise operations of two lists,
+`Dot` and a user function mapped over lists read too ("Lists"): the operation
+`rows.agree` or `rows.square` (`may-fail`; `_agree`, `_square` of the
+JavaScript printer), made once before the builds, gives 0, the initial value
+of each sum of the operator, so `dce` keeps it and no count or length changes
+(a sum of a constant length stays written out), and it throws a `RangeError`
+(`incompatible-dimensions: lists of lengths …`, `expected-square-matrix: …`)
+where they differ, the interpreter's error. A check of the same two lengths
+in an open region is read again, not made twice.
 A reader that reads no element of the result (`Length` of the product) reads
 no sum, so `dce` removes the check there: a known limitation of
 `docs/COMPILATION-MODEL.md`.
@@ -2877,6 +2920,12 @@ lists, the length of `PointList(A, B)`) moves too, and so does a loop over them,
 except in the interval mode with an `iterationBudget` below 2^32, whose limit
 refuses a loop over a list longer than the budget (the option `listLoops`); a
 `filter` does not (it throws for an undecided condition in the interval mode).
+Out of a `loop` of a run-time count that is not a `Loop`, or a `build`, at the
+place where a `may-fail` instruction would move, a check of two lengths
+(`rows.agree`, `rows.square`: "Lists") moves under the guard that the loop runs
+a pass (`lo <= hi`, `1 <= n`), and its value is 0 where it does not; a length
+plus that value is the length of a list that exists, so the sum or the build
+that reads it moves too (`Sum(i·Dot(L, M), i, 1, n)`).
 Such a build or loop runs once where the program ran it no time, no longer than
 the list took to make; on JavaScript its passes then tick the deadline. So in
 `Sum(Max(Max(L), k), Limits(k, 1, n))` the loop of `Max(L)` runs once, also at
@@ -3429,9 +3478,12 @@ element, in order: `h(x, List(2, 4, 8, 16))`, `Sum(f(L))`. The function is
 defined with its scalar parameters, so a call with a list and a call with a
 scalar, in either order, and calls with lists of two lengths call one function.
 The lists must be flat and have one length: equal stated lengths, or one
-run-time length value (`h(D, D)`); lists of two lengths (the interpreter gives
-`incompatible-dimensions`) or of lengths that are not proved equal (`h(D, G)`)
-decline, as do a nested list (the interpreter maps to the leaves), a list of
+run-time length value (`h(D, D)`); lists of two stated lengths (the interpreter
+gives `incompatible-dimensions`) decline. On JavaScript, outside the bigint and
+interval modes, lengths that are not proved equal (`h(D, G)`, `h(V, D)` of
+`V: list<real^3>`) are compared once before the build (`agreedLength()`,
+"Lists"), a `RangeError` where they differ; elsewhere they decline. So do a
+nested list (the interpreter maps to the leaves), a list of
 points at a scalar parameter, a function whose result is not a scalar or a point
 (a list of lists), and a list argument of a recursive call. A list of points at
 a parameter declared as a point (a tuple type, not one that only the index reads

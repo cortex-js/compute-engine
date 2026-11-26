@@ -196,7 +196,7 @@
   code compares them once at run time and throws a `RangeError` where they
   differ, as the interpreter gives an error there: with `A: matrix<real>`
   at `A = [[1, 0], [0, 1]]`, `MatrixMultiply(M, A)` throws
-  `RangeError: incompatible-dimensions: MatrixMultiply of operands whose inner lengths differ (3 and 2)`,
+  `RangeError: incompatible-dimensions: lists of lengths 3 and 2`,
   and `Trace(M)` throws `RangeError: expected-square-matrix: …`. The
   comparison runs when an element of the result is read. This also
   holds for a list of rows of a run-time count, and for a stated length
@@ -219,6 +219,26 @@
   matrix type, `RowReduce` of a matrix of run-time size, matrices of complex numbers or
   of booleans, a matrix of one stated dimension (`matrix<real^2x?>`), GLSL,
   the interval target and the `bigint` mode decline.
+
+- **Compiled JavaScript compares the lengths of two lists of run-time
+  length.** With `L, M: list<real>`, a user function of scalar parameters
+  called with both lists, `h(L, M)`, declined with "list arguments of h
+  whose lengths are not one value", so the program fell back to the
+  interpreter; and at `L = [1, 2]`, `M = [1, 2, 3]`, where the interpreter
+  gives the error `incompatible-dimensions`, `L + M` gave `[2, 4]`,
+  `Sum((L − M)^2)` gave `0`, `Mean(L·M)` gave `2.5` and `Dot(L, M)` gave
+  `5`. The compiled code now compares the two lengths once, before the loop
+  of the operation, and throws
+  `RangeError: incompatible-dimensions: lists of lengths 2 and 3` where
+  they differ: an element-wise operation of two lists (`L + M`, `L < M`,
+  `L + [1, 2, 3]`, `And` of two lists of booleans, `Rgb(L, M, 0.5)`),
+  `Dot(L, M)` and `h(L, M)`, which now compiles. At equal lengths the
+  values are the interpreter's: at `M = [3, 4]`, `L + M` gives `[4, 6]`.
+  Later operations on the same lists read the first comparison:
+  `(L + M)·(L − M)` compares once. Lengths that the compiler proves equal
+  (`L + L`, `Dot(L, L)`, `h(L, L)`) compare nothing, and their code is
+  unchanged. Lists of points, GLSL, the interval target and the `bigint`
+  mode compare no length.
 
 ### Resolved Issues
 

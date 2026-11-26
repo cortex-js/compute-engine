@@ -329,8 +329,8 @@ export const JS: Syntax = deepFreeze({
     // The same value read row by row, at indices in range.
     'rows.count': '$0.length',
     'rows.len': '$0[$1].length',
-    // The length of the rows of a matrix, and the checks of two lengths of
-    // the matrix operators.
+    // The length of the rows of a matrix, and the checks of two lengths
+    // (`agree()` of `lower-lists.ts`).
     'rows.width': '($0.length === 0 ? 0 : $0[0].length)',
     'rows.agree': { text: '_agree($0, $1)', helpers: ['_agree'] },
     'rows.square': { text: '_square($0, $1)', helpers: ['_square'] },
@@ -478,11 +478,13 @@ export const JS: Syntax = deepFreeze({
     _rowr:
       'const _rowr = (g, i) => { const k = i > 0 ? i - 1 : g.length + i; return Number.isInteger(i) && i !== 0 && k >= 0 && k < g.length ? k : -1; };',
     _lenr: 'const _lenr = (g, k, absent) => (k < 0 ? absent : g[k].length);',
-    // The inner lengths of `MatrixMultiply`, and the two lengths of the
-    // matrix of `Trace`: the interpreter's value where they differ is the
-    // error `incompatible-dimensions` or `expected-square-matrix`.
+    // Two lengths that an operation reads at each index (an element-wise
+    // operation, a call mapped over lists, `Dot`, the inner lengths of
+    // `MatrixMultiply`), and the two lengths of the matrix of `Trace`: the
+    // interpreter's value where they differ is the error
+    // `incompatible-dimensions` or `expected-square-matrix`.
     _agree:
-      "const _agree = (a, b) => { if (a !== b) throw new RangeError(`incompatible-dimensions: MatrixMultiply of operands whose inner lengths differ (${a} and ${b})`); return 0; };",
+      "const _agree = (a, b) => { if (a !== b) throw new RangeError(`incompatible-dimensions: lists of lengths ${a} and ${b}`); return 0; };",
     _square:
       "const _square = (a, b) => { if (a !== b) throw new RangeError(`expected-square-matrix: Trace of a matrix of ${a} rows and ${b} columns`); return 0; };",
     // The order of the matrix of `Determinant`, `Inverse` and

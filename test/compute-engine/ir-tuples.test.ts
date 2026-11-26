@@ -929,7 +929,7 @@ describe('the causes of the third corpus run', () => {
     check(['Range', 'x', 5], [{ x: 0.5 }, { x: -1.25 }], opts);
     check(['Range', 1, 5, 'x'], [{ x: 1.5 }, { x: -1 }], opts);
   });
-  test('lists of two run-time lengths: the length of the first', () => {
+  test('lists of two run-time lengths: compared at run time', () => {
     // The witness (showcase/three-body-problem).
     const json = [
       'Add',
@@ -941,9 +941,10 @@ describe('the causes of the third corpus run', () => {
     const p = { A: [1, -2, 0.5], U: [3, 4, 2], Xs: [5, 6, -1], h: 0.25 };
     const r = check(json, [p, { ...p, h: -3 }], opts);
     // Two lengths: the interpreter's value is an error (the static type
-    // `list<real>` does not show it), so the value is unspecified.
+    // `list<real>` does not show it), and the compiled code throws a
+    // `RangeError` (`agree()` of `lower-lists.ts`).
     expect(() => interpret(json, { ...p, Xs: [5, 6] })).toThrow(/no value/);
-    expect(r.run!({ ...p, Xs: [5, 6] } as never)).toHaveLength(3);
+    expect(() => r.run!({ ...p, Xs: [5, 6] } as never)).toThrow(RangeError);
     // Two stated lengths that differ still decline.
     expect(declined(['Add', ['List', 1, 'x'], ['List', 1, 2, 3]])).toMatch(
       /different lengths|static type error/
