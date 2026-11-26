@@ -777,7 +777,13 @@ function canonicalizationDiagnostics(
       (declaration) => !topLevel.has(declaration)
     );
     if (localConstants.length > 0) {
-      constantWrites = constantWritesOf(ce, ast, source, rawStatements, program);
+      constantWrites = constantWritesOf(
+        ce,
+        ast,
+        source,
+        rawStatements,
+        program
+      );
       for (const declaration of localConstants) {
         const range = statementRange(declaration, source);
         for (const group of declaredGroups(constantWrites.byName, declaration))
@@ -976,7 +982,13 @@ function canonicalizationDiagnostics(
         // constant too.
         if (isConstantDeclaration(statement)) {
           const range = statementRange(statement, source);
-          constantWrites ??= constantWritesOf(ce, ast, source, rawStatements, program);
+          constantWrites ??= constantWritesOf(
+            ce,
+            ast,
+            source,
+            rawStatements,
+            program
+          );
           // All statements are prepared already. Report their source sites
           // now, including bodies hoisted ahead of this declaration.
           for (const group of declaredGroups(constantWrites.byName, statement))

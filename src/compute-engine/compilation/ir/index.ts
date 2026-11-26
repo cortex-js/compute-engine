@@ -151,7 +151,15 @@ export const TARGETS: Readonly<Record<Target, Profile>> = deepFreeze({
     syntax: JS,
   },
   glsl: {
-    lanes: ['real', 'integer', 'boolean', 'complex', 'color', 'array', 'record'],
+    lanes: [
+      'real',
+      'integer',
+      'boolean',
+      'complex',
+      'color',
+      'array',
+      'record',
+    ],
     rank: 1,
     runtimeLengths: false,
     draws: false,

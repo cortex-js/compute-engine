@@ -575,7 +575,9 @@ export function makeArray(
   if ('fill' in source) {
     const count = source.count;
     if (!Number.isInteger(count) || count < 0)
-      throw new RangeError(`The count of an array must be a non-negative integer, not ${count}`);
+      throw new RangeError(
+        `The count of an array must be a non-negative integer, not ${count}`
+      );
     const value = source.fill.evaluate();
     const cell = convertCell(ce, spec, value);
     if (cell.error !== undefined) return cell.error;
@@ -660,7 +662,11 @@ function cellOffset(index: number, count: number): number {
 
 /** The error of a store at an index out of range, worded as the element
  * write of a list words it (`library/control-structures.ts`). */
-function outOfRange(ce: ComputeEngine, index: number, count: number): Expression {
+function outOfRange(
+  ce: ComputeEngine,
+  index: number,
+  count: number
+): Expression {
   return ce.error([
     'out-of-range',
     count === 0

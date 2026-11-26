@@ -1735,7 +1735,9 @@ function typesOverlapUncached(a: Type, b: Type): boolean {
     a.kind === 'array' &&
     b.kind === 'array'
   )
-    return isSubtype(a.elements, b.elements) && isSubtype(b.elements, a.elements);
+    return (
+      isSubtype(a.elements, b.elements) && isSubtype(b.elements, a.elements)
+    );
   const args = sameHeadArguments(a, b);
   if (args !== null)
     return args[0].every((t, i) => typesOverlap(t, args[1][i]));

@@ -358,7 +358,10 @@ export function arrayLowering(
     const i = cx.value(x)!;
     const t = type(i);
     if (t.shape.length > 0 || !isSubLane(t.lane, 'real'))
-      decline(x, `an index of an array that is not a number (${typeToString(t)})`);
+      decline(
+        x,
+        `an index of an array that is not a number (${typeToString(t)})`
+      );
     return i;
   };
 
@@ -597,7 +600,10 @@ export function arrayLowering(
           : gather(e, a, s);
       }
       if (t.shape.length > 0 || !isSubLane(t.lane, 'real'))
-        decline(x, `an index of an array that is not a number (${typeToString(t)})`);
+        decline(
+          x,
+          `an index of an array that is not a number (${typeToString(t)})`
+        );
       return cell(e, a, i);
     },
 
@@ -661,7 +667,10 @@ export function arrayLowering(
      *  names (`IRType.nominal`): the record keeps that name where the
      *  engine type of the expression is lost, such as a parameter of no
      *  type of a user function that is given the read of a cell. */
-    tupleCellNominal: (ce: ComputeEngine, name: string | undefined): boolean => {
+    tupleCellNominal: (
+      ce: ComputeEngine,
+      name: string | undefined
+    ): boolean => {
       const ref = name === undefined ? undefined : ce._typeRegistry[name];
       return ref !== undefined && arrayStorageKind(ref).tuple;
     },
@@ -733,7 +742,10 @@ export function arrayLowering(
       readOnly(e, 'ArrayFrom (a construction)');
       const cells = cellsOf(e, e.type.type);
       if (cells === undefined)
-        decline(e, `ArrayFrom whose type ${engineTypeToString(e.type.type)} is not an array type`);
+        decline(
+          e,
+          `ArrayFrom whose type ${engineTypeToString(e.type.type)} is not an array type`
+        );
       if (e.nops === 2 && !isString(e.ops[1]))
         decline(e, 'ArrayFrom whose cell type is not a string literal');
       site(e);
@@ -748,10 +760,7 @@ export function arrayLowering(
           cells.tuple !== undefined &&
           vt.lane === 'record' &&
           vt.nominal === cells.tuple.tag;
-        if (
-          !record &&
-          (vt.shape.length > 0 || !isSubLane(vt.lane, 'real'))
-        )
+        if (!record && (vt.shape.length > 0 || !isSubLane(vt.lane, 'real')))
           decline(
             e,
             `ArrayFrom of a Repeat of a value of type ${typeToString(vt)} for an array<${cells.cell}>`

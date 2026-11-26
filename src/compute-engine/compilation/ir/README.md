@@ -19,23 +19,23 @@ list literal.
 
 ## Layers
 
-| File                           | Does                                                                                         | Does not                                 |
-| ------------------------------ | -------------------------------------------------------------------------------------------- | ---------------------------------------- |
-| `operators.ts`                 | One row per operator (arity, signatures, effect, fold); region rows                          | Name a target                            |
-| `lower.ts`                     | The one walk: the head's binding, the constructs, scopes and arms                            | Optimize; spell                          |
-| `lower-lists.ts`               | List sources (an input, a `Range`, a build), reductions, `Max` and `Min`, the list operators |                                          |
-| `lower-functions.ts`           | User functions by definition, signatures, the fixed point of their effects                   |                                          |
-| `lower-matrices.ts`            | The matrix operators ("Matrices"): builds of the elements, or a kernel of the runtime        |                                          |
-| `lower-arrays.ts`             | The mutable arrays ("Arrays"): the cells, the store, `Swap`, `ArrayFrom`, the names that hold one |                                          |
-| `lower-context.ts`             | The types the three lowering files share; `Decline`                                          |                                          |
-| `ir.ts`                        | Types, instructions, functions, the builder, the def-use index                               | Know a target                            |
-| `effects.ts`                   | The effect of an instruction and of a function; the eligibility queries; trace               |                                          |
-| `verify.ts`                    | Definitions, dominance (of values and lengths), types from the tables, calls                 | Re-derive a type rule                    |
-| `passes.ts`                    | `scalarize`, `fold`, `strength`, `hoist`, `inline`, `cse`, `invariants`, `dce`               | Change the effect trace                  |
-| `outline.ts`                   | The pool loops of `runAsync()`: their accumulators, worker programs, the functions that wait | Change the program                       |
-| `print.ts`                     | The shared statement printer and the inline policy                                           | Decide anything that depends on a target |
-| `print-js.ts`, `print-glsl.ts` | A `Syntax`: spellings, types, statement forms; the stored code, `run()`                      | Analyse the program                      |
-| `index.ts`                     | The target profiles and their one check (`admits()`); the frame warnings                     |                                          |
+| File                           | Does                                                                                              | Does not                                 |
+| ------------------------------ | ------------------------------------------------------------------------------------------------- | ---------------------------------------- |
+| `operators.ts`                 | One row per operator (arity, signatures, effect, fold); region rows                               | Name a target                            |
+| `lower.ts`                     | The one walk: the head's binding, the constructs, scopes and arms                                 | Optimize; spell                          |
+| `lower-lists.ts`               | List sources (an input, a `Range`, a build), reductions, `Max` and `Min`, the list operators      |                                          |
+| `lower-functions.ts`           | User functions by definition, signatures, the fixed point of their effects                        |                                          |
+| `lower-matrices.ts`            | The matrix operators ("Matrices"): builds of the elements, or a kernel of the runtime             |                                          |
+| `lower-arrays.ts`              | The mutable arrays ("Arrays"): the cells, the store, `Swap`, `ArrayFrom`, the names that hold one |                                          |
+| `lower-context.ts`             | The types the three lowering files share; `Decline`                                               |                                          |
+| `ir.ts`                        | Types, instructions, functions, the builder, the def-use index                                    | Know a target                            |
+| `effects.ts`                   | The effect of an instruction and of a function; the eligibility queries; trace                    |                                          |
+| `verify.ts`                    | Definitions, dominance (of values and lengths), types from the tables, calls                      | Re-derive a type rule                    |
+| `passes.ts`                    | `scalarize`, `fold`, `strength`, `hoist`, `inline`, `cse`, `invariants`, `dce`                    | Change the effect trace                  |
+| `outline.ts`                   | The pool loops of `runAsync()`: their accumulators, worker programs, the functions that wait      | Change the program                       |
+| `print.ts`                     | The shared statement printer and the inline policy                                                | Decide anything that depends on a target |
+| `print-js.ts`, `print-glsl.ts` | A `Syntax`: spellings, types, statement forms; the stored code, `run()`                           | Analyse the program                      |
+| `index.ts`                     | The target profiles and their one check (`admits()`); the frame warnings                          |                                          |
 
 Every table (`OPERATORS`, `REGION_ROWS`, `REDUCTIONS`, `JS`, `GLSL`, `TARGETS`)
 is frozen, and every cache lives in one `lower()` call: the emitted text is a
@@ -220,13 +220,12 @@ is a real. An integer value of 2^53 or more is a double and its low digits are
 unspecified (`Mod(2^60 + n, 3)`; rule 3 of
 `docs/plans/2026-11-12-js-route-course-correction.md`): the compiler makes no
 analysis of integer ranges. A closed node keeps the interpreter's value
-(`Mod(2^60 + 1, 3)` is 2). At run time `Mod` and `Remainder` have no guard for an
-integer of 2^53 or more (one or two machine operations: a check would be
-most of their cost; `IsPrime`, `Totient` and the factor readers, which
-loop, throw a `RangeError` there): `Mod(n!, 7)` at n = 25 is 0, and the compiled code
-gives 6, the remainder of the double. The remedy for the host is the `bigint`
-mode. On GLSL `mod()` of a value beyond 2^24 is the remainder of the float,
-unspecified.
+(`Mod(2^60 + 1, 3)` is 2). At run time `Mod` and `Remainder` have no guard for
+an integer of 2^53 or more (one or two machine operations: a check would be most
+of their cost; `IsPrime`, `Totient` and the factor readers, which loop, throw a
+`RangeError` there): `Mod(n!, 7)` at n = 25 is 0, and the compiled code gives 6,
+the remainder of the double. The remedy for the host is the `bigint` mode. On
+GLSL `mod()` of a value beyond 2^24 is the remainder of the float, unspecified.
 
 A product with a rational constant `p/q` whose denominator is not a power of two
 (the canonical form of `x/49`, `29k/50`) is `(p · factors) / q`: a
@@ -404,19 +403,18 @@ inputs: a parameter of no declared type is a real, and one declared `any` or
 `value` declines, as an argument of type `any` does. A positional parameter of a
 root function literal of no declared type whose uses give it a type that admits
 a list (`A ↦ Transpose(A)`: `value`) declines with `untyped-input` and its name
-(CE-1837). A name that only a branch
-dropped at compile time reads is an input too (`If(2 < 3, 0, z)` with `z`
-undeclared is refused). A scalar of type `number` is a real in the `strict` mode
-and a complex in the `complex` mode; a scalar `complex` input is on the complex
-lane, and a number given for a complex input is lifted to `{re, im: 0}`, also
-with `entryChecks: false`. A list of complex elements declines: an entry of such
-a list can be a number or a `{re, im}` object (the ABI of
-`docs/COMPILATION-MODEL.md`), and only a run-time test tells them apart. An
-outer list of no stated length (`list<real>`, `vector`, `list<list<real^2>>`)
-has a run-time length (JavaScript only), also as a parameter of a root function
-literal: the length is a positional parameter before the list, read from the
-argument. A list element of type `unknown` or `any` declines with the input's
-name.
+(CE-1837). A name that only a branch dropped at compile time reads is an input
+too (`If(2 < 3, 0, z)` with `z` undeclared is refused). A scalar of type
+`number` is a real in the `strict` mode and a complex in the `complex` mode; a
+scalar `complex` input is on the complex lane, and a number given for a complex
+input is lifted to `{re, im: 0}`, also with `entryChecks: false`. A list of
+complex elements declines: an entry of such a list can be a number or a
+`{re, im}` object (the ABI of `docs/COMPILATION-MODEL.md`), and only a run-time
+test tells them apart. An outer list of no stated length (`list<real>`,
+`vector`, `list<list<real^2>>`) has a run-time length (JavaScript only), also as
+a parameter of a root function literal: the length is a positional parameter
+before the list, read from the argument. A list element of type `unknown` or
+`any` declines with the input's name.
 
 A `Declare` in a `Block` has a value, positional or in its attributes
 (`Declare(t, {value: 0})`; a declaration with no value is an error of the
@@ -632,45 +630,44 @@ list operand gives the list of the colours of its elements, a scalar operand is
 read at every element, and lists are zipped (`Hsv(210, Range(1, 10)/40, 1)`,
 `Rgb(D, D, 0.5)`, `AsOklab(Hsv(0, 0, D))`, also of a nested list), by the
 element-wise operation of the lists of numbers ("Lists"): lists of two stated
-lengths decline (the interpreter gives `incompatible-dimensions`); of
-run-time lengths, the JavaScript code compares them (`Rgb(D, E, 0.5)` with 3
-and 1 elements throws a `RangeError`, "Lists"), and the interval mode gives a
-list as long as the first one whose colours past the end of a shorter list
-have NaN channels. A conversion reads a tuple of three
-numbers, a literal or an input of type `tuple<real, real, real>`, as the sRGB
-colour of its channels, as the interpreter does (`AsOklab((1, 0, 0))` is
-`AsOklab(Rgb(1, 0, 0))`). Every other tuple operand declines: a tuple of four
-(its alpha) or of two numbers, a tuple of colours (`AsOklab(Tuple(Cv, Cr))`, an
-error of the interpreter), a list of tuples, and a tuple operand of a
-constructor (`Hsv(Tuple(1, 2), 0, 0.5)`). On JavaScript a list of colours is an
-array of the objects, also as the result of the program (`List(Cv, Cr)` of two
-colour names), and `Length` reads it; an `At` of it that the passes do not make
-an element (an index that is not a constant in range of a stated length after
-`fold`) declines in `admits()` (the interpreter gives `Missing` out of range),
-and a `Sum` of it declines (an `incompatible-type` error of the interpreter). On
-GLSL a list of colours declines (`admits()`); `At` of a constant index of an
-operation of a stated length is the colour of that element
-(`At(Hsv(0, 0, L), 2)` of `L: list<real^3>`), since the `scalarize` and `fold`
-passes leave no list. On JavaScript a colour operation whose operands are
-constants, or such colours or lists of constants, reads no input and has no
-effect: it is computed once, when the code is loaded, in `preambleOnce`
-(`onceLists()` of `print-js.ts`), by the same member of `_SYS`, and every call
-shares the object (`AsOklab(C)` of a name `C = Hsv(270, 0.4, 0.95)`, a constant
-arm of a `Which`); one that reads an input, a local, an index or a draw is
-computed at each call. GLSL writes the operation of constants in the shader
-text; the interval mode has no colour. A conditional between colours joins on
-the lane (`If`, `Which` with a `True` clause; with none, its value can be
-`Missing` and it declines), and a `Block` local, also one that a `Loop` assigns,
-holds a colour (a local declared with the type `color` declines; one of no
-stated type, or `unknown`, holds it). A name whose value is a constructor of
-three numbers is that colour (see the values of free names above). A user
-function may return a colour, declared (`(real) -> color`, also through
-`Typed(…, 'color')` in the body) or inferred from the body: an object on
-JavaScript, a `vec3` on GLSL. Declined: a list of colours on GLSL, a colour
-input, a colour string, a tuple of components other than three real numbers
-(`AsRgb((r, g, b, a))`), a list of tuples, a parameter of a user function that
-is a colour, arithmetic on a colour (an `error` of the canonical form),
-`ColorFromColorspace`, and `mode: 'bigint'`.
+lengths decline (the interpreter gives `incompatible-dimensions`); of run-time
+lengths, the JavaScript code compares them (`Rgb(D, E, 0.5)` with 3 and 1
+elements throws a `RangeError`, "Lists"), and the interval mode gives a list as
+long as the first one whose colours past the end of a shorter list have NaN
+channels. A conversion reads a tuple of three numbers, a literal or an input of
+type `tuple<real, real, real>`, as the sRGB colour of its channels, as the
+interpreter does (`AsOklab((1, 0, 0))` is `AsOklab(Rgb(1, 0, 0))`). Every other
+tuple operand declines: a tuple of four (its alpha) or of two numbers, a tuple
+of colours (`AsOklab(Tuple(Cv, Cr))`, an error of the interpreter), a list of
+tuples, and a tuple operand of a constructor (`Hsv(Tuple(1, 2), 0, 0.5)`). On
+JavaScript a list of colours is an array of the objects, also as the result of
+the program (`List(Cv, Cr)` of two colour names), and `Length` reads it; an `At`
+of it that the passes do not make an element (an index that is not a constant in
+range of a stated length after `fold`) declines in `admits()` (the interpreter
+gives `Missing` out of range), and a `Sum` of it declines (an
+`incompatible-type` error of the interpreter). On GLSL a list of colours
+declines (`admits()`); `At` of a constant index of an operation of a stated
+length is the colour of that element (`At(Hsv(0, 0, L), 2)` of
+`L: list<real^3>`), since the `scalarize` and `fold` passes leave no list. On
+JavaScript a colour operation whose operands are constants, or such colours or
+lists of constants, reads no input and has no effect: it is computed once, when
+the code is loaded, in `preambleOnce` (`onceLists()` of `print-js.ts`), by the
+same member of `_SYS`, and every call shares the object (`AsOklab(C)` of a name
+`C = Hsv(270, 0.4, 0.95)`, a constant arm of a `Which`); one that reads an
+input, a local, an index or a draw is computed at each call. GLSL writes the
+operation of constants in the shader text; the interval mode has no colour. A
+conditional between colours joins on the lane (`If`, `Which` with a `True`
+clause; with none, its value can be `Missing` and it declines), and a `Block`
+local, also one that a `Loop` assigns, holds a colour (a local declared with the
+type `color` declines; one of no stated type, or `unknown`, holds it). A name
+whose value is a constructor of three numbers is that colour (see the values of
+free names above). A user function may return a colour, declared
+(`(real) -> color`, also through `Typed(…, 'color')` in the body) or inferred
+from the body: an object on JavaScript, a `vec3` on GLSL. Declined: a list of
+colours on GLSL, a colour input, a colour string, a tuple of components other
+than three real numbers (`AsRgb((r, g, b, a))`), a list of tuples, a parameter
+of a user function that is a colour, arithmetic on a colour (an `error` of the
+canonical form), `ColorFromColorspace`, and `mode: 'bigint'`.
 
 The other colour operators call the interpreter's kernels on JavaScript
 (`_SYS.colorMix`, …: `lerpOklchColor`, `gamutMapOklch`, `colormapColor` of
@@ -945,71 +942,67 @@ of the name declines (`symbol()` of `lower.ts`, which admits only the occurrence
 that `wholeRows()` lowers): arithmetic, an argument of a parameter of another
 type, and a list that the program makes at such a parameter (`sq(sq(g))`). A
 value whose rows have one length is read as a matrix there instead (below,
-`asMatrix()`). A list of lists of booleans,
-the bigint and the interval modes and GLSL decline the input. The entry checks
-it as a list (a string or a typed array is refused), and a batch shares it
-between its cells.
+`asMatrix()`). A list of lists of booleans, the bigint and the interval modes
+and GLSL decline the input. The entry checks it as a list (a string or a typed
+array is refused), and a batch shares it between its cells.
 
 A value of a matrix type of no stated dimensions (`matrix`, `matrix<real>`,
 `matrix<integer>`; `isFreeMatrix()` of `lower-functions.ts`) is such an input
 too at a typed parameter of `Apply`, a parameter of a user function, an input
 that a user function reads and a variable of the engine that a root literal
-assigns, with one more fact: its rows have one length, the length of its first row,
-the operation `rows.width` (`$0.length === 0 ? 0 : $0[0].length`), which the
-compiled code does not test (R5: a value with rows of different lengths is
-outside the type, and the engine refuses one as its value). It is made where
-the parameter is made: in the entry body (`b.entryOp()`, which records a pure
+assigns, with one more fact: its rows have one length, the length of its first
+row, the operation `rows.width` (`$0.length === 0 ? 0 : $0[0].length`), which
+the compiled code does not test (R5: a value with rows of different lengths is
+outside the type, and the engine refuses one as its value). It is made where the
+parameter is made: in the entry body (`b.entryOp()`, which records a pure
 operation so that a later `b.op()` of the same operand is that value, as
-`before()` makes it again) or at the start of the body of a user function,
-and is the value's `rowWidths`; its `rowCounts` is `rows.count`. So every
-reader of the lane reads it, a row read by `chunks()` has that length (a `Map`
-of each element keeps the fact), and the matrix operators read it
-("Matrices"). An input of the entry (a name read at the entry, a positional
-parameter of a root function literal: `input()` of `lower.ts`) is not a
-parameter of the lane: it is a list of rank 2 of reals or integers of the
-shape `[{v: r}, {v: c}]`, with two length parameters before it, its number of
-rows and the length of its first row ("Matrices", a matrix of run-time size).
-The readers of the lane read it as its rows, the operation `rows.of` (`$0`:
-the same array of arrays), whose `rowCounts` and `rowWidths` are `r` and `c`;
-that value is the binding of the name. Its two lengths are parameters, where
-the count of the other values of the lane is an operation made where it is
-read (`rows.count`), so two forms compile for it that decline for them: an
-`If` with no else whose list arm reads it (`If(n > 0, Map(r ↦ Sum(r), M))`,
-a list of NaN where the condition is false, as for an input of type
-`list<real>`), and a `Sum` whose term is a list made from it
-(`Sum(k · Map(r ↦ Sum(r), M), k, 1, 200)`).
+`before()` makes it again) or at the start of the body of a user function, and
+is the value's `rowWidths`; its `rowCounts` is `rows.count`. So every reader of
+the lane reads it, a row read by `chunks()` has that length (a `Map` of each
+element keeps the fact), and the matrix operators read it ("Matrices"). An input
+of the entry (a name read at the entry, a positional parameter of a root
+function literal: `input()` of `lower.ts`) is not a parameter of the lane: it is
+a list of rank 2 of reals or integers of the shape `[{v: r}, {v: c}]`, with two
+length parameters before it, its number of rows and the length of its first row
+("Matrices", a matrix of run-time size). The readers of the lane read it as its
+rows, the operation `rows.of` (`$0`: the same array of arrays), whose
+`rowCounts` and `rowWidths` are `r` and `c`; that value is the binding of the
+name. Its two lengths are parameters, where the count of the other values of the
+lane is an operation made where it is read (`rows.count`), so two forms compile
+for it that decline for them: an `If` with no else whose list arm reads it
+(`If(n > 0, Map(r ↦ Sum(r), M))`, a list of NaN where the condition is false, as
+for an input of type `list<real>`), and a `Sum` whose term is a list made from
+it (`Sum(k · Map(r ↦ Sum(r), M), k, 1, 200)`).
 
-A read of a value of the lane whose rows have one length (`rowWidths`) and
-whose elements are reals or integers (`rowsElements`) that no reader of the
-lane admits is a read of a matrix: `symbol()` and `wholeOnly()` of `lower.ts`
-give `asMatrix()` of it, a list of rank 2 of the shape `[{v: r}, {v: c}]` of
-its number of rows and the length of its rows. For an input of the entry it
-is the parameter that `rows.of` reads (`matrixOf`); for another value (a
-parameter of a matrix type, a `Transpose`, a product, an `Inverse`, a table
-that the program builds, a `Map` or a `Filter` of rows of one length) it is
-the region `rows.matrix` (`rows.matrix.int` of integers), whose body is empty:
-the same array of arrays (`const v = g;`), the reverse of `rows.of`. So the
-operations that thread over a list thread over it ("Matrices", the operations
-on the elements), and `Add(Transpose(M), B)` compiles. A value of the lane
-with no such fact (an input of type `list<list<real>>`, the result of a call,
-a join, a value that a loop carries) still declines. An argument at a parameter of a
-matrix type, of a user function
-or of `Apply`, must have rows of one length (`matrixRows()` of
-`lower-lists.ts`): a value of the lane with the fact is taken as it is, and a
-list of rank 2 of reals or integers (a matrix of stated size, a literal, a
-build of a constant row length) is taken as its rows, a `rows.build` of them
-(`asRows()`) whose `rowCounts` and `rowWidths` are its two lengths; a
-`list<list<real>>` input, a value whose rows can differ (a `Filter` inside
-the rows), a call result and a join decline ("…, a matrix, whose rows can
-have different lengths"), since the interpreter gives `incompatible-type`
-for rows of different lengths. A call result has no fact even when the
-declared result type of the user function is a matrix type: the interpreter
-does not check that type (a body `[[1, 2], [3]]` gives that list). The
-element `number` is a real outside the mode `complex`; a matrix
-of one stated dimension (`matrix<real^2x?>`), of complex numbers or of
-booleans, GLSL and the interval and the bigint modes decline the input, with
-its type in the cause. A matrix type of stated dimensions
-(`matrix<real^2x3>`) is a list of rank 2, as before.
+A read of a value of the lane whose rows have one length (`rowWidths`) and whose
+elements are reals or integers (`rowsElements`) that no reader of the lane
+admits is a read of a matrix: `symbol()` and `wholeOnly()` of `lower.ts` give
+`asMatrix()` of it, a list of rank 2 of the shape `[{v: r}, {v: c}]` of its
+number of rows and the length of its rows. For an input of the entry it is the
+parameter that `rows.of` reads (`matrixOf`); for another value (a parameter of a
+matrix type, a `Transpose`, a product, an `Inverse`, a table that the program
+builds, a `Map` or a `Filter` of rows of one length) it is the region
+`rows.matrix` (`rows.matrix.int` of integers), whose body is empty: the same
+array of arrays (`const v = g;`), the reverse of `rows.of`. So the operations
+that thread over a list thread over it ("Matrices", the operations on the
+elements), and `Add(Transpose(M), B)` compiles. A value of the lane with no such
+fact (an input of type `list<list<real>>`, the result of a call, a join, a value
+that a loop carries) still declines. An argument at a parameter of a matrix
+type, of a user function or of `Apply`, must have rows of one length
+(`matrixRows()` of `lower-lists.ts`): a value of the lane with the fact is taken
+as it is, and a list of rank 2 of reals or integers (a matrix of stated size, a
+literal, a build of a constant row length) is taken as its rows, a `rows.build`
+of them (`asRows()`) whose `rowCounts` and `rowWidths` are its two lengths; a
+`list<list<real>>` input, a value whose rows can differ (a `Filter` inside the
+rows), a call result and a join decline ("…, a matrix, whose rows can have
+different lengths"), since the interpreter gives `incompatible-type` for rows of
+different lengths. A call result has no fact even when the declared result type
+of the user function is a matrix type: the interpreter does not check that type
+(a body `[[1, 2], [3]]` gives that list). The element `number` is a real outside
+the mode `complex`; a matrix of one stated dimension (`matrix<real^2x?>`), of
+complex numbers or of booleans, GLSL and the interval and the bigint modes
+decline the input, with its type in the cause. A matrix type of stated
+dimensions (`matrix<real^2x3>`) is a list of rank 2, as before.
 
 A list of lists of real or integer numbers that the program makes, whose rows
 have a run-time length, is of the lane too, on JavaScript outside the interval
@@ -1021,72 +1014,69 @@ condition) that keeps rows is `rows.filter`, which pushes each row kept. The
 lane of the elements is in `rowsElements`, not in the op: one region for
 integers and reals. The value is gated as an input is (`rowsParams`): it is read
 whole only where `wholeRows()` admits it, by a reader of its rows (`chunks()`,
-which reads any value of the lane through `rowsOf()`: `Map`, `Filter`,
-`Length`, `Count`, `At(At(v, i), j)`, `Flatten`, `Reduce`, `Fold`, `FlatMap`),
-at a parameter of that lane, as the value of a local and as the result. A
-`Block` (its last statement), an `If`, a `Which`, a `Coalesce`, a `Typed`, a
+which reads any value of the lane through `rowsOf()`: `Map`, `Filter`, `Length`,
+`Count`, `At(At(v, i), j)`, `Flatten`, `Reduce`, `Fold`, `FlatMap`), at a
+parameter of that lane, as the value of a local and as the result. A `Block`
+(its last statement), an `If`, a `Which`, a `Coalesce`, a `Typed`, a
 `WithRandomSeed` and an `Apply` of a function literal (its body, when no
-argument is mapped over) pass the admission to the operands that give their value
-(`passesWhole()` and `wholeOnly()` of `lower.ts`); every other read is a read of
-a matrix where the rows have one length (`asMatrix()`, above), and declines
-otherwise ("a list of lists of run-time length read whole other than by a
-reader of its rows …"). The join of two arms of the lane (`branch()`) is of the lane, of reals
-where one arm is. A call of a user function whose body is such a list
-(`step(g: list<list<integer>>) = map(r => map(x => x + 1, r), g)`) is of the
-lane, so `step(step(g))` compiles. A local that holds such a list is written
-again by an `Assign` of another one (`assign()`, `Binding.rows`), and a `Loop`
-carries it as one value (`carry` of `loop()`), whose parameter has the lane of
-the elements of the local; a write of reals to a local of integers puts the
-local on the real lane from its declaration (`WidenList`). A `Reduce` or a
+argument is mapped over) pass the admission to the operands that give their
+value (`passesWhole()` and `wholeOnly()` of `lower.ts`); every other read is a
+read of a matrix where the rows have one length (`asMatrix()`, above), and
+declines otherwise ("a list of lists of run-time length read whole other than by
+a reader of its rows …"). The join of two arms of the lane (`branch()`) is of
+the lane, of reals where one arm is. A call of a user function whose body is
+such a list (`step(g: list<list<integer>>) = map(r => map(x => x + 1, r), g)`)
+is of the lane, so `step(step(g))` compiles. A local that holds such a list is
+written again by an `Assign` of another one (`assign()`, `Binding.rows`), and a
+`Loop` carries it as one value (`carry` of `loop()`), whose parameter has the
+lane of the elements of the local; a write of reals to a local of integers puts
+the local on the real lane from its declaration (`WidenList`). A `Reduce` or a
 `Fold` from such a list carries it the same way (`reduceRows()` of
 `lower-lists.ts`): each step must give one, and a step from integers that gives
-reals puts the accumulator on the real lane (a trial lowering, as for a
-scalar). A `List` literal whose elements are flat lists of reals or integers,
-one of them of a run-time length (`List(Map(i ↦ i + 1, P), List(Length(P)))`),
-is of the lane too (`rowsLiteral()` of `lower-lists.ts`: the `list`
-instruction of the lane, `[a, b]`); a literal whose rows all have constant
-lengths keeps its list of rank 2 or its record of lists ("Records").
-`Join` and `ListJoin` of lists of lists, one of them of the lane, are the rows
-of the operands in order (`rowsJoin()`, the operation `rows.join`,
-`[...$0, ...$1]`), a list of rank 2 of numbers read as its rows (a
-`rows.build` of them); `Append(a, r_1, …)` of such a list `a` and flat lists is
-`a` joined with the literal of the `r_i`. A `Reduce` or a `Fold` from `List()`
-whose static type is a list of lists of numbers first tries an accumulator of
-the lane from an empty list of rows, the lane of its elements the body's
-(`reduceRows()`); a body that declines there takes the path of a flat list
-(in `cx.attempt()`, as the rows paths of `Join` and `Append` are, so that an
-operand is lowered once). A `rows.build` or a `rows.filter` whose row length is
-a value made before the region, or made in it by pure operations of such values
-and constants, records "every row has this length" in the side table
+reals puts the accumulator on the real lane (a trial lowering, as for a scalar).
+A `List` literal whose elements are flat lists of reals or integers, one of them
+of a run-time length (`List(Map(i ↦ i + 1, P), List(Length(P)))`), is of the
+lane too (`rowsLiteral()` of `lower-lists.ts`: the `list` instruction of the
+lane, `[a, b]`); a literal whose rows all have constant lengths keeps its list
+of rank 2 or its record of lists ("Records"). `Join` and `ListJoin` of lists of
+lists, one of them of the lane, are the rows of the operands in order
+(`rowsJoin()`, the operation `rows.join`, `[...$0, ...$1]`), a list of rank 2 of
+numbers read as its rows (a `rows.build` of them); `Append(a, r_1, …)` of such a
+list `a` and flat lists is `a` joined with the literal of the `r_i`. A `Reduce`
+or a `Fold` from `List()` whose static type is a list of lists of numbers first
+tries an accumulator of the lane from an empty list of rows, the lane of its
+elements the body's (`reduceRows()`); a body that declines there takes the path
+of a flat list (in `cx.attempt()`, as the rows paths of `Join` and `Append` are,
+so that an operand is lowered once). A `rows.build` or a `rows.filter` whose row
+length is a value made before the region, or made in it by pure operations of
+such values and constants, records "every row has this length" in the side table
 `rowWidths` (the operations made again after the region, where an equal
 operation of equal operands is one value), and a `rows.build` records its count
 in `rowCounts`; `rowsOf()` reads both, so a `Map` of each element of such a
 value, a `Filter` of it and a local that holds it keep the fact. A join of two
 arms, a value that a loop carries, a call, a parameter of a type other than a
 matrix type (above), a join of lists and a literal have none. The matrix
-operators read the fact ("Matrices").
-Declined: a row of the lane at an index known at run time as an element of a
-list (`Map(i ↦ At(g, i), Range(1, n))`: the interpreter gives `Missing` where
-the row is absent), elements that are booleans, complex numbers, points or
-strings, a list of such lists (rank 3), a step of a `Reduce` from one that
-gives another value, `Scan` of one, a `List` literal of a row and a scalar (a
-record), a `Join` of such a list and a flat list, an `Append` of a scalar, a
-parallel `Assign` of a local that holds one, the matrix operators of one without
-the fact (`Transpose(v)`: "its rows can have different lengths"), GLSL and the
-interval and the bigint modes.
+operators read the fact ("Matrices"). Declined: a row of the lane at an index
+known at run time as an element of a list (`Map(i ↦ At(g, i), Range(1, n))`: the
+interpreter gives `Missing` where the row is absent), elements that are
+booleans, complex numbers, points or strings, a list of such lists (rank 3), a
+step of a `Reduce` from one that gives another value, `Scan` of one, a `List`
+literal of a row and a scalar (a record), a `Join` of such a list and a flat
+list, an `Append` of a scalar, a parallel `Assign` of a local that holds one,
+the matrix operators of one without the fact (`Transpose(v)`: "its rows can have
+different lengths"), GLSL and the interval and the bigint modes.
 
 A user function whose result type is such a list (declared, or inferred from a
 body `Map(i ↦ Map(j ↦ …, Range(1, n)), Range(1, n))`) has the type of its body,
 which must be a list of rank 2 of integers or reals (not of points), of the
 lengths that the body settles, or a value of the lane `rows` that the body makes
-(above). A `build`
-whose element is a list of a length value that is a constant (the count of
-`Range(1, 32)`, made in the region) has an element of that number of elements
-(`region()` of `lower.ts`), so
+(above). A `build` whose element is a list of a length value that is a constant
+(the count of `Range(1, 32)`, made in the region) has an element of that number
+of elements (`region()` of `lower.ts`), so
 `Map(i ↦ Map(j ↦ i·j, Range(1, 20)), Range(1, 20))` keeps its two loops and is a
 list of 20 lists of 20; an element of a run-time length is `rows.build` (above).
-So one step of the Game of Life on a 32 × 32
-grid, `step(g: list<list<integer>>)` with `n = 32`, compiles for a root literal
+So one step of the Game of Life on a 32 × 32 grid,
+`step(g: list<list<integer>>)` with `n = 32`, compiles for a root literal
 `(g: list<list<integer>>) ↦ step(g)` and for `step(G)` with `G` declared
 `list<list<integer>>`.
 
@@ -1801,28 +1791,27 @@ reads it again (`(D + E)·(D − E)` makes one; a check of another kind,
 check proved equal to another proves those equal too, and its value 0 reads the
 value 0 of that check, so that a reader that relies on both equalities keeps
 both checks (`(D + E)·(E − F)` makes two, and the build reads the second only).
-`knownLength()` gives the
-constant a length was proved equal to, so `List(1, 2, 3)·D + List(4, 5)` still
-declines. An operand that is an element-wise operation of its own length, or
-such a build, is read at the index as the operation on its elements
-(`elementAt()`), so the build computes each element once, as one element-wise
-operation does with the operations of its shape (`fuses()` of `print.ts`). In
-the interval mode the result is unspecified: a list as long as `D`, NaN where
-`E` has no element. Lists of rank 2 or more read their
-outer length the same way, and their inner lengths must be the same (`P + Q` of
-two inputs of type `list<tuple<real, real>>`, CE-1537); when the outer lengths
-differ, the JavaScript code gives a list as long as the first list, or throws a
-`TypeError` when a later list is shorter. A `Multiply` of a list of rank 2 or
-more (a matrix) with another list, and a `Power` of such a base, decline: the
-interpreter's value is the matrix product or power (`M·N`, `M·L`, `M^s` at an
-integer `s`), measured for every pair of a scalar, a list, a matrix, a vector
-and a point; `M^N` and `M^0.5`, element by element in the interpreter, decline
-too (the simple rule). A list of points is not a matrix: `P^2` is the power of
-each coordinate (CE-1539). A matrix times scalars, and the other operations of
-two matrices of one shape, are element by element, as in the interpreter. The
-operands of a `Range` are reals or integers: its elements are `lo + k·step` for
-`k` from 0, of the count of `rangeCount`, the interpreter's (`Range(1, N)` at
-`N = 3.5` is `[1, 2, 3]`, `Range(-h, h)` at `h = 2.5` is
+`knownLength()` gives the constant a length was proved equal to, so
+`List(1, 2, 3)·D + List(4, 5)` still declines. An operand that is an
+element-wise operation of its own length, or such a build, is read at the index
+as the operation on its elements (`elementAt()`), so the build computes each
+element once, as one element-wise operation does with the operations of its
+shape (`fuses()` of `print.ts`). In the interval mode the result is unspecified:
+a list as long as `D`, NaN where `E` has no element. Lists of rank 2 or more
+read their outer length the same way, and their inner lengths must be the same
+(`P + Q` of two inputs of type `list<tuple<real, real>>`, CE-1537); when the
+outer lengths differ, the JavaScript code gives a list as long as the first
+list, or throws a `TypeError` when a later list is shorter. A `Multiply` of a
+list of rank 2 or more (a matrix) with another list, and a `Power` of such a
+base, decline: the interpreter's value is the matrix product or power (`M·N`,
+`M·L`, `M^s` at an integer `s`), measured for every pair of a scalar, a list, a
+matrix, a vector and a point; `M^N` and `M^0.5`, element by element in the
+interpreter, decline too (the simple rule). A list of points is not a matrix:
+`P^2` is the power of each coordinate (CE-1539). A matrix times scalars, and the
+other operations of two matrices of one shape, are element by element, as in the
+interpreter. The operands of a `Range` are reals or integers: its elements are
+`lo + k·step` for `k` from 0, of the count of `rangeCount`, the interpreter's
+(`Range(1, N)` at `N = 3.5` is `[1, 2, 3]`, `Range(-h, h)` at `h = 2.5` is
 `[-2.5, -1.5, …, 2.5]`), integers when the first element and the step are. GLSL
 has no spelling of a run-time count.
 
@@ -2156,19 +2145,18 @@ declines), and `Not`, `And` and `Or` of lists, with a scalar broadcast
 operand, and one with an effect declines. Lists of two run-time lengths are
 compared at run time ("Lists"): a `RangeError` where they differ, the
 interpreter's `incompatible-dimensions`. In the interval mode such an `And` or
-`Or` has the first operand's length. `Not` of a tuple
-of booleans (`Not(Tuple(p, q))`) is the tuple of the negations, as the
-interpreter's. A mask or a base of a mask with an effect declines: the
-interpreter reads a lazy base at the kept positions only
-(`At(Map(k ↦ k + Random(), A), M)` draws twice for two kept positions). On GLSL
-a list of booleans of a stated length is a `bvec` (`Or(M3, L3 > x)`), and the
-filter declines; in the interval mode a mask element undecided over the box
-gives the whole range, as for `Filter`. `Clamp(x, lo, hi)` is
-`ElementMin(ElementMax(x, lo), hi)`, the interpreter's `min(max(x, lo), hi)`:
-`hi` when `lo > hi` (on GLSL `min(max(…))`, not `clamp()`, whose value is
-undefined there), integers stay integers, and each operand threads over a list
-(`At(L, Clamp(Floor(I), 0, +∞))` is the floored index of each element of `I`,
-NaN below 1).
+`Or` has the first operand's length. `Not` of a tuple of booleans
+(`Not(Tuple(p, q))`) is the tuple of the negations, as the interpreter's. A mask
+or a base of a mask with an effect declines: the interpreter reads a lazy base
+at the kept positions only (`At(Map(k ↦ k + Random(), A), M)` draws twice for
+two kept positions). On GLSL a list of booleans of a stated length is a `bvec`
+(`Or(M3, L3 > x)`), and the filter declines; in the interval mode a mask element
+undecided over the box gives the whole range, as for `Filter`.
+`Clamp(x, lo, hi)` is `ElementMin(ElementMax(x, lo), hi)`, the interpreter's
+`min(max(x, lo), hi)`: `hi` when `lo > hi` (on GLSL `min(max(…))`, not
+`clamp()`, whose value is undefined there), integers stay integers, and each
+operand threads over a list (`At(L, Clamp(Floor(I), 0, +∞))` is the floored
+index of each element of `I`, NaN below 1).
 
 `Equal` and `NotEqual` of two lists, of two tuples and of two booleans
 (`equality()` of `lower.ts`, CE-1532) have no row signature. Two lists, or two
@@ -2254,16 +2242,16 @@ already gives `incompatible-dimensions` for most); lists of two run-time lengths
 are an error of the interpreter (`incompatible-dimensions` for `Which` and for
 `If` with an `else`), so the value is unspecified: a list as long as the first
 condition, never an arm whole (CE-1238). A condition or an arm that is an
-element-wise operation of two lists of run-time lengths compares them
-("Lists") once, before the selection, and its build is accepted
-(`If(L > 0, L·M, 0)`). Such an arm of another length than the mask (except in
-a restriction, which zips them) is compared with the mask by the same `agree()`,
-and the length of the selection reads that check: `If(N > 0, L·M, 0)` makes two
-checks, and `If(L > 0, L + List(1, 2, 3), 0)` reads the one of the arm; a mask
-and an arm of two stated lengths decline. A check throws also where no position
-selects the arm, where the interpreter has a value (a known limitation). An
-arm that compares no length (`If(N > 0, L, 0)`) is not compared with the mask.
-A condition after the first that compares lengths is accepted only when its
+element-wise operation of two lists of run-time lengths compares them ("Lists")
+once, before the selection, and its build is accepted (`If(L > 0, L·M, 0)`).
+Such an arm of another length than the mask (except in a restriction, which zips
+them) is compared with the mask by the same `agree()`, and the length of the
+selection reads that check: `If(N > 0, L·M, 0)` makes two checks, and
+`If(L > 0, L + List(1, 2, 3), 0)` reads the one of the arm; a mask and an arm of
+two stated lengths decline. A check throws also where no position selects the
+arm, where the interpreter has a value (a known limitation). An arm that
+compares no length (`If(N > 0, L, 0)`) is not compared with the mask. A
+condition after the first that compares lengths is accepted only when its
 length, without the check, is the mask's. On GLSL a stated length writes the
 selection out (`vec3` of three conditionals); a run-time length declines. The
 interval mode declines it.
@@ -2400,14 +2388,13 @@ interpreter's value for every length, also 0:
   `invariants` moves the check under the guard that the loop runs a pass, its
   value 0 elsewhere, and the sum that reads it after it, so that
   `Map(x ↦ x·Dot(L, M), L)` and `Sum(i·Dot(L, M), i, 1, n)` compute the sum
-  once; a loop of no pass gives the interpreter's value, whatever the lengths.
-  A check in an arm of a conditional or of a short circuit stays there.
-  `Norm(x)` of a
-  real or a complex scalar is `Abs(x)`; of a point or a list of points, `Abs`
-  (the Euclidean norm); of a list of real numbers, of the order 2 (by default)
-  the square root of the sum of the squares (the interpreter's sum of squares;
-  it scales a vector whose squares would overflow or underflow, which the
-  compiled code does not: a known limitation), of the order 1 the sum of the
+  once; a loop of no pass gives the interpreter's value, whatever the lengths. A
+  check in an arm of a conditional or of a short circuit stays there. `Norm(x)`
+  of a real or a complex scalar is `Abs(x)`; of a point or a list of points,
+  `Abs` (the Euclidean norm); of a list of real numbers, of the order 2 (by
+  default) the square root of the sum of the squares (the interpreter's sum of
+  squares; it scales a vector whose squares would overflow or underflow, which
+  the compiled code does not: a known limitation), of the order 1 the sum of the
   absolute values, of the order `Infinity` their `Max` from 0. Another order (an
   order that is not a positive number also for a scalar), a matrix and complex
   elements decline.
@@ -2456,9 +2443,9 @@ built the same way, with the interpreter's value for every length, also 0:
   every other reader declines. A consumer whose value holds a row
   (`Map(r ↦ r, Chunk(L, 3))`) makes the lane `rows` on JavaScript ("The rows
   lane"); `ListJoin` and `Join` of such rows decline ("a list of lists of
-  run-time length"). On
-  GLSL a consumer compiles only when every row has a constant length of at least
-  1 (`Map(r ↦ Sum(r), Partition(L6, 4))` of `L6: list<real^6>`).
+  run-time length"). On GLSL a consumer compiles only when every row has a
+  constant length of at least 1 (`Map(r ↦ Sum(r), Partition(L6, 4))` of
+  `L6: list<real^6>`).
 - `TakeWhile(L, p)` and `DropWhile(L, p)` split `L` at the first index of a
   `filter` of the indices where `p` fails, or at the length. `CountIf(L, p)` is
   the count of the `filter` of the indices where `p` holds, `IndexWhere` its
@@ -2526,8 +2513,8 @@ built the same way, with the interpreter's value for every length, also 0:
   site.
 
 GLSL compiles those of a constant index and a stated length that write a short
-list out (`DeleteAt(L, 2)`, `Slice(L, 2, -1)` of `L: list<real^6>`); the interval
-mode declines all of them but `Identity` and `ApplyWhole`
+list out (`DeleteAt(L, 2)`, `Slice(L, 2, -1)` of `L: list<real^6>`); the
+interval mode declines all of them but `Identity` and `ApplyWhole`
 (`<head> on interval-js`).
 
 In the interval mode every list operator of the first list above compiles except
@@ -2674,136 +2661,131 @@ lengths, declines.
 ## Matrices
 
 A matrix is a list of rank 2 of real or integer numbers whose rows have a stated
-length (`matrix<real^2x3>`, `list<list<real^3>>`, a literal, a build): a list
-of lists of a run-time length (an input of type `list<list<real>>`, a build
-whose rows have a run-time length) is the lane `rows` ("The rows lane"), which
-the matrix operators decline (`docs/COMPILATION-MODEL.md`), except a value
-whose rows have one length (`rowWidths`: a build, an input or a parameter of
-a matrix type), a matrix of run-time size: the operators read it as a list
-of rank 2 of the shape `[{v: r}, {v: c}]` of its number of rows and the
-length of its rows (`numbers()` of `lower-matrices.ts`, which gives
-`asMatrix()` of it), so each operator has one lowering, which reads the
-shape of its operand, for a stated and for a run-time size: `at(at(m, i), j)`
-is the element, and the lengths are those of the shape. The two forms of a
-matrix of run-time size are one array of arrays: the list of rank 2
-(`rows.matrix`, or the parameter of an input of the entry) and the value of
-the lane `rows` (`rows.of`), which `rowsOfMatrix()` of `lower.ts` gives where
-a value of the lane is read whole (`wholeRows()`: a reader of the rows, a
-local, an arm, the result, a parameter of that lane, the kernels below).
+length (`matrix<real^2x3>`, `list<list<real^3>>`, a literal, a build): a list of
+lists of a run-time length (an input of type `list<list<real>>`, a build whose
+rows have a run-time length) is the lane `rows` ("The rows lane"), which the
+matrix operators decline (`docs/COMPILATION-MODEL.md`), except a value whose
+rows have one length (`rowWidths`: a build, an input or a parameter of a matrix
+type), a matrix of run-time size: the operators read it as a list of rank 2 of
+the shape `[{v: r}, {v: c}]` of its number of rows and the length of its rows
+(`numbers()` of `lower-matrices.ts`, which gives `asMatrix()` of it), so each
+operator has one lowering, which reads the shape of its operand, for a stated
+and for a run-time size: `at(at(m, i), j)` is the element, and the lengths are
+those of the shape. The two forms of a matrix of run-time size are one array of
+arrays: the list of rank 2 (`rows.matrix`, or the parameter of an input of the
+entry) and the value of the lane `rows` (`rows.of`), which `rowsOfMatrix()` of
+`lower.ts` gives where a value of the lane is read whole (`wholeRows()`: a
+reader of the rows, a local, an arm, the result, a parameter of that lane, the
+kernels below).
 
-An input of the entry of a matrix type of no stated dimensions (a name read
-at the entry, a positional parameter of a root function literal: `input()` of
+An input of the entry of a matrix type of no stated dimensions (a name read at
+the entry, a positional parameter of a root function literal: `input()` of
 `lower.ts`) is a list of rank 2 of the lane `real` or `integer` whose two
 lengths are values, the shape `[{v: r}, {v: c}]`. Two length parameters come
 before it, both `lengthOf`: `r`, the length of the input, and `c`, which is
 `widthOf` too, the length of its first row and 0 of no row (`Syntax.width`,
-`($0.length === 0 ? 0 : $0[0].length)` on JavaScript, a statement at the
-start of the entry when the body reads it, so that it is read once). Both are
-known `>= 0` (`inputLengths`). Its run-time form is the host's array of
-arrays, so the operation `rows.of` (`$0`) reads it as a value of the lane
-`rows` at no cost, with `r` and `c` as its `rowCounts` and `rowWidths`. That
-value is the binding of the name: every reader below, and every reader of
-"The rows lane", reads it, and a read of the name that no reader of the lane
-admits reads the parameter itself. The other values of a matrix type (a
-parameter of a user function or of `Apply`, an input that a user function
-reads, a variable of the engine that a root literal assigns, a build) are of
-the lane `rows`, and such a read reads them as a list of rank 2 too
-(`rows.matrix`; "The rows lane", `asMatrix()`).
+`($0.length === 0 ? 0 : $0[0].length)` on JavaScript, a statement at the start
+of the entry when the body reads it, so that it is read once). Both are known
+`>= 0` (`inputLengths`). Its run-time form is the host's array of arrays, so the
+operation `rows.of` (`$0`) reads it as a value of the lane `rows` at no cost,
+with `r` and `c` as its `rowCounts` and `rowWidths`. That value is the binding
+of the name: every reader below, and every reader of "The rows lane", reads it,
+and a read of the name that no reader of the lane admits reads the parameter
+itself. The other values of a matrix type (a parameter of a user function or of
+`Apply`, an input that a user function reads, a variable of the engine that a
+root literal assigns, a build) are of the lane `rows`, and such a read reads
+them as a list of rank 2 too (`rows.matrix`; "The rows lane", `asMatrix()`).
 `docs/plans/2026-11-25-matrix-of-run-time-size.md` describes the change that
 gives each of them this shape.
 
 The operations on the elements of a matrix of run-time size (CE-1834). An
-operation that threads over a list threads over a list of rank 2 of two
-run-time lengths as over any list: `2·A`, `A + 1`, `Sin(A)` and `A + 2·A` are
-one operation of the shape of `A`. Two matrices whose shapes the type does not
-prove the same (`resultType()` gives none: `A + B`, `Transpose(A) + B`, `A + K`
-of a `K` of stated size) are lowered by `elementwise()` of `lower-matrices.ts`:
-the `build` of the rows, each the `build` of the operation on the elements at
-one place and on the scalar operands. Each of the two lengths of the result is
-the length of two flat lists that an operation reads at each index
-(`agreedLength()` of `lower-lists.ts`, "Lists"): the length plus the value 0
-of the check `rows.agree`, which throws a `RangeError`
+operation that threads over a list threads over a list of rank 2 of two run-time
+lengths as over any list: `2·A`, `A + 1`, `Sin(A)` and `A + 2·A` are one
+operation of the shape of `A`. Two matrices whose shapes the type does not prove
+the same (`resultType()` gives none: `A + B`, `Transpose(A) + B`, `A + K` of a
+`K` of stated size) are lowered by `elementwise()` of `lower-matrices.ts`: the
+`build` of the rows, each the `build` of the operation on the elements at one
+place and on the scalar operands. Each of the two lengths of the result is the
+length of two flat lists that an operation reads at each index (`agreedLength()`
+of `lower-lists.ts`, "Lists"): the length plus the value 0 of the check
+`rows.agree`, which throws a `RangeError`
 (`incompatible-dimensions: lists of lengths …`) where the lengths of the
-operands differ, the interpreter's error. It is made once, before the
-builds, which read it as their length, so `dce` keeps it, and a later
-operation on the same matrices reads the same check; a reader of one length
-only (`Length(A + B)`) runs the comparison of that length only (a known
-limitation of `docs/COMPILATION-MODEL.md`). Two
-lengths that are two constants (`knownLength()`), a matrix with a list (`A + v`, whose value in
-the interpreter adds `v[i]` to the row `i`), a tuple operand, a target that
-compares no length (`checks`) and a row that does not thread decline as
-before ("lists of different lengths or ranks"). The result is a list of rank
-2 of run-time lengths, which the matrix operators read as any matrix;
-`RowReduce` and `Reshape` of it decline. Where a value of the lane `rows` is
-read whole (`wholeRows()`), it is its rows (`rows.of`): a parameter of a
-matrix type takes it, the body of a user function whose value it is gives
-its rows (a call gives one length, `call()` of `lower-functions.ts`: the
-result of the call has no row length, so `inc(A) + 1` declines where
-`inc := m ↦ m + 1`), an `If` whose arms are two such results of two sizes
-joins them as rows, a local holds it and is written again, and an element
-`At(At(A + B, i), j)` is read (`rows.at`). The row `At(A + B, 1)` as the
+operands differ, the interpreter's error. It is made once, before the builds,
+which read it as their length, so `dce` keeps it, and a later operation on the
+same matrices reads the same check; a reader of one length only
+(`Length(A + B)`) runs the comparison of that length only (a known limitation of
+`docs/COMPILATION-MODEL.md`). Two lengths that are two constants
+(`knownLength()`), a matrix with a list (`A + v`, whose value in the interpreter
+adds `v[i]` to the row `i`), a tuple operand, a target that compares no length
+(`checks`) and a row that does not thread decline as before ("lists of different
+lengths or ranks"). The result is a list of rank 2 of run-time lengths, which
+the matrix operators read as any matrix; `RowReduce` and `Reshape` of it
+decline. Where a value of the lane `rows` is read whole (`wholeRows()`), it is
+its rows (`rows.of`): a parameter of a matrix type takes it, the body of a user
+function whose value it is gives its rows (a call gives one length, `call()` of
+`lower-functions.ts`: the result of the call has no row length, so `inc(A) + 1`
+declines where `inc := m ↦ m + 1`), an `If` whose arms are two such results of
+two sizes joins them as rows, a local holds it and is written again, and an
+element `At(At(A + B, i), j)` is read (`rows.at`). The row `At(A + B, 1)` as the
 value, a matrix operator of such an `If`, and the reductions of a matrix
 (`Sum(A)`) decline.
 
-Two lengths that must be equal (the inner lengths of
-`MatrixMultiply`, the numbers of rows and of columns of `Trace`) and that
-`same()` does not prove equal (one value, or equal constants) are compared
-once at run time on JavaScript, in one place, `agree()` of `lower-lists.ts`
-(user decision 2026-11-25), which the element-wise operations of two lists,
-`Dot` and a user function mapped over lists read too ("Lists"): the operation
-`rows.agree` or `rows.square` (`may-fail`; `_agree`, `_square` of the
-JavaScript printer), made once before the builds, gives 0, the initial value
-of each sum of the operator, so `dce` keeps it and no count or length changes
-(a sum of a constant length stays written out), and it throws a `RangeError`
+Two lengths that must be equal (the inner lengths of `MatrixMultiply`, the
+numbers of rows and of columns of `Trace`) and that `same()` does not prove
+equal (one value, or equal constants) are compared once at run time on
+JavaScript, in one place, `agree()` of `lower-lists.ts` (user decision
+2026-11-25), which the element-wise operations of two lists, `Dot` and a user
+function mapped over lists read too ("Lists"): the operation `rows.agree` or
+`rows.square` (`may-fail`; `_agree`, `_square` of the JavaScript printer), made
+once before the builds, gives 0, the initial value of each sum of the operator,
+so `dce` keeps it and no count or length changes (a sum of a constant length
+stays written out), and it throws a `RangeError`
 (`incompatible-dimensions: lists of lengths …`, `expected-square-matrix: …`)
-where they differ, the interpreter's error. A check of the same two lengths
-in an open region is read again, not made twice.
-A reader that reads no element of the result (`Length` of the product) reads
-no sum, so `dce` removes the check there: a known limitation of
-`docs/COMPILATION-MODEL.md`.
-Two constants that differ decline. The order of `Determinant`, `Inverse` and
-`MatrixPower` is the number of rows where `same()` proves it equal to the
-length of the rows, and otherwise the operation `rows.order` (`may-fail`;
-`_order`), which gives the number of rows and throws a `RangeError`
-(`expected-square-matrix: …`) where they differ. Its value is read by the
-kernel, so `dce` keeps it before the kernel: `mdet` of the elements row by
-row (`rows.flat`) and the order, whose value at the order 1 is the element
-(the constant order 1 keeps its read of the element), and `rows.inverse`,
-`rows.power` (`_SYS.matrixInverse($0, $1)`, `_SYS.matrixPower($0, $1, $2)`:
-the order is the last argument of the kernel, the order of its matrix of
-NaN). Their value is of the lane `rows`, of reals, whose `rowCounts` and
-`rowWidths` are the order, so a reader that reads no element (`Length`,
-`Shape`) reads the check too; `Rank`, a constant, and a statement whose
-value is dropped do not (a known limitation). A matrix of which one length
-only is known at run time (a build of a constant row length,
-`P: list<list<real^2>>`) is read the same way, so its order is checked the
-same way (`kernel()`), and its transpose has rows of a run-time length. In
-the bigint mode, which compares no length and has no value of the lane
-`rows`, `Trace`, the transpose and the kernels of a matrix of a size known
-at run time decline. `RowReduce` of a matrix whose rows have a run-time
-length declines. The matrix operators (`lower-matrices.ts`) settle
-the shape of their value from the shapes of their operands; a tuple, a list of
-tuples, complex and boolean elements, a rank above 2 and another number of
-operands decline. On JavaScript:
+where they differ, the interpreter's error. A check of the same two lengths in
+an open region is read again, not made twice. A reader that reads no element of
+the result (`Length` of the product) reads no sum, so `dce` removes the check
+there: a known limitation of `docs/COMPILATION-MODEL.md`. Two constants that
+differ decline. The order of `Determinant`, `Inverse` and `MatrixPower` is the
+number of rows where `same()` proves it equal to the length of the rows, and
+otherwise the operation `rows.order` (`may-fail`; `_order`), which gives the
+number of rows and throws a `RangeError` (`expected-square-matrix: …`) where
+they differ. Its value is read by the kernel, so `dce` keeps it before the
+kernel: `mdet` of the elements row by row (`rows.flat`) and the order, whose
+value at the order 1 is the element (the constant order 1 keeps its read of the
+element), and `rows.inverse`, `rows.power` (`_SYS.matrixInverse($0, $1)`,
+`_SYS.matrixPower($0, $1, $2)`: the order is the last argument of the kernel,
+the order of its matrix of NaN). Their value is of the lane `rows`, of reals,
+whose `rowCounts` and `rowWidths` are the order, so a reader that reads no
+element (`Length`, `Shape`) reads the check too; `Rank`, a constant, and a
+statement whose value is dropped do not (a known limitation). A matrix of which
+one length only is known at run time (a build of a constant row length,
+`P: list<list<real^2>>`) is read the same way, so its order is checked the same
+way (`kernel()`), and its transpose has rows of a run-time length. In the bigint
+mode, which compares no length and has no value of the lane `rows`, `Trace`, the
+transpose and the kernels of a matrix of a size known at run time decline.
+`RowReduce` of a matrix whose rows have a run-time length declines. The matrix
+operators (`lower-matrices.ts`) settle the shape of their value from the shapes
+of their operands; a tuple, a list of tuples, complex and boolean elements, a
+rank above 2 and another number of operands decline. On JavaScript:
 
 - `Matrix(m)` is `m` (`Vector(a, b, c)` is the column `Matrix` of its canonical
   form). `Rank(m)` is the number of axes, a constant (0 for a scalar);
   `Shape(m)` the tuple of the lengths (a run-time length is its value; a scalar
-  declines, the empty tuple). Of a matrix whose number of rows is known at
-  run time only they are 2 and its two lengths, also where it has no row,
-  where the interpreter's empty list of rows has rank 1 and the shape `(0)`:
-  a known limitation of `docs/COMPILATION-MODEL.md` (the value of a matrix
-  type has a row; `[]` is not one). `Flatten(m)` is the build of the elements row by row (a list
-  is itself, a scalar the list of it); with a depth, a constant non-negative
-  integer or `+oo`, depth 0 is `m` and any other is the same build, as a matrix
-  has one level (another depth declines). `Reshape(m, Tuple(d1, …, dk))` of
-  constant positive integers is the nested build of the elements row by row,
-  cycled from the first when there are fewer, as the interpreter's; another
-  shape (an input, a `List`) declines.
+  declines, the empty tuple). Of a matrix whose number of rows is known at run
+  time only they are 2 and its two lengths, also where it has no row, where the
+  interpreter's empty list of rows has rank 1 and the shape `(0)`: a known
+  limitation of `docs/COMPILATION-MODEL.md` (the value of a matrix type has a
+  row; `[]` is not one). `Flatten(m)` is the build of the elements row by row (a
+  list is itself, a scalar the list of it); with a depth, a constant
+  non-negative integer or `+oo`, depth 0 is `m` and any other is the same build,
+  as a matrix has one level (another depth declines).
+  `Reshape(m, Tuple(d1, …, dk))` of constant positive integers is the nested
+  build of the elements row by row, cycled from the first when there are fewer,
+  as the interpreter's; another shape (an input, a `List`) declines.
 - `Transpose(m)` and `ConjugateTranspose(m)` (of reals) are the build of the
   columns, whose length is the number of rows, a run-time length for
-  `Transpose(P)` of `P: list<list<real^2>>`. A scalar
-  and a list are themselves, as in the interpreter.
+  `Transpose(P)` of `P: list<list<real^2>>`. A scalar and a list are themselves,
+  as in the interpreter.
 - `Trace(m)` is the sum from 0 of the diagonal of a square matrix (a scalar is
   itself). `Diagonal(m)` of a matrix is the build of its `Min(rows, columns)`
   diagonal elements; of a list of a stated length `n`, the `n × n` matrix with
@@ -2812,13 +2794,13 @@ operands decline. On JavaScript:
   product of a matrix and a list on either side, or the inner product of two
   lists: builds whose elements are sums from 0 of the products in the order of
   the inner index. Two stated inner lengths that differ decline (the
-  interpreter's `incompatible-dimensions`); a run-time inner length is
-  compared with the other by `agree()` (above), a `RangeError` where they
-  differ; a stated inner length beside a run-time one keeps its sum
-  written out, from the 0 of the check (`MatrixMultiply(K, v)` of
-  `K: matrix<real^2x3>` and `v: list<real>`). GLSL (which has no list of rank 2 and no list of a
-  run-time length) and the bigint mode compare no run-time length: such
-  lengths that differ give an unspecified value there.
+  interpreter's `incompatible-dimensions`); a run-time inner length is compared
+  with the other by `agree()` (above), a `RangeError` where they differ; a
+  stated inner length beside a run-time one keeps its sum written out, from the
+  0 of the check (`MatrixMultiply(K, v)` of `K: matrix<real^2x3>` and
+  `v: list<real>`). GLSL (which has no list of rank 2 and no list of a run-time
+  length) and the bigint mode compare no run-time length: such lengths that
+  differ give an unspecified value there.
 - `Determinant`, `Inverse`, `MatrixPower` and `RowReduce` are the rows `mdet`,
   `minverse`, `mpower` and `mrowreduce`, the kernels `_SYS.matrixDeterminant`,
   `matrixInverse`, `matrixPower` and `matrixRowReduce` of `matrix-runtime.ts`:
@@ -2838,18 +2820,19 @@ operands decline. On JavaScript:
   within the precision of a double of it, except where a value of the kernel is
   discontinuous: a singular matrix (above) and `RowReduce`, whose tolerance
   `1e-10` makes 0 a pivot of an exact matrix (a known limitation). The first
-  three read a square matrix: both lengths stated and equal, or a run-time
-  order checked by `rows.order` (above); a matrix of two stated lengths that
-  differ (the interpreter's `expected-square-matrix`) declines. `Determinant` of a `1 × 1` matrix
-  is its element; otherwise `mdet` reads the elements row by row (`Flatten`) and
-  the order, so that its result is a real scalar (`real-element`). `Inverse` of
-  a singular matrix and `MatrixPower` past `MAX_MATRIX_POWER_EXPONENT` are a
-  matrix of NaN, where the interpreter leaves them unevaluated. `MatrixPower`
-  takes an exponent on the integer lane (the interpreter's power of a real
-  exponent is a root of the matrix at a half-integer): `A^2`, whose canonical
-  form is `MatrixPower(A, 2)`, compiles. `RowReduce` reads any matrix, with the
-  pivot tolerance `1e-10` of the interpreter's `rref()` and its `ce.chop()` at
-  the engine's tolerance at the compilation.
+  three read a square matrix: both lengths stated and equal, or a run-time order
+  checked by `rows.order` (above); a matrix of two stated lengths that differ
+  (the interpreter's `expected-square-matrix`) declines. `Determinant` of a
+  `1 × 1` matrix is its element; otherwise `mdet` reads the elements row by row
+  (`Flatten`) and the order, so that its result is a real scalar
+  (`real-element`). `Inverse` of a singular matrix and `MatrixPower` past
+  `MAX_MATRIX_POWER_EXPONENT` are a matrix of NaN, where the interpreter leaves
+  them unevaluated. `MatrixPower` takes an exponent on the integer lane (the
+  interpreter's power of a real exponent is a root of the matrix at a
+  half-integer): `A^2`, whose canonical form is `MatrixPower(A, 2)`, compiles.
+  `RowReduce` reads any matrix, with the pivot tolerance `1e-10` of the
+  interpreter's `rref()` and its `ce.chop()` at the engine's tolerance at the
+  compilation.
 - `Cross(u, v)` of two lists of three numbers, or of two 3-tuples (a tuple, as
   the interpreter's), is the list of the three differences of products; a list
   and a tuple decline. It compiles on GLSL (a `vec3`) and in the interval mode
@@ -3019,9 +3002,9 @@ place where a `may-fail` instruction would move, a check of two lengths
 (`rows.agree`, `rows.square`: "Lists") moves under the guard that the loop runs
 a pass (`lo <= hi`, `1 <= n`), and its value is 0 where it does not; a length
 plus that value is the length of a list that exists, so the sum or the build
-that reads it moves too (`Sum(i·Dot(L, M), i, 1, n)`).
-Such a build or loop runs once where the program ran it no time, no longer than
-the list took to make; on JavaScript its passes then tick the deadline. So in
+that reads it moves too (`Sum(i·Dot(L, M), i, 1, n)`). Such a build or loop runs
+once where the program ran it no time, no longer than the list took to make; on
+JavaScript its passes then tick the deadline. So in
 `Sum(Max(Max(L), k), Limits(k, 1, n))` the loop of `Max(L)` runs once, also at
 `n = 0`, and a call in the loop of `Sum(f(x)·k, Limits(k, 1, n))` stays there,
 so that a loop of no pass runs no call. In Tycho's `voronoi-diagram`, the loop
@@ -3577,37 +3560,36 @@ gives `incompatible-dimensions`) decline. On JavaScript, outside the bigint and
 interval modes, lengths that are not proved equal (`h(D, G)`, `h(V, D)` of
 `V: list<real^3>`) are compared once before the build (`agreedLength()`,
 "Lists"), a `RangeError` where they differ; elsewhere they decline. So do a
-nested list (the interpreter maps to the leaves), a list of
-points at a scalar parameter, a function whose result is not a scalar or a point
-(a list of lists), and a list argument of a recursive call. A list of points at
-a parameter declared as a point (a tuple type, not one that only the index reads
-of the body inferred, `isIndexReadTuple()`), in a signature that is not all
-scalar and has no parameter `broadcastable<T>` (`pointsMapAt()`, the test of the
-interpreter's `pointListParamSlots()`), is mapped the same way, one point per
-call (CE-1477): the arguments of each call of such a function are lowered before
-the function, a list of points at such a parameter is zipped with the other
-lists of points there and with the flat lists at scalar parameters (of one
-length, as above), and a point or a scalar elsewhere is bound whole. An argument
-of such a call whose static type at the call settles no shape (`unknown`), at a
-slot where the call maps, declines with `unsettled-shape`, and so does one
-beside a flat list that a call maps over: the interpreter pairs it with the
-points or zips it with the list when it is a list and binds it whole otherwise.
-An occurrence that the engine narrows at the call (`t` at a `real` slot) is read
-by its narrowed type: a list passed to an untyped parameter of a function
-literal is a value outside the type that the body implies, and the result is
-unspecified (`docs/COMPILATION-MODEL.md`, "Fail closed"). A result that is a
-point makes the call a list of points: with
-`f := (p: tuple<number, number>) ↦ (p[1] + 1, p[2])` declared
-`(tuple<number, number>) -> tuple<number, number>`, `f(P)` is `[(2, 2), (4, 4)]`
-at `P = [(1, 2), (3, 4)]`, and so is a flat list mapped at a scalar parameter
-(`f((1, 2), L)` of `f := (p: tuple<real, real>, t: real) ↦ (p[1] + t, p[2])`).
-On GLSL a list of points of a constant length is written out (a `PointList` or a
-literal `List` of points, "Tuples"): `f` of it compiles when the result of `f`
-is a scalar, and a list of points as the result declines. A tuple argument for a
-scalar parameter declines (a tuple is atomic). A declared result `complex` of a
-real body is the body converted to the complex lane. A declared result `color`
-takes a body on the colour lane ("The colour lane"); a parameter `color`
-declines.
+nested list (the interpreter maps to the leaves), a list of points at a scalar
+parameter, a function whose result is not a scalar or a point (a list of lists),
+and a list argument of a recursive call. A list of points at a parameter
+declared as a point (a tuple type, not one that only the index reads of the body
+inferred, `isIndexReadTuple()`), in a signature that is not all scalar and has
+no parameter `broadcastable<T>` (`pointsMapAt()`, the test of the interpreter's
+`pointListParamSlots()`), is mapped the same way, one point per call (CE-1477):
+the arguments of each call of such a function are lowered before the function, a
+list of points at such a parameter is zipped with the other lists of points
+there and with the flat lists at scalar parameters (of one length, as above),
+and a point or a scalar elsewhere is bound whole. An argument of such a call
+whose static type at the call settles no shape (`unknown`), at a slot where the
+call maps, declines with `unsettled-shape`, and so does one beside a flat list
+that a call maps over: the interpreter pairs it with the points or zips it with
+the list when it is a list and binds it whole otherwise. An occurrence that the
+engine narrows at the call (`t` at a `real` slot) is read by its narrowed type:
+a list passed to an untyped parameter of a function literal is a value outside
+the type that the body implies, and the result is unspecified
+(`docs/COMPILATION-MODEL.md`, "Fail closed"). A result that is a point makes the
+call a list of points: with `f := (p: tuple<number, number>) ↦ (p[1] + 1, p[2])`
+declared `(tuple<number, number>) -> tuple<number, number>`, `f(P)` is
+`[(2, 2), (4, 4)]` at `P = [(1, 2), (3, 4)]`, and so is a flat list mapped at a
+scalar parameter (`f((1, 2), L)` of
+`f := (p: tuple<real, real>, t: real) ↦ (p[1] + t, p[2])`). On GLSL a list of
+points of a constant length is written out (a `PointList` or a literal `List` of
+points, "Tuples"): `f` of it compiles when the result of `f` is a scalar, and a
+list of points as the result declines. A tuple argument for a scalar parameter
+declines (a tuple is atomic). A declared result `complex` of a real body is the
+body converted to the complex lane. A declared result `color` takes a body on
+the colour lane ("The colour lane"); a parameter `color` declines.
 
 A parameter declared a list of reals or integers
 (`(list<integer>, integer) -> integer`) is a list: of a stated length, which the
@@ -3857,19 +3839,19 @@ record, or the unit type `nothing`: a field whose value is `Nothing`. On
 JavaScript a record is the array of its fields (a `list` instruction of the
 record type), a `nothing` field `null` (the operation `nothing`). Records
 compile on JavaScript only (user decision Q3 of the plan of CE-1652): in the
-interval mode and in the `bigint` mode a constructor declines ("records
-compile on javascript only"), also when a field read would fold the record away,
-and a `Tuple` or a `List` of several lanes is lowered as before ("elements of
-two types"); `admits()` refuses the lane there too. GLSL (CE-1870) holds a
-vector only: the record of a nominal tuple type of two to four fields, each
-declared a real or an integer (`vectorRecord()` of `ir.ts`). The constructor
-of another nominal type declines with the cause (`notVector()` of
-`lower-records.ts`, `recordLowering(cx, javascript, vectors)`), `admits()`
-refuses every other record (`Profile.vectorRecords`), and the printer spells
-the record `vecN`, its `list` instruction `vecN(…)` and a `field` as an
-element. The rest is the lowering of records of JavaScript: the nominal
-name in `sameFields()`, the equality of the fields of one nominal type, the
-declines of a record against a tuple, the discharges of `absent()`.
+interval mode and in the `bigint` mode a constructor declines ("records compile
+on javascript only"), also when a field read would fold the record away, and a
+`Tuple` or a `List` of several lanes is lowered as before ("elements of two
+types"); `admits()` refuses the lane there too. GLSL (CE-1870) holds a vector
+only: the record of a nominal tuple type of two to four fields, each declared a
+real or an integer (`vectorRecord()` of `ir.ts`). The constructor of another
+nominal type declines with the cause (`notVector()` of `lower-records.ts`,
+`recordLowering(cx, javascript, vectors)`), `admits()` refuses every other
+record (`Profile.vectorRecords`), and the printer spells the record `vecN`, its
+`list` instruction `vecN(…)` and a `field` as an element. The rest is the
+lowering of records of JavaScript: the nominal name in `sameFields()`, the
+equality of the fields of one nominal type, the declines of a record against a
+tuple, the discharges of `absent()`.
 
 - **Making a record.** The constructor of a nominal tuple type that
   `type P = tuple<…>` declares (`recordConstructor()`; not a parameterized or an
@@ -3887,10 +3869,9 @@ declines of a record against a tuple, the discharges of `absent()`.
   a list, a record) is a record with no names (`Tuple("a", t)`, `[t, "a"]`); a
   `Tuple` or `List` of one lane stays the tuple or the list of "Tuples" and
   "Lists". On JavaScript a `List` of flat lists of numbers, one of them of a
-  run-time length, is a list of lists of the lane `rows` ("The rows lane"),
-  not a record. A field of a run-time length declines (its length is a value
-  of the function that makes the record), and so does a field of the lane
-  `rows`. A
+  run-time length, is a list of lists of the lane `rows` ("The rows lane"), not
+  a record. A field of a run-time length declines (its length is a value of the
+  function that makes the record), and so does a field of the lane `rows`. A
   list of records (an element of a build, a filter or a random frame) declines.
 - **Reading a record.** `Field(r, name)` of a record of a named tuple type and
   `At(r, k)` (`First`, `Last`) of a constant `k` in range give the field (the
@@ -3953,12 +3934,12 @@ declines of a record against a tuple, the discharges of `absent()`.
   or inferred type is a `dictionary` or a `record` type declines ("not a
   scalar"). As the result of the code a dictionary is an object of its keys, and
   at a function of the host it is the engine's dictionary of its keys
-  (`boxValue()` of `print-js.ts`). The values of a dictionary are nodes of
-  the program (`readers` of `lower.ts`, with the dictionary as their reader),
-  so a `List` or a `Tuple` literal that is a value of a dictionary is listed
+  (`boxValue()` of `print-js.ts`). The values of a dictionary are nodes of the
+  program (`readers` of `lower.ts`, with the dictionary as their reader), so a
+  `List` or a `Tuple` literal that is a value of a dictionary is listed
   (`Listed`) and a function of the host receives it
-  (`figureDraw({p -> (t, 1)})`). A value of a dictionary is not a place where
-  a list of NaN stands for an absent list (`nanForAbsent()`).
+  (`figureDraw({p -> (t, 1)})`). A value of a dictionary is not a place where a
+  list of NaN stands for an absent list (`nanForAbsent()`).
 - **Protocol methods.** A call whose head is the dispatcher of a protocol member
   (`rotateAbout(c, a, p)`, and the member call `c.rotateAbout(a, p)`, which has
   the same canonical form) and whose first operand is a record of a named type
@@ -4115,19 +4096,19 @@ declines of a record against a tuple, the discharges of `absent()`.
   array of its elements: such a value inside a list, a tuple or a record
   declines. At the top of an argument the interpreter passes the `List` of the
   elements of a finite lazy indexed collection (`listedHostArguments()` of
-  `listed-element.ts`, CE-1807), so there a list of scalars whose static type
-  is a list and whose length is a constant of at most `ce.maxCollectionSize`
-  is taken whatever made it (`listedByHost()` of `lower.ts`): a `Range`, a
-  `Map`, an element-wise sum, a constant, an `if` of two lists. A list of a
-  run-time length there declines. A function lowered for a listed argument
-  declines a later call with an argument that is not (`coversListed()`). The
-  tracking runs in a second lowering of a program whose first lowering reaches
-  such a host argument (`NeedsListed`), so a program with no such argument keeps
-  its code; in it, a `Tuple` or a `List` literal of several types holds its head
-  too, so `figureDraw((t, "a"))` and `draw([circle(…), circle(…)])` compile. A
-  record of no names that is not such a literal (a constant `pair = (1, "a")`),
-  a colour (the code holds `Rgb(0.5, 0, 0)` in OKLCh), a complex number, a list
-  of a run-time length in a rest argument and a lane `rows` decline. The host
+  `listed-element.ts`, CE-1807), so there a list of scalars whose static type is
+  a list and whose length is a constant of at most `ce.maxCollectionSize` is
+  taken whatever made it (`listedByHost()` of `lower.ts`): a `Range`, a `Map`,
+  an element-wise sum, a constant, an `if` of two lists. A list of a run-time
+  length there declines. A function lowered for a listed argument declines a
+  later call with an argument that is not (`coversListed()`). The tracking runs
+  in a second lowering of a program whose first lowering reaches such a host
+  argument (`NeedsListed`), so a program with no such argument keeps its code;
+  in it, a `Tuple` or a `List` literal of several types holds its head too, so
+  `figureDraw((t, "a"))` and `draw([circle(…), circle(…)])` compile. A record of
+  no names that is not such a literal (a constant `pair = (1, "a")`), a colour
+  (the code holds `Rgb(0.5, 0, 0)` in OKLCh), a complex number, a list of a
+  run-time length in a rest argument and a lane `rows` decline. The host
   function's static type still must be `real`, `integer`, `boolean` or
   `nothing`.
 - **The result of `run()`.** A record result of the entry is converted once, at
@@ -4143,90 +4124,90 @@ declines of a record against a tuple, the discharges of `absent()`.
 ## Arrays
 
 A mutable array of machine cells (`array<T>`, `docs/COMPILATION-MODEL.md`,
-"Arrays") is a value of the lane `array`, on JavaScript in the default mode,
-and read as an input on GLSL (`lower-arrays.ts`). Its IR type holds the cell: `IRType.array = { cell,
-type, lane, tuple? }`, the storage kind of `arrayStorageKind()`, the lane of a
-cell (`integer` or `real`) and, for a tuple cell, its tag and field names. An
-array has no length in its type: it is one shape whatever its count.
+"Arrays") is a value of the lane `array`, on JavaScript in the default mode, and
+read as an input on GLSL (`lower-arrays.ts`). Its IR type holds the cell:
+`IRType.array = { cell, type, lane, tuple? }`, the storage kind of
+`arrayStorageKind()`, the lane of a cell (`integer` or `real`) and, for a tuple
+cell, its tag and field names. An array has no length in its type: it is one
+shape whatever its count.
 
-The value is the engine's `BoxedArray`. The code reads its fields at each
-use: `_cells` (the typed array), `_count`, `_version`. So every operation of
-the lane is `effectful` (`arr.get`, `arr.set`, `arr.byte`, `arr.setbyte`,
-`arr.len`, `arr.touch`, `arr.swap`, `arr.from.*`; the forms `.int` for an
-integer cell and `.r` for an index on the real lane, which is tested for an
-integer): they keep their place, count and order, and no pass moves a read
-across a store, a `Swap` or a call of the host. `arr.ref`, the reference of
-an array that a value of the program holds, is pure.
+The value is the engine's `BoxedArray`. The code reads its fields at each use:
+`_cells` (the typed array), `_count`, `_version`. So every operation of the lane
+is `effectful` (`arr.get`, `arr.set`, `arr.byte`, `arr.setbyte`, `arr.len`,
+`arr.touch`, `arr.swap`, `arr.from.*`; the forms `.int` for an integer cell and
+`.r` for an index on the real lane, which is tested for an integer): they keep
+their place, count and order, and no pass moves a read across a store, a `Swap`
+or a call of the host. `arr.ref`, the reference of an array that a value of the
+program holds, is pure.
 
 How an array reaches the code (`lower-arrays.ts`, `adapter.ts`):
 
-- a parameter of the root function literal: an entry parameter with a check
-  of the cell type (`arrayEntryCheck`);
-- a name whose value is an array: an input `_.name` that the wrapper of
-  `run()` reads in the engine at each call, from the definition of the name
-  at the compilation, and checks; the name is in the result's `arrays`, not
-  in `captures`;
-- a name whose value is an array and that the root function literal
-  assigns, itself or through a user function: a name of `Program.assigns`
+- a parameter of the root function literal: an entry parameter with a check of
+  the cell type (`arrayEntryCheck`);
+- a name whose value is an array: an input `_.name` that the wrapper of `run()`
+  reads in the engine at each call, from the definition of the name at the
+  compilation, and checks; the name is in the result's `arrays`, not in
+  `captures`;
+- a name whose value is an array and that the root function literal assigns,
+  itself or through a user function: a name of `Program.assigns`
   (`Assigned.array`), not of `arrays`, which `run()` reads and writes back
-  (`assigningRun()`) and the code writes and reads around each call of the
-  host (`state.put.arr`, `state.get.arr`);
-- in a program that calls the host, itself or through a user function, a
-  name whose value is an array and that the program reads: a name of
-  `Program.assigns` with `Assigned.read`, reported in `arrays`, which the
-  code reads again after each call of the host (`state.get.arr`, no
-  `state.put`) and `run()` does not write back;
-- an array inside a value that a name holds (a named tuple): `_SYS.arrays.refs[k]`,
-  bound in `runtimeOf()` as `_SYS.hosts` is, with the name in `captures`;
+  (`assigningRun()`) and the code writes and reads around each call of the host
+  (`state.put.arr`, `state.get.arr`);
+- in a program that calls the host, itself or through a user function, a name
+  whose value is an array and that the program reads: a name of
+  `Program.assigns` with `Assigned.read`, reported in `arrays`, which the code
+  reads again after each call of the host (`state.get.arr`, no `state.put`) and
+  `run()` does not write back;
+- an array inside a value that a name holds (a named tuple):
+  `_SYS.arrays.refs[k]`, bound in `runtimeOf()` as `_SYS.hosts` is, with the
+  name in `captures`;
 - `ArrayFrom`: a call of `_SYS.arrays.make[k]`, which evaluates the engine's
   `ArrayFrom` with the binding of the node.
 
-A read is `+a._cells[i > 0 ? i - 1 : a._cells.length + i]`: outside the
-cells a typed array gives `undefined`, and the unary plus makes it `NaN`, the
-interpreter's value. A store is `(a._version++, a._cells[…] = v)`, with no
-range test. A tuple cell is four bytes at `4k` to `4k + 3`: the read of one
-field is one `arr.byte`, and the read of the cell is a record of its nominal
-type (or a tuple of the code for a type with no name). A unit that holds a
-store calls `arrayNote` (the store epoch of the engine and one state event)
-before each `call.host<k>` and in a `finally` of `run()`.
+A read is `+a._cells[i > 0 ? i - 1 : a._cells.length + i]`: outside the cells a
+typed array gives `undefined`, and the unary plus makes it `NaN`, the
+interpreter's value. A store is `(a._version++, a._cells[…] = v)`, with no range
+test. A tuple cell is four bytes at `4k` to `4k + 3`: the read of one field is
+one `arr.byte`, and the read of the cell is a record of its nominal type (or a
+tuple of the code for a type with no name). A unit that holds a store calls
+`arrayNote` (the store epoch of the engine and one state event) before each
+`call.host<k>` and in a `finally` of `run()`.
 
-The scan `callbackScan()` declines a read or a store in the body of a
-function literal that is an operand or a value. `absent()` declines a
-discharge of a record of a nominal type that is a tuple cell. The entry plan
-of such code has `arrays: true`, and `restoreEntryPlan()` refuses it.
+The scan `callbackScan()` declines a read or a store in the body of a function
+literal that is an operand or a value. `absent()` declines a discharge of a
+record of a nominal type that is a tuple cell. The entry plan of such code has
+`arrays: true`, and `restoreEntryPlan()` refuses it.
 
 On GLSL (`LowerOptions.glsl`) an array is an input of the entry and is read
-only: `lower-arrays.ts` declines every other use (`readOnly()`,
-`heldValue()`), and integer cells whose range is outside ±2^24 (`exact()`).
-A cell of one number is `arr.get` or `arr.get.int` (`.r` for an index on the
-real lane, spelled alike), a tuple cell one `arr.get4` (a list of four
-integers, one texel; the verifier knows its type), an element of it an
-`elem` of that read, and the count `arr.len`. For a tuple cell of a nominal
-type the `arr.get4` is the record of that type (four integer fields, the
-name and the field names), a vector of GLSL ("Records"); the verifier
-requires its name to be the tag of the cell, and `absent()` declines a
-discharge of it. After the passes,
-`holdArrays()` (`index.ts`) gives each array input the texture of its cells
-in `IRType.storage` when it is not the default one (`isampler2D` for signed
-integer cells, `sampler2D` for the names of the option `storage`, bytes in a
-normalized texture) and, to a fixed point, to the parameters of the
-functions it is passed to; it refuses an array that is not a parameter, a
-yield, a read by another operation than an `arr.*`, and a parameter that two
-calls give two textures. The printer spells `<op>.<storage>` as for a list
-in storage: one helper per texture (`_gpu_ir_cell_f`, `_gpu_ir_cell_u`,
-`_gpu_ir_cell_i`, `_gpu_ir_cell_n`, `_gpu_ir_cell4_u`, `_gpu_ir_cell4_n`),
-with the index test of `at` against the uniform `$0_count`. An array
-parameter is declared as its sampler and its count
-(`highp usampler2D A, int A_count`), and a call passes both (`Syntax.call`
-takes the types of the arguments); `GlslResult.parameters` lists the
-sampler, then the count (`{ input: 'A', name: 'A_count', type: 'int',
-count: true }`), in the order of the parameters of `f`. `holdStorage()`
-leaves an array to `holdArrays()` on GLSL only; the JavaScript slice keeps
-its refusal of a `storage` hint on an array. `adapter-glsl.ts` reports
-`lowered` (the sampler: `highp usampler2D`, `highp isampler2D` or
-`highp sampler2D`) and `count` in `freeSymbolTypes`, and declines a constant
-index that is 0 or not an integer, another input spelled as the sampler or
-the count of an array, and a `vars` entry of an array.
+only: `lower-arrays.ts` declines every other use (`readOnly()`, `heldValue()`),
+and integer cells whose range is outside ±2^24 (`exact()`). A cell of one number
+is `arr.get` or `arr.get.int` (`.r` for an index on the real lane, spelled
+alike), a tuple cell one `arr.get4` (a list of four integers, one texel; the
+verifier knows its type), an element of it an `elem` of that read, and the count
+`arr.len`. For a tuple cell of a nominal type the `arr.get4` is the record of
+that type (four integer fields, the name and the field names), a vector of GLSL
+("Records"); the verifier requires its name to be the tag of the cell, and
+`absent()` declines a discharge of it. After the passes, `holdArrays()`
+(`index.ts`) gives each array input the texture of its cells in `IRType.storage`
+when it is not the default one (`isampler2D` for signed integer cells,
+`sampler2D` for the names of the option `storage`, bytes in a normalized
+texture) and, to a fixed point, to the parameters of the functions it is passed
+to; it refuses an array that is not a parameter, a yield, a read by another
+operation than an `arr.*`, and a parameter that two calls give two textures. The
+printer spells `<op>.<storage>` as for a list in storage: one helper per texture
+(`_gpu_ir_cell_f`, `_gpu_ir_cell_u`, `_gpu_ir_cell_i`, `_gpu_ir_cell_n`,
+`_gpu_ir_cell4_u`, `_gpu_ir_cell4_n`), with the index test of `at` against the
+uniform `$0_count`. An array parameter is declared as its sampler and its count
+(`highp usampler2D A, int A_count`), and a call passes both (`Syntax.call` takes
+the types of the arguments); `GlslResult.parameters` lists the sampler, then the
+count (`{ input: 'A', name: 'A_count', type: 'int', count: true }`), in the
+order of the parameters of `f`. `holdStorage()` leaves an array to
+`holdArrays()` on GLSL only; the JavaScript slice keeps its refusal of a
+`storage` hint on an array. `adapter-glsl.ts` reports `lowered` (the sampler:
+`highp usampler2D`, `highp isampler2D` or `highp sampler2D`) and `count` in
+`freeSymbolTypes`, and declines a constant index that is 0 or not an integer,
+another input spelled as the sampler or the count of an array, and a `vars`
+entry of an array.
 
 ## How to add
 
@@ -4360,33 +4341,31 @@ in `adapter.ts` (JavaScript), `adapter-glsl.ts` and `adapter-interval.ts`, and
   at the start of its body (so that an arm rebinds a binding of the frame,
   `arm()`), and when it writes one its IR function returns the record of the
   value of the body and of each name it writes; the call reads the fields and
-  rebinds the names (`Lowering.stateWrite()`). A `Loop` carries such a name,
-  as it carries a local (`loop()`). A function named as an operand
-  (`Map(f, L)`, `namedUser()`) is scanned as a call, and the facts of the
-  symbol count its names; a call of a function that the scan did not reach (a
-  function value) that reads such a name declines (`free()`), and so does a
-  lazy collection that reaches such a function and reads no variable of the
-  engine (`readsVariableIn()`, the interpreter's rule of listing, without
-  the names that the program binds). A write in a loop frame (a `Sum`, a
-  callback of `Map`), a call that maps over a list (`mapOver()`), a recursive
-  writer and a list name written by a function decline. A name that holds an
-  array of machine cells is such a name too (`Assigned.array`): a positional
-  parameter of its array type, a local that an `Assign` binds to another
-  array of the same cells, whose reference the entry returns and `run()`
-  writes back. A call of a function of the host in such a literal
-  (`hostCall()`) reads and writes every name of `assigns`: before the
-  `call.host<k>`, one `state.put` of the index `j` and the value of each
-  name (`_SYS.state.put(j, v)`, `writeAssigned()` of `print-js.ts`, the
-  write of `run()`), and after it one `state.get` of each, on the lane of
-  the name (`_SYS.state.get(j)`, `readAssigned()`, the read of `run()`,
-  which throws its `TypeError`), which rebinds the name
-  (`Lowering.stateWrite()`). Both operations are effectful, so they keep
-  their place around the call. The `facts()` of the call count every name,
-  so a `Loop` carries them and the arms of an `If` give them; a user
-  function that calls the host, itself or through its calls
-  (`assignedNames()` records it as `host` of `stateOf()`), reads and writes
-  every name that is not a list. A list name, and a call in a loop frame (a
-  `Sum`, a callback of `Map`), decline. A warning of a
+  rebinds the names (`Lowering.stateWrite()`). A `Loop` carries such a name, as
+  it carries a local (`loop()`). A function named as an operand (`Map(f, L)`,
+  `namedUser()`) is scanned as a call, and the facts of the symbol count its
+  names; a call of a function that the scan did not reach (a function value)
+  that reads such a name declines (`free()`), and so does a lazy collection that
+  reaches such a function and reads no variable of the engine
+  (`readsVariableIn()`, the interpreter's rule of listing, without the names
+  that the program binds). A write in a loop frame (a `Sum`, a callback of
+  `Map`), a call that maps over a list (`mapOver()`), a recursive writer and a
+  list name written by a function decline. A name that holds an array of machine
+  cells is such a name too (`Assigned.array`): a positional parameter of its
+  array type, a local that an `Assign` binds to another array of the same cells,
+  whose reference the entry returns and `run()` writes back. A call of a
+  function of the host in such a literal (`hostCall()`) reads and writes every
+  name of `assigns`: before the `call.host<k>`, one `state.put` of the index `j`
+  and the value of each name (`_SYS.state.put(j, v)`, `writeAssigned()` of
+  `print-js.ts`, the write of `run()`), and after it one `state.get` of each, on
+  the lane of the name (`_SYS.state.get(j)`, `readAssigned()`, the read of
+  `run()`, which throws its `TypeError`), which rebinds the name
+  (`Lowering.stateWrite()`). Both operations are effectful, so they keep their
+  place around the call. The `facts()` of the call count every name, so a `Loop`
+  carries them and the arms of an `If` give them; a user function that calls the
+  host, itself or through its calls (`assignedNames()` records it as `host` of
+  `stateOf()`), reads and writes every name that is not a list. A list name, and
+  a call in a loop frame (a `Sum`, a callback of `Map`), decline. A warning of a
   random frame is in `warnings` (`kind: 'correctness'`). `profile` is `'ir'`.
 - **Stored code.** The result has the fields of stored code
   (`StoredJavaScript`): `preambleOnce` (and `preamble`, the same text) holds the

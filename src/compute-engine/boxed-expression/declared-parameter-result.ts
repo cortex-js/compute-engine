@@ -18,9 +18,7 @@ import {
 import { scopeChainDeclarationCount } from '../scope-declaration-count.js';
 import { withScratchScope } from '../scratch-scopes.js';
 import { failClosedCounts } from './store-guard.js';
-import {
-  noteStackDependentAnswer,
-} from '../static-typing-view.js';
+import { noteStackDependentAnswer } from '../static-typing-view.js';
 
 /**
  * The scope the function literal `literal` was defined in: the parent of the
@@ -1083,10 +1081,7 @@ function emptyElementSeedOf(t: Type): Type | undefined {
  * `unknown`. A record key, an alias name or a value type whose text is
  * "unknown" is not the primitive type. `seen` holds the aliases that are
  * being read, so a recursive alias is read once. */
-export function mentionsUnknown(
-  t: Type,
-  seen: Set<Type> = new Set()
-): boolean {
+export function mentionsUnknown(t: Type, seen: Set<Type> = new Set()): boolean {
   if (typeof t === 'string') return t === 'unknown';
   const any = (types: readonly Type[]) =>
     types.some((x) => mentionsUnknown(x, seen));

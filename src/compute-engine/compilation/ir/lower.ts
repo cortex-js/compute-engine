@@ -532,7 +532,6 @@ type Misuse = 'write' | 'read' | undefined;
 const worse = (a: Misuse, b: Misuse): Misuse =>
   a === 'write' || b === 'write' ? 'write' : (a ?? b);
 
-
 /** The decline of a call of a function of the host with a list, a tuple
  *  or a record as an argument in a lowering that does not track the
  *  `Listed` of its values (`Lowering.trackListed`): `lowerWide()` lowers
@@ -1799,8 +1798,8 @@ function lowerOnce(
       ) &&
       [...(s.marks ?? []), ...(t.marks ?? [])].every((m) => m === undefined)
     )
-      return s.fields!
-        .map((_, k) =>
+      return s
+        .fields!.map((_, k) =>
           apply(node, 'Equal', [
             records.field(node, x, k),
             records.field(node, y, k),
@@ -1993,7 +1992,10 @@ function lowerOnce(
     const a = arrayBase(cell.ops[0]);
     if (a === undefined || !arrays.tupleCells(a)) return undefined;
     if (k === undefined)
-      decline(e, 'an element of a tuple cell of an array at an index that is not a constant');
+      decline(
+        e,
+        'an element of a tuple cell of an array at an index that is not a constant'
+      );
     return arrays.element(e, a, cell.ops[1], k);
   };
 
@@ -5025,7 +5027,8 @@ function lowerOnce(
 
   /** `ir`, the type of an input, is the IR type of the engine type `t`. */
   const sameInput = (ir: IRType, t: Type): boolean => {
-    if (ir.lane === 'array') return arrayIRType(t)?.array?.cell === ir.array?.cell;
+    if (ir.lane === 'array')
+      return arrayIRType(t)?.array?.cell === ir.array?.cell;
     const x = inputIR(t) ?? rowsInput(t);
     return (
       x !== undefined &&
@@ -6510,7 +6513,10 @@ function lowerOnce(
               : undefined;
           // A local of an array type: an array of those cells, which a write
           // replaces with another (`assign()`).
-          if (!scalarLocal && arrayCells(ce.type(typeName).type) !== undefined) {
+          if (
+            !scalarLocal &&
+            arrayCells(ce.type(typeName).type) !== undefined
+          ) {
             const cells = arrays.cellsOf(s, ce.type(typeName).type)!;
             const v = cx.value(value)!;
             if (type(v).array?.cell !== cells.cell)
@@ -7426,7 +7432,10 @@ function lowerOnce(
         ? lookup(target.ops[0].symbol)
         : undefined;
       // A cell of an array (`lower-arrays.ts`).
-      if (owned?.binding.whole === undefined && owned?.binding.role !== 'list') {
+      if (
+        owned?.binding.whole === undefined &&
+        owned?.binding.role !== 'list'
+      ) {
         const stored = arrays.addTo(e);
         if (stored !== undefined) return stored;
       }

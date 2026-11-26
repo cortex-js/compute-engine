@@ -231,10 +231,7 @@ import type {
 import type { EvaluateHandlerOptions } from '../types-definitions.js';
 import { runWithEvaluationEffects } from '../effects-registry.js';
 import type { EffectHandlers } from '../types-effects.js';
-import type {
-  ArrayInterface,
-  FunctionInterface,
-} from '../types-expression.js';
+import type { ArrayInterface, FunctionInterface } from '../types-expression.js';
 import type {
   Type,
   TypeParameter,
@@ -9547,7 +9544,8 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
     EvaluateAt: {
       description: 'Evaluate a function at one point or between two bounds.',
       lazy: true,
-      signature: '(f: function, lower: expression, upper: expression?) -> unknown',
+      signature:
+        '(f: function, lower: expression, upper: expression?) -> unknown',
       parameters: {
         f: {
           description: 'The function, or an expression of its free variables.',
@@ -15622,10 +15620,7 @@ function canonicalCellAssign(
     isSubtype(last.type.type, INDEXED_COLLECTION_SHAPE_TYPE)
   )
     ops[ops.length - 1] = ce.typeError('integer', last.type, last);
-  return ce._fn('Assign', [
-    ce.function('At', [root, ...ops]),
-    value.canonical,
-  ]);
+  return ce._fn('Assign', [ce.function('At', [root, ...ops]), value.canonical]);
 }
 
 /**

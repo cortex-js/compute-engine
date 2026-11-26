@@ -1118,7 +1118,8 @@ export function listLowering(cx: Lowering) {
         'a list of lists of run-time length (JavaScript only, outside the interval and the bigint modes)'
       );
     const t = type(v);
-    if (cx.tuples.has(v)) decline(e, 'a list of lists of run-time length of points');
+    if (cx.tuples.has(v))
+      decline(e, 'a list of lists of run-time length of points');
     if (t.lane !== 'integer' && t.lane !== 'real')
       decline(
         e,
@@ -1287,7 +1288,8 @@ export function listLowering(cx: Lowering) {
       // `rows` (CE-1736).
       const kept = over(e, s, name, c.ops[2], true, c);
       const lane = cx.rowsElements.get(kept);
-      s = lane === undefined ? listSource(kept) : rowsOf(e, kept, lane).source();
+      s =
+        lane === undefined ? listSource(kept) : rowsOf(e, kept, lane).source();
     }
     const v = over(e, s, name, e.ops[0], false, e);
     if (b.changes() > before)
@@ -2939,7 +2941,8 @@ export function listLowering(cx: Lowering) {
       init: [init],
       body: region,
     });
-    if (b.changes() > effects) decline(e, 'Reduce by a function with an effect');
+    if (b.changes() > effects)
+      decline(e, 'Reduce by a function with an effect');
     return out;
   };
 

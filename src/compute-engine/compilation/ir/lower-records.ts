@@ -318,7 +318,10 @@ export function recordLowering(
     const { constant, ...f } = t.fields![k];
     if (f.shape.includes(0)) {
       if (f.shape.length !== 1 || t.marks?.[k] !== undefined)
-        decline(e, 'a read of a field that is an empty list of lists or points');
+        decline(
+          e,
+          'a read of a field that is an empty list of lists or points'
+        );
       return cx.emptyList(e, f.lane);
     }
     const v = b.op('field', [r, b.constant(k, 'integer')], f);

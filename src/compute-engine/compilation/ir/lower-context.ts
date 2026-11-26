@@ -20,14 +20,7 @@ import {
   isExpression,
   isFunction,
 } from '../../boxed-expression/type-guards.js';
-import type {
-  Assigned,
-  Builder,
-  IRType,
-  Lane,
-  Region,
-  V,
-} from './ir.js';
+import type { Assigned, Builder, IRType, Lane, Region, V } from './ir.js';
 import type { OperatorRow } from './operators.js';
 import { STANDARD_LIBRARIES } from '../../library/library.js';
 

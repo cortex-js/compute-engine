@@ -784,17 +784,18 @@ function compileIr(
       ),
     workers: () => engine.workers,
   };
-  result.broadcastAsync = arrays !== undefined
-    ? () => Promise.reject(arrayBroadcastError())
-    : bigint
-    ? () => Promise.reject(bigintBroadcastError())
-    : strings
-      ? () => Promise.reject(stringBroadcastError())
-      : rows
-        ? () => Promise.reject(rowsBroadcastError())
-        : records
-          ? () => Promise.reject(recordBroadcastError())
-          : makeBroadcastAsync(asyncSpec);
+  result.broadcastAsync =
+    arrays !== undefined
+      ? () => Promise.reject(arrayBroadcastError())
+      : bigint
+        ? () => Promise.reject(bigintBroadcastError())
+        : strings
+          ? () => Promise.reject(stringBroadcastError())
+          : rows
+            ? () => Promise.reject(rowsBroadcastError())
+            : records
+              ? () => Promise.reject(recordBroadcastError())
+              : makeBroadcastAsync(asyncSpec);
   result.willUsePool =
     bigint || strings || rows || records || arrays !== undefined
       ? () => false

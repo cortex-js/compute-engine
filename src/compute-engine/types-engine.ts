@@ -2009,8 +2009,7 @@ export interface IComputeEngine {
    * engine refuses a storage of more than 2 GiB (2^31 bytes) for one array.
    */
   arrayAllocation:
-    | undefined
-    | ((count: number, bytesPerCell: number) => boolean);
+    undefined | ((count: number, bytesPerCell: number) => boolean);
 
   /**
    * A function called with each array that `ArrayFrom` made, after the

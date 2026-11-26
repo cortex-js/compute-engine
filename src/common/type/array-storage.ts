@@ -41,16 +41,15 @@ export function arrayCellType(type: Type): Type | undefined {
 
 /** The integer storages, in the order of the table: the first one whose
  * range holds the range of the cell type applies. */
-const INTEGER_STORAGES: ReadonlyArray<
-  readonly [ArrayStorage, number, number]
-> = [
-  ['uint8', 0, 255],
-  ['int8', -128, 127],
-  ['uint16', 0, 65_535],
-  ['int16', -32_768, 32_767],
-  ['uint32', 0, 4_294_967_295],
-  ['int32', -2_147_483_648, 2_147_483_647],
-];
+const INTEGER_STORAGES: ReadonlyArray<readonly [ArrayStorage, number, number]> =
+  [
+    ['uint8', 0, 255],
+    ['int8', -128, 127],
+    ['uint16', 0, 65_535],
+    ['int16', -32_768, 32_767],
+    ['uint32', 0, 4_294_967_295],
+    ['int32', -2_147_483_648, 2_147_483_647],
+  ];
 
 const EXPRESSION_CELLS: ArrayStorageKind = Object.freeze({
   storage: 'expression',
@@ -93,7 +92,9 @@ export function arrayStorageKind(cellType: Type): ArrayStorageKind {
   if (t.kind === 'reference') {
     // A nominal type: a machine cell only as the tuple of four bytes.
     const def = throughTransparentAliases(aliasDefinitionAt(t));
-    return isByteTuple(def) ? { storage: 'uint8', tuple: true } : EXPRESSION_CELLS;
+    return isByteTuple(def)
+      ? { storage: 'uint8', tuple: true }
+      : EXPRESSION_CELLS;
   }
   if (t.kind === 'numeric') {
     if (t.type === 'real') return { storage: 'float64', tuple: false };

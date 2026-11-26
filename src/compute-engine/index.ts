@@ -1722,8 +1722,7 @@ export class ComputeEngine implements IComputeEngine {
    * @experimental
    */
   arrayAllocation:
-    | undefined
-    | ((count: number, bytesPerCell: number) => boolean) = undefined;
+    undefined | ((count: number, bytesPerCell: number) => boolean) = undefined;
 
   /**
    * A function called with each array that `ArrayFrom` made, after the
@@ -1736,9 +1735,8 @@ export class ComputeEngine implements IComputeEngine {
    *
    * @experimental
    */
-  arrayCreated:
-    | undefined
-    | ((array: Expression & ArrayInterface) => void) = undefined;
+  arrayCreated: undefined | ((array: Expression & ArrayInterface) => void) =
+    undefined;
 
   /**
    * Return symbol tables suitable for the specified categories, or `"all"`

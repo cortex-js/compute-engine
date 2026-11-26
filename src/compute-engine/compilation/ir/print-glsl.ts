@@ -1942,9 +1942,7 @@ export const GLSL: Syntax = deepFreeze({
   // An array argument is its sampler and its count.
   call: (fn, args, types) =>
     `_fn_ir_${fn}(${args
-      .map((a, k) =>
-        types?.[k]?.lane === 'array' ? `${a}, ${a}_count` : a
-      )
+      .map((a, k) => (types?.[k]?.lane === 'array' ? `${a}, ${a}_count` : a))
       .join(', ')})`,
   fn: (name, params, result, body) =>
     [

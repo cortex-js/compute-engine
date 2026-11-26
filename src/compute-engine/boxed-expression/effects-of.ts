@@ -1395,10 +1395,17 @@ function mutationEffects(
     let rootType: Type | undefined;
     if (name !== undefined) {
       const def = nodeDefinition(root, name);
-      rootType = def !== undefined && 'value' in def ? def.value.type.type : undefined;
+      rootType =
+        def !== undefined && 'value' in def ? def.value.type.type : undefined;
     } else rootType = root.type.type;
-    const labels = cellStoreLabels(rootType, target.nops - 1, name !== undefined);
-    let effects = labels.scope ? declared : subtractEffects(declared, ['scope']);
+    const labels = cellStoreLabels(
+      rootType,
+      target.nops - 1,
+      name !== undefined
+    );
+    let effects = labels.scope
+      ? declared
+      : subtractEffects(declared, ['scope']);
     if (labels.state) effects = unionComputedEffects(effects, ['state']);
     return effects;
   }
@@ -1442,9 +1449,13 @@ function mutationEffects(
  * literal, as `mutationEffects()` reads it for the store of a cell. No read
  * is recorded. `undefined` when the node records no value definition.
  */
-export function homeValueType(node: Expression, name: string): Type | undefined {
+export function homeValueType(
+  node: Expression,
+  name: string
+): Type | undefined {
   const def = homeResolution(node, name);
-  if (def === NO_HOME || def === undefined || !('value' in def)) return undefined;
+  if (def === NO_HOME || def === undefined || !('value' in def))
+    return undefined;
   return def.value.type.type;
 }
 

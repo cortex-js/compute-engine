@@ -187,10 +187,7 @@ export function stripNumericRanges(t: Type): Type {
  * carry bounds: echoing `real<0..>` for `−|x|` claimed a sign the value
  * contradicts.
  */
-export function negateNumericType(
-  t: Type,
-  seen?: Set<TypeReference>
-): Type {
+export function negateNumericType(t: Type, seen?: Set<TypeReference>): Type {
   if (typeof t === 'string') return t;
   switch (t.kind) {
     case 'numeric': {
@@ -251,10 +248,7 @@ export function negateNumericType(
       if (unfolded === t) return t;
       const decl = declarationOf(t);
       if (seen?.has(decl)) return t;
-      const reflected = negateNumericType(
-        unfolded,
-        new Set(seen).add(decl)
-      );
+      const reflected = negateNumericType(unfolded, new Set(seen).add(decl));
       if (
         reflected === unfolded ||
         typeToDedupKey(reflected) === typeToDedupKey(unfolded)

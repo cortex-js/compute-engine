@@ -222,11 +222,7 @@ function readsActivatedName(expr: Expression): boolean {
     // Written-out data (`_isLiteralData()`, decided once per node) holds no
     // symbol. A `false` answer is not kept, so the test keeps each read of a
     // view over a long list from visiting every element (CE-1831).
-    if (
-      !isFunction(e) ||
-      e._numericStore !== undefined ||
-      e._isLiteralData()
-    )
+    if (!isFunction(e) || e._numericStore !== undefined || e._isLiteralData())
       return false;
     noteOwnNames(e, bound);
     const def = e.valueDefinition;

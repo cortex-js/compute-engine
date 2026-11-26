@@ -1443,9 +1443,7 @@ export function functionLowering(
         }),
       };
     }
-    ir.results.push(
-      fn.writes.length > 0 ? type(ir.body.yields[0]) : fn.result
-    );
+    ir.results.push(fn.writes.length > 0 ? type(ir.body.yields[0]) : fn.result);
     if (!fn.guess && !fn.assumed) fn.listed = listedOf(cx, fn.value!);
     // A call in the body passes the inputs, parameters of the body.
     for (const a of fn.self) a.push(...ir.body.params.slice(fn.own));

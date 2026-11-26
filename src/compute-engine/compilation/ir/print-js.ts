@@ -173,11 +173,11 @@ const builds = (z: Ints, count: Wrap): Syntax['regions'] => {
     blocks(z, k, `${out}_n`),
   ];
   return {
-    build: ({ outs: [out], args: [n], params: [k] }) => ({
+    'build': ({ outs: [out], args: [n], params: [k] }) => ({
       open: open(out, n, k, false),
       close: ([y]) => [`  ${out}[${toNumber(k)}] = ${y};`, '}'],
     }),
-    filter: ({ outs: [c, out], args: [n], params: [k] }) => ({
+    'filter': ({ outs: [c, out], args: [n], params: [k] }) => ({
       open: open(out, n, k, true),
       close: ([keep, y]) => [
         `  if (${keep}) ${out}.push(${y});`,
@@ -326,7 +326,8 @@ export const JS: Syntax = deepFreeze({
     'arr.byte': '(+$0._cells[4 * ($1 > 0 ? $1 - 1 : $0._count + $1) + $2])',
     'arr.byte.r':
       '(+$0._cells[Number.isInteger($1) ? 4 * ($1 > 0 ? $1 - 1 : $0._count + $1) + $2 : -1])',
-    'arr.setbyte': '($0._cells[4 * ($1 > 0 ? $1 - 1 : $0._count + $1) + $2] = $3)',
+    'arr.setbyte':
+      '($0._cells[4 * ($1 > 0 ? $1 - 1 : $0._count + $1) + $2] = $3)',
     'arr.setbyte.r':
       '($0._cells[Number.isInteger($1) ? 4 * ($1 > 0 ? $1 - 1 : $0._count + $1) + $2 : -1] = $3)',
     'arr.touch': '($0._version++)',
@@ -556,14 +557,14 @@ export const JS: Syntax = deepFreeze({
     // interpreter's value where they differ is the error
     // `incompatible-dimensions` or `expected-square-matrix`.
     _agree:
-      "const _agree = (a, b) => { if (a !== b) throw new RangeError(`incompatible-dimensions: lists of lengths ${a} and ${b}`); return 0; };",
+      'const _agree = (a, b) => { if (a !== b) throw new RangeError(`incompatible-dimensions: lists of lengths ${a} and ${b}`); return 0; };',
     _square:
-      "const _square = (a, b) => { if (a !== b) throw new RangeError(`expected-square-matrix: Trace of a matrix of ${a} rows and ${b} columns`); return 0; };",
+      'const _square = (a, b) => { if (a !== b) throw new RangeError(`expected-square-matrix: Trace of a matrix of ${a} rows and ${b} columns`); return 0; };',
     // The order of the matrix of `Determinant`, `Inverse` and
     // `MatrixPower`: the interpreter's value of another is the error
     // `expected-square-matrix`.
     _order:
-      "const _order = (a, b) => { if (a !== b) throw new RangeError(`expected-square-matrix: a matrix of ${a} rows and ${b} columns`); return a; };",
+      'const _order = (a, b) => { if (a !== b) throw new RangeError(`expected-square-matrix: a matrix of ${a} rows and ${b} columns`); return a; };',
     // `At(At(g, i), j)` of a list of rows whose lengths can differ: NaN
     // where `i` is out of range of `g` or `j` of its row.
     _atr: 'const _atr = (g, i, j) => { const k = i > 0 ? i - 1 : g.length + i; if (!(Number.isInteger(i) && i !== 0 && k >= 0 && k < g.length)) return NaN; const r = g[k]; const m = j > 0 ? j - 1 : r.length + j; return Number.isInteger(j) && j !== 0 && m >= 0 && m < r.length ? r[m] : NaN; };',
@@ -953,7 +954,12 @@ function hostCaller(
  */
 export function readAssigned(
   x: Assigned
-): number | boolean | Expression | (number | boolean)[] | (number | boolean)[][] {
+):
+  | number
+  | boolean
+  | Expression
+  | (number | boolean)[]
+  | (number | boolean)[][] {
   const v = x.definition.value;
   if (x.array !== undefined) {
     arrayEntryCheck(x.array, `The variable "${x.name}"`)(v);
