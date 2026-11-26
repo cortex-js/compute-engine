@@ -273,6 +273,18 @@
 
 ### Resolved Issues
 
+- **`IsSatisfiable`, `IsTautology`, `TruthTable`, `PrimeImplicants`,
+  `PrimeImplicates`, `MinimalDNF` and `MinimalCNF` stay unevaluated for a
+  formula that holds a comparison** (CE-1850). These functions tried `True`
+  and `False` for each symbol, also for a symbol that is a number:
+  `IsSatisfiable(x > 0)` gave `False`, and `IsTautology(x > 0 || x <= 0)`
+  gave `False`. Both now stay unevaluated, and so does a formula with any
+  operand other than `True`, `False`, a symbol and the connectives `And`,
+  `Or`, `Not`, `Implies`, `Equivalent`, `Xor`, `Nand` and `Nor` (a
+  quantifier, a function call). The operand is evaluated first, so a
+  comparison with a known value is still analyzed:
+  `IsSatisfiable(P && 1 < 2)` is `True`.
+
 - **A function that is declared with a signature and has no body refuses a
   list whose elements cannot fit a parameter** (CE-1839). With
   `ce.declare('k', '(real, string) -> real')`,

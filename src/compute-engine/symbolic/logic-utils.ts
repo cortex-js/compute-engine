@@ -4,6 +4,7 @@ import type {
 } from '../global-types.js';
 
 import { isFunction, isSymbol, sym } from '../boxed-expression/type-guards.js';
+import { isLibraryOperator } from '../library-shadowing.js';
 
 /**
  * Basic evaluation functions for logical operators.
@@ -860,33 +861,49 @@ export function toDNF(expr: Expression, ce: ComputeEngine): Expression {
   return dnf.simplify();
 }
 
+/** The operators that combine truth values into a truth value. */
+const CONNECTIVES = [
+  'And',
+  'Or',
+  'Not',
+  'Implies',
+  'Equivalent',
+  'Xor',
+  'Nand',
+  'Nor',
+] as const;
+
 /**
- * Extract all propositional variables from a boolean expression.
- * Returns a sorted array of unique variable names.
+ * The variables of a propositional formula, as a sorted array of unique
+ * names, or `undefined` when `expr` is not a propositional formula.
+ *
+ * A propositional formula is `True`, `False`, a symbol, or a connective
+ * (`CONNECTIVES`) applied to propositional formulas. Each of its symbols
+ * stands for a truth value, so an analysis can try `True` and `False` for it.
+ *
+ * Any other operand is not a formula: a comparison (`x > 0`), a quantifier,
+ * a function call. Its symbols are not truth values (`x` is a number in
+ * `x > 0`), and its truth value is not independent of the other operands
+ * (`x > 0` and `x <= 0` are never both true). A truth-table analysis of it
+ * would give a wrong answer, so the caller leaves the expression unevaluated.
  */
-export function extractVariables(expr: Expression): string[] {
+export function extractVariables(expr: Expression): string[] | undefined {
   const variables = new Set<string>();
 
-  function visit(e: Expression) {
-    // Skip True/False constants
-    if (sym(e) === 'True' || sym(e) === 'False') return;
+  function visit(e: Expression): boolean {
+    if (sym(e) === 'True' || sym(e) === 'False') return true;
 
-    // If it's a symbol (variable), add it
     if (isSymbol(e) && e.operator === 'Symbol') {
       variables.add(e.symbol);
-      return;
+      return true;
     }
 
-    // Recursively process operands
-    if (isFunction(e)) {
-      for (const op of e.ops) {
-        visit(op);
-      }
-    }
+    if (!isFunction(e)) return false;
+    if (!CONNECTIVES.some((name) => isLibraryOperator(e, name))) return false;
+    return e.ops.every(visit);
   }
 
-  visit(expr);
-  return Array.from(variables).sort();
+  return visit(expr) ? Array.from(variables).sort() : undefined;
 }
 
 /**

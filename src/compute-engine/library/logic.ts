@@ -1267,7 +1267,7 @@ export const LOGIC_FUNCTION_LIBRARY: SymbolDefinitions = {
     parameters: [
       {
         description:
-          'The boolean expression; with more than 20 variables the result stays unevaluated.',
+          'The boolean expression; with more than 20 variables, or with an operand that is not a symbol or a connective (a comparison such as `x > 0`), the result stays unevaluated.',
         sample: 'p && !q',
       },
     ],
@@ -1297,7 +1297,7 @@ export const LOGIC_FUNCTION_LIBRARY: SymbolDefinitions = {
     parameters: [
       {
         description:
-          'The boolean expression; with more than 20 variables the result stays unevaluated.',
+          'The boolean expression; with more than 20 variables, or with an operand that is not a symbol or a connective (a comparison such as `x > 0`), the result stays unevaluated.',
         sample: 'p || !p',
       },
     ],
@@ -1337,7 +1337,7 @@ export const LOGIC_FUNCTION_LIBRARY: SymbolDefinitions = {
     parameters: [
       {
         description:
-          'The boolean expression; with more than 10 variables the result stays unevaluated.',
+          'The boolean expression; with more than 10 variables, or with an operand that is not a symbol or a connective (a comparison such as `x > 0`), the result stays unevaluated.',
         sample: 'p && q',
       },
     ],
@@ -1369,7 +1369,7 @@ export const LOGIC_FUNCTION_LIBRARY: SymbolDefinitions = {
     parameters: [
       {
         description:
-          'The boolean expression; with more than 12 variables the result stays unevaluated.',
+          'The boolean expression; with more than 12 variables, or with an operand that is not a symbol or a connective (a comparison such as `x > 0`), the result stays unevaluated.',
         sample: '(a && b) || (a && !b)',
       },
     ],
@@ -1405,7 +1405,7 @@ export const LOGIC_FUNCTION_LIBRARY: SymbolDefinitions = {
     parameters: [
       {
         description:
-          'The boolean expression; with more than 12 variables the result stays unevaluated.',
+          'The boolean expression; with more than 12 variables, or with an operand that is not a symbol or a connective (a comparison such as `x > 0`), the result stays unevaluated.',
         sample: 'a && b',
       },
     ],
@@ -1443,7 +1443,7 @@ export const LOGIC_FUNCTION_LIBRARY: SymbolDefinitions = {
     parameters: [
       {
         description:
-          'The boolean expression to minimize; with more than 12 variables the result stays unevaluated.',
+          'The boolean expression to minimize; with more than 12 variables, or with an operand that is not a symbol or a connective (a comparison such as `x > 0`), the result stays unevaluated.',
         sample: '(a && b) || (a && !b) || (!a && b)',
       },
     ],
@@ -1481,7 +1481,7 @@ export const LOGIC_FUNCTION_LIBRARY: SymbolDefinitions = {
     parameters: [
       {
         description:
-          'The boolean expression to minimize; with more than 12 variables the result stays unevaluated.',
+          'The boolean expression to minimize; with more than 12 variables, or with an operand that is not a symbol or a connective (a comparison such as `x > 0`), the result stays unevaluated.',
         sample: '(a || b) && (a || !b)',
       },
     ],
