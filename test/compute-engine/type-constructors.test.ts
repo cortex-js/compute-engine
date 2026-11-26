@@ -178,6 +178,47 @@ describe('NOMINAL constructor — the tagged value (§4.1)', () => {
     );
   });
 
+  // CE-1745: a field of tuple type beside a scalar field does not make the
+  // scalar field map a list, as it does for a user function.
+  test('a list at a scalar field beside a tuple field is `incompatible-type`', () => {
+    const ce = new ComputeEngine();
+    ce.declareType('F', 'tuple<m: tuple<real, real>, q: string>');
+    expect(ce.box(['F', ['Tuple', 1, 0], ['List', 1, 2]]).toString()).toBe(
+      'F((1, 0), Error(ErrorCode("incompatible-type", "string", "vector<integer^2>"), [1,2]))'
+    );
+    ce.declareType('G', 'tuple<q: real, m: tuple<real, real>>');
+    expect(ce.box(['G', ['List', 1, 2], ['Tuple', 1, 0]]).toString()).toBe(
+      'G(Error(ErrorCode("incompatible-type", "real", "vector<integer^2>"), [1,2]), (1, 0))'
+    );
+    expect(ce.box(['F', ['Tuple', 1, 0], { str: 'a' }]).type.toString()).toBe(
+      'F'
+    );
+  });
+
+  test('the same on the Epsil route, and for an alias constructor', () => {
+    const ce = new ComputeEngine();
+    const r = executeEpsil(
+      ce,
+      `type F = tuple<m: tuple<real, real>, q: string>
+F((1, 0), [1, 2])`
+    );
+    expect(r.value!.toString()).toBe(
+      'Error(ErrorCode("incompatible-type", "string", "vector<integer^2>"), [1,2])'
+    );
+    ce.declareType('A', 'tuple<tuple<real, real>, real>', { alias: true });
+    expect(ce.box(['A', ['Tuple', 1, 0], ['List', 1, 2]]).isValid).toBe(false);
+  });
+
+  test('a user function with a point parameter still maps a list at a scalar parameter', () => {
+    const ce = new ComputeEngine();
+    const r = executeEpsil(
+      ce,
+      `function k(p: tuple<real, real>, s: real) { s + 1 }
+k((1, 0), [1, 2])`
+    );
+    expect(r.value!.toString()).toBe('[2,3]');
+  });
+
   test('a scalar newtype tags and checks', () => {
     const ce = new ComputeEngine();
     ce.declareType('meters', 'number');

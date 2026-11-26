@@ -199,6 +199,15 @@
   range of more than 10,000 elements (`let xs: list<integer> = 1..20000`)
   still gives the error; start from a list (`[k for k in 1..20000]`).
 
+- **The constructor of a named tuple type with a field of tuple type checks
+  a list given at another field** (CE-1745). With
+  `type F = tuple<m: tuple<real, real>, q: string>`, `F((1, 0), [1, 2])`
+  gave the value `F((1, 0), [1, 2])` with no error, and now gives an
+  `incompatible-type` error at the second argument, as `F((1, 0), 5)` does.
+  A user function with a point parameter still maps a list at a number
+  parameter: with `function k(p: tuple<real, real>, s: real) { s + 1 }`,
+  `k((1, 0), [1, 2])` gives `[2, 3]`.
+
 - **A derivative, an integral or a limit with no variable written, of a
   formula that reads a variable that holds a formula, is computed with the
   variable of that formula** (CE-1787). After

@@ -196,7 +196,7 @@ export function diagnosticFlow(ce: ComputeEngine, program: Expression) {
           args,
           signature,
           undefined,
-          threadableGate(signature, paramsAreScalar(signature)),
+          threadableGate(signature, paramsAreScalar(signature), true),
           undefined,
           {
             noInference: true,

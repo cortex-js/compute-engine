@@ -2604,15 +2604,26 @@ function candidateParamsAt(valueType: Type, idx: number): Type[] {
  * binds its argument WHOLE (`list<…>`, `tuple<…>`, a callback) is validated
  * exactly as it would be without the declaration. A signature-wide `true`
  * there admitted a collection at every slot unchecked.
+ *
+ * `mapsPointLists` is `true` when the callee is a user function, whose
+ * application maps a list at a scalar sibling of a point parameter. Any other
+ * operator with a point parameter (the constructor of a named tuple type
+ * `tuple<m: tuple<real, real>, q: string>`) binds each argument whole, so a
+ * list at its `q` slot is checked against `string` (CE-1745).
  */
-export function threadableGate(sig: Type, whenUndeclared: boolean): Threadable {
+export function threadableGate(
+  sig: Type,
+  whenUndeclared: boolean,
+  mapsPointLists: boolean
+): Threadable {
   const plan = broadcastableParamSlots(sig);
   if (plan === undefined) {
-    // A signature with a point parameter maps a list at a scalar sibling
-    // slot (`pointListParamSlots`, ROADMAP CE-414), so such a slot is
+    // A user function (`mapsPointLists`) with a point parameter maps a list
+    // at a scalar sibling slot (`pointListParamSlots`, ROADMAP CE-414), so such a slot is
     // threadable. A point slot is not: its list of points is admitted by
     // `mapsPointLists`, which checks that the elements are points.
-    const points = whenUndeclared ? undefined : pointListParamSlots(sig);
+    const points =
+      whenUndeclared || !mapsPointLists ? undefined : pointListParamSlots(sig);
     if (points === undefined) return whenUndeclared;
     return (i: number) => {
       const slot = points.at(i);
@@ -3279,7 +3290,7 @@ export function validatedLiteralApplicationOperands(
     ops,
     checkedType,
     undefined,
-    threadableGate(checkedType, paramsAreScalar(checkedType)),
+    threadableGate(checkedType, paramsAreScalar(checkedType), true),
     undefined,
     {
       operatorName: 'Apply',
@@ -3609,7 +3620,11 @@ function declinedCallOperands(
       ops,
       opDef._validationSignature ?? opDef.signature.type,
       false,
-      threadableGate(opDef.signature.type, opDef.broadcastable === true),
+      threadableGate(
+        opDef.signature.type,
+        opDef.broadcastable === true,
+        opDef.isUserFunctionDefinition
+      ),
       undefined,
       {
         resolutionOut,
@@ -4495,7 +4510,8 @@ function makeCanonicalFunctionCore(
         // its refined type is one.
         threadableGate(
           pinned ? checkedType : valueType,
-          paramsAreScalar(pinned ? checkedType : valueType)
+          paramsAreScalar(pinned ? checkedType : valueType),
+          true
         ),
         undefined,
         {
@@ -5287,7 +5303,11 @@ function applyOperatorDefinition(
             opDef.lazy,
             // Declared-`broadcastable<T>` slots are threadable by declaration,
             // per position — see the value-definition site above.
-            threadableGate(opDef.signature.type, opDef.broadcastable === true),
+            threadableGate(
+              opDef.signature.type,
+              opDef.broadcastable === true,
+              opDef.isUserFunctionDefinition
+            ),
             undefined,
             {
               resolutionOut: lazyResolutionOut,
@@ -5473,7 +5493,11 @@ function applyOperatorDefinition(
             result.ops,
             opDef.signature.type,
             opDef.lazy,
-            threadableGate(opDef.signature.type, opDef.broadcastable === true),
+            threadableGate(
+              opDef.signature.type,
+              opDef.broadcastable === true,
+              opDef.isUserFunctionDefinition
+            ),
             (i) => opDef.stripsMissingAt(i),
             {
               resolutionOut: seamResolution,
@@ -5615,7 +5639,11 @@ function applyOperatorDefinition(
         opDef.lazy,
         // Declared-`broadcastable<T>` slots are threadable by declaration, per
         // position — see the value-definition site above.
-        threadableGate(opDef.signature.type, opDef.broadcastable === true),
+        threadableGate(
+          opDef.signature.type,
+          opDef.broadcastable === true,
+          opDef.isUserFunctionDefinition
+        ),
         // Strip-before-validate (§3.B): a `propagate`/`handle` operator admits
         // an absent (`Missing`) or possibly-absent (`T | missing`) operand in a
         // stripped position; the runtime gate carries the absence. A function
