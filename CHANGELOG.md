@@ -251,6 +251,18 @@
   unchanged. Lists of points, GLSL, the interval target and the `bigint`
   mode compare no length.
 
+### Behavior Changes
+
+- **`Slice` reads a bound of 0 as a position before the first element, not
+  as a position counted from the end** (CE-1843). Only a negative bound
+  counts from the end, and the result is the part of `start` to `end` that
+  is in the collection. `Slice([10, 20, 30, 40, 50], 0, 2)` was `[]` and is
+  now `[10, 20]`; `Slice("abcde", 0, 2)` was `""` and is now `"ab"`. An end
+  of 0, or an end before the first element, gives an empty result:
+  `Slice([10, 20, 30, 40, 50], 1, 0)` was the whole list and
+  `Slice([10, 20, 30, 40, 50], 1, -9)` was `[10]`; both are now `[]`. Write
+  an end of `-1` for the last element. Compiled code gives the same values.
+
 ### Resolved Issues
 
 - **A function that is declared with a signature and has no body refuses a

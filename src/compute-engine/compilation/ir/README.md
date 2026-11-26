@@ -2394,9 +2394,9 @@ built the same way, with the interpreter's value for every length, also 0:
   where the interpreter leaves the form unevaluated or gives an error
   (JavaScript only). Of a flat list of numbers or booleans.
 - `Slice(L, s, e)` is the interpreter's `computeSliceBounds()`: real indices
-  rounded (`count.round`), an index below 1 counted from the end, then at least
-  1, the end at most the length (`Slice(L, 2, 0)` is from the second to the
-  last, `Slice(L, 0, 2)` empty). `Slice(L, r)` of a span declines.
+  rounded (`count.round`), a negative index counted from the end, the start at
+  least 1, the end at least 0 and at most the length (`Slice(L, 0, 2)` is the
+  first two elements, `Slice(L, 2, 0)` empty). `Slice(L, r)` of a span declines.
 - `Linspace(a, b, c)` is the build of `c` elements (`linspace.count`: the floor,
   at least 0, 50 when it is not finite; 50 by default, and `Linspace(b)` is
   `Linspace(1, b)`), the element `k` of the interpreter's `linspaceSample()`
@@ -2494,7 +2494,7 @@ built the same way, with the interpreter's value for every length, also 0:
   site.
 
 GLSL compiles those of a constant index and a stated length that write a short
-list out (`DeleteAt(L, 2)`, `Slice(L, 2, 0)` of `L: list<real^6>`); the interval
+list out (`DeleteAt(L, 2)`, `Slice(L, 2, -1)` of `L: list<real^6>`); the interval
 mode declines all of them but `Identity` and `ApplyWhole`
 (`<head> on interval-js`).
 

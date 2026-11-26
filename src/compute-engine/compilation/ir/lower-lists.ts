@@ -3279,20 +3279,21 @@ export function listLowering(cx: Lowering) {
       );
     }
     if (h === 'Slice') {
-      // The interpreter's `computeSliceBounds()`: an index below 1 is
-      // counted from the end, then at least 1; the end at most the length.
+      // The interpreter's `computeSliceBounds()`: a negative index is
+      // counted from the end; the start at least 1, the end at least 0 (the
+      // empty slice) and at most the length.
       const [a, z] = [rounded(e.ops[1]), rounded(e.ops[2])];
       const fromEnd = (x: V) =>
         when(
           e,
           'Less',
           x,
-          one,
+          zero,
           () => int(e, 'Add', int(e, 'Add', n, one), x),
           () => x
         );
       const start = int(e, 'Max', fromEnd(a), one);
-      const end = int(e, 'Min', int(e, 'Max', fromEnd(z), one), n);
+      const end = int(e, 'Min', int(e, 'Max', fromEnd(z), zero), n);
       const length = int(
         e,
         'Max',
