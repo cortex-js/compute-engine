@@ -11,6 +11,10 @@
  *   where an element is kept, over the source.
  * - CE-1806.3: `First` of a `Filter`, `Find` and `Any` stop at the first
  *   element kept.
+ * - CE-1806.4: a view whose length is a count known at run time
+ *   (`Range(1, n)`, `Tabulate`, `Repeat`) reads its length through a
+ *   `listlen`, which refuses 2^32 elements as the build did.
+ * - CE-1806.7: a gather `At(L, Range(a, b))` read by a reducer is one loop.
  *
  * A view stays a list as the result of the program, as an argument of a
  * function of the host, where it is read twice, and where its callback has
@@ -174,6 +178,155 @@ describe('CE-1806.3: the first element that a Filter keeps', () => {
   });
 });
 
+describe('CE-1806.4 and CE-1806.7: a view of a length known at run time', () => {
+  const P = [10, 20, 30, 40];
+  const square = ['Function', ['Power', 'x', 2], 'x'];
+  /** The compilation of `json`, whose value equals the interpreter's at
+   *  each of `inputs`, with `n`, `a` and `b` integers, `x0` a real and `P`
+   *  a list of reals. */
+  const agreesJson = (json: unknown, inputs: Inputs[]) => {
+    const ce = new ComputeEngine();
+    ce.declare('n', 'integer');
+    ce.declare('a', 'integer');
+    ce.declare('b', 'integer');
+    ce.declare('x0', 'real');
+    ce.declare('P', 'list<real>');
+    const expr = ce.box(json as any);
+    const result = compile(expr, { to: 'javascript', fallback: false } as any);
+    expect(result.success).toBe(true);
+    for (const at of inputs) {
+      const value = result.run!(at);
+      const expected = interpreted(ce, expr, at);
+      expect([json, at, value]).toEqual([json, at, expected]);
+    }
+    return { code: result.code as string, run: result.run! };
+  };
+  // A count of 2^32 elements: the build refused it, and so does the code
+  // that does not build the list.
+  const refused = /^a list of more than 2\^32 iterations$/;
+  const counts = [3, 1, 0, -2].map((n) => ({ n, x0: 2, P, a: 2, b: n }));
+
+  test.each([
+    // `Range(1, n)` counts down to `n`: `n = 0` gives `[1, 0]`.
+    ['Sum', ['Map', square, ['Range', 1, 'n']]],
+    ['Max', ['Map', square, ['Range', 1, 'n']]],
+    ['Mean', ['Map', square, ['Range', 1, 'n']]],
+    // `Tabulate` of a count below 1 is empty.
+    ['Max', ['Tabulate', square, 'n']],
+    ['Sum', ['Tabulate', square, 'n']],
+    ['Sum', ['Repeat', 'x0', 'n']],
+    // A `Map` of a `Map`: the inner build is read by the outer one, of the
+    // same length, which refuses it there.
+    [
+      'Sum',
+      [
+        'Map',
+        ['Function', ['Add', 'y', 1], 'y'],
+        ['Map', square, ['Range', 1, 'n']],
+      ],
+    ],
+    // CE-1806.7: the indices, the gather and the sum are one loop.
+    ['Sum', ['At', 'P', ['Range', 'a', 'b']]],
+    ['Max', ['At', 'P', ['Range', 'a', 'b']]],
+  ])('%j: one loop, no array, and it refuses 2^32 elements', (...json) => {
+    const { code, run } = agreesJson(json, counts);
+    expect(arrays(code)).toBe(0);
+    expect(loops(code)).toBe(1);
+    expect(code).toContain('_listlen(');
+    expect(() => run({ n: 2 ** 32, x0: 2, P, a: 1, b: 2 ** 32 })).toThrow(
+      refused
+    );
+  });
+
+  test.each([
+    'first(map(x => x * 0.5, 1..k))',
+    'map(x => x * 0.5, 1..k)[-1]',
+    'map(x => x * 0.5, 1..k)[r]',
+  ])('%s: no array, and it refuses 2^32 elements', (src) => {
+    const { code, run } = compiled(src);
+    expect(arrays(code)).toBe(0);
+    for (const k of [5, 1, 0, -3]) {
+      const expected = Array.from(
+        { length: Math.max(k, 0) },
+        (_, j) => (j + 1) * 0.5
+      );
+      const at = src.includes('[r]') ? 2 : src.includes('[-1]') ? -1 : 1;
+      const j = at > 0 ? at - 1 : expected.length + at;
+      expect(run({ k, r: 2 })).toEqual(expected[j] ?? NaN);
+    }
+    expect(() => run({ k: 2 ** 32, r: 2 })).toThrow(refused);
+  });
+
+  test.each([
+    'sum(filter(1..k, c => c > 2))',
+    'length(filter(1..k, c => c > 2))',
+    'mean(filter(1..k, c => c > 2))',
+  ])('%s: one loop over the source, and it refuses 2^32 elements', (src) => {
+    const code = agrees(src, { k: 6 });
+    expect(arrays(code)).toBe(0);
+    expect(loops(code)).toBe(1);
+    for (const k of [0, -3]) agrees(src, { k });
+    expect(() => compiled(src).run({ k: 2 ** 32 })).toThrow(refused);
+  });
+
+  test('a loop that reads two views of the same count keeps one list', () => {
+    // The loop reads the length of one `listlen`, which refuses the count
+    // once: the second build stays, and refuses it where it was. (The
+    // interpreter leaves `Dot` of two views unevaluated, CE-1451.)
+    const ce = new ComputeEngine();
+    ce.declare('n', 'integer');
+    const result = compile(
+      ce.box([
+        'Dot',
+        ['Map', square, ['Range', 1, 'n']],
+        ['Map', ['Function', ['Multiply', 2, 'x'], 'x'], ['Range', 1, 'n']],
+      ] as any),
+      { to: 'javascript', fallback: false } as any
+    );
+    expect(arrays(result.code)).toBe(1);
+    expect(loops(result.code)).toBe(2);
+    // The sum of `2x^3` over `Range(1, n)`, which counts down from 1.
+    for (const [n, expected] of [
+      [3, 72],
+      [1, 2],
+      [0, 2],
+      [-2, -16],
+    ])
+      expect(result.run!({ n })).toBe(expected);
+    expect(() => result.run!({ n: 2 ** 32 })).toThrow(refused);
+  });
+
+  test.each([0, 1.5])(
+    'At of a view at the constant index %p keeps the list, which refuses 2^32 elements',
+    (index) => {
+      // The value is NaN with no read of the length, so a `listlen` would be
+      // removed: the build stays.
+      const ce = new ComputeEngine();
+      ce.declare('n', 'integer');
+      const json = [
+        'At',
+        ['Map', ['Function', ['Multiply', 0.5, 'x'], 'x'], ['Range', 1, 'n']],
+        index,
+      ];
+      const result = compile(ce.box(json as any), {
+        to: 'javascript',
+        fallback: false,
+      } as any);
+      expect(result.success).toBe(true);
+      expect(result.run!({ n: 3 })).toBeNaN();
+      expect(() => result.run!({ n: 2 ** 32 })).toThrow(refused);
+    }
+  );
+
+  test('a read at a constant index reads no length', () => {
+    // `First` of a `Map` of integers reads the element 0 of the build,
+    // which keeps the list (CE-1806.5); a `listlen` is put only where the
+    // code reads the length.
+    const { code } = compiled('first(map(x => x * 2, 1..k))');
+    expect(code).not.toContain('_listlen(');
+  });
+});
+
 describe('a view that stays a list', () => {
   test('the result of the program', () => {
     const { code, run } = compiled('map(x => x * 2, L)');
@@ -191,15 +344,6 @@ describe('a view that stays a list', () => {
       'do { let m = filter(L, c => c > 2); sum(m) + length(m) + first(m) }'
     );
     expect(arrays(filtered)).toBe(1);
-  });
-
-  test('a view of a length known at run time only, not as the length of a list', () => {
-    // A build refuses 2^32 elements, and a loop of 2^32 passes runs: the
-    // list stays, so that the program refuses what it refused.
-    const { code, run } = compiled('first(map(x => x * 0.5, 1..k))');
-    expect(arrays(code)).toBe(1);
-    expect(run({ k: 5 })).toBe(0.5);
-    expect(arrays(compiled('sum(filter(1..k, c => c > 2))').code)).toBe(1);
   });
 
   test('a view that a loop reads at an index other than its own', () => {

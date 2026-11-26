@@ -52,13 +52,15 @@ const PINNED: [rule: string, program: unknown][] = [
 ];
 
 describe('IR slice: GLSL text', () => {
-  test('every IR operation has a spelling in both printers (GLSL declines a draw, a Range, a run-time index of a list of booleans, of points or of lists, a real function with no GLSL form, an integer row of reals, the Fibonacci number of an integer, a complex function with no GLSL form, a colour map, a sort, an ordering, a median and the other statistics of a list, the run-time test of a real count of a rotation, the rounding of a real count, the samples of a Linspace, the operations of a list local written in place, the matrix kernels, the rows of Chunk and Partition, and the records)', () => {
+  test('every IR operation has a spelling in both printers (GLSL declines a draw, a Range, a run-time index of a list of booleans, of points or of lists, a real function with no GLSL form, an integer row of reals, the Fibonacci number of an integer, a complex function with no GLSL form, a colour map, a sort, an ordering, a median and the other statistics of a list, the run-time test of a real count of a rotation, the length of a list that is not built, the rounding of a real count, the samples of a Linspace, the operations of a list local written in place, the matrix kernels, the rows of Chunk and Partition, and the records)', () => {
     // prettier-ignore
     const jsOnly = new Set(['draw', 'shuffle', 'rangecount', 'colormap', 'atu', 'atp', 'atrow',
       'sort', 'sort.int', 'ordering', 'median',
       'mode', 'quartile1', 'quartile3', 'skewness', 'kurtosis', 'covariance', 'pcovariance', 'correlation',
       'rbinomial', 'fibonacci.int',
       'isundef', 'present.int', 'present', 'cpresent', 'present.bool', 'count.int',
+      // The length of a list that the pass `forward` does not build (CE-1806).
+      'listlen',
       'count.round', 'linspace.count', 'linspace',
       'copy', 'copy.int', 'copy.bool', 'wix', 'get', 'set', 'set.bool', 'getat', 'getatu',
       'mdet', 'minverse', 'mpower', 'mrowreduce',

@@ -435,6 +435,10 @@ export const OPERATORS: readonly OperatorRow[] = Object.freeze([
   // A real count of a rotation as an integer, which fails where it is not
   // one (the interpreter gives `incompatible-type`); JavaScript only.
   row(undefined,      1,          [[[R], I, 'count.int']],       { ...list, effect: 'may-fail' }),
+  // The length of a list that the pass `forward` does not build, which
+  // fails where a build of that length would (2^32 or more, NaN); the
+  // passes put it on JavaScript only (`passes.ts`, `guardFor()`).
+  row(undefined,      1,          [[[I], I, 'listlen']],         { ...list, effect: 'may-fail' }),
   // A real count or index of `Take`, `Drop`, `Slice` and `Tabulate`
   // rounded as the interpreter's `toInteger()` (`Math.round`); JavaScript
   // only.

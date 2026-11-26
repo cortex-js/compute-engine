@@ -1770,28 +1770,44 @@ instruction reads: an `elem` at the index of the one loop, build or filter
 between them (the loop of `Sum`, `Product`, `Max`, `Min`, `Mean`, `Reduce`; a
 `Map` or a `Filter` of the `Map`) when that loop runs from 0 within the length
 of the build (the loop of `Dot` over the length of its other operand does not,
-and keeps the array), or an `elem` that runs once for each run of
-the build (only conditionals between them), is the body at that index; an `At`
-of a real element that runs once (`First`, `Last`, `At` of a constant or a
-run-time index) is the body at the index where it is in range, by the rule of
-`At`, and NaN elsewhere. Its second half, `filters`, takes a filter of a pure
-body: when no instruction reads its list, a loop that counts the elements kept
-(`Length`, `All`); when one instruction reads the first element (`First`,
-`Find`) or none does (`Any`), and only `0 < count` reads the count, a loop that
-stops at the first element kept; when one loop of the same region reduces the
-list (`Sum`, `Product`, `Mean`, `Max`, `Min`, `Reduce`), that loop over the
-source, its body in the arm where an element is kept, counting them where the
-count is read after it. `first(map(x => x * 2, L))` is `2 * L[0]` where `L` has
-an element, and `sum(filter(map(x => x * 2, L), c => c > 2))` is one loop over
-`L`. The length of the view must be one that the program knows to be below 2^32
-(the length of an input or of another list that exists, a constant, the count of
-a filter): the guard of a build refuses 2^32 elements, where the guard of a loop
-accepts 2^32 passes, so the array of a view over `Range(1, n)` or `Repeat(x, n)`
-of a count known at run time stays, and the program refuses what it refused. A
-callback with an effect (a draw, a call of a function of the host) or that can
-fail (`AssertPresent`) keeps the array, and so do a reader at another index (the
-loop of `Sum` over a `Reverse`) and an `At` of integers or booleans (its value
-out of range, NaN or `undefined`, is not a value of the lane).
+and keeps the array), or an `elem` that runs once for each run of the build
+(only conditionals between them), is the body at that index; an `At` of a real
+element that runs once (`First`, `Last`, `At` of a constant or a run-time index)
+is the body at the index where it is in range, by the rule of `At`, and NaN
+elsewhere. Its second half, `filters`, takes a filter of a pure body: when no
+instruction reads its list, a loop that counts the elements kept (`Length`,
+`All`); when one instruction reads the first element (`First`, `Find`) or none
+does (`Any`), and only `0 < count` reads the count, a loop that stops at the
+first element kept; when one loop of the same region reduces the list (`Sum`,
+`Product`, `Mean`, `Max`, `Min`, `Reduce`), that loop over the source, its body
+in the arm where an element is kept, counting them where the count is read after
+it. `first(map(x => x * 2, L))` is `2 * L[0]` where `L` has an element, and
+`sum(filter(map(x => x * 2, L), c => c > 2))` is one loop over `L`. The guard of
+a build refuses 2^32 elements, where the guard of a loop accepts 2^32 passes, so
+the program must refuse the length of the view where the build was. A length
+that the program knows to be below 2^32 (the length of an input or of another
+list that exists, a constant, the count of a filter, a `listlen`) needs nothing.
+Another one (a count known at run time: `Range(1, n)`, `Tabulate(f, n)`,
+`Repeat(x, n)`, `At(L, Range(a, b))`) is read through the operation `listlen`,
+put before the build (`guardFor()`): its value is the count, and it throws the
+`RangeError` of the build for a count of 2^32 or more. It is `may-fail`, so
+`dce` keeps it where it is read: an `at` reads its value as the length, a loop
+to the count less 1 runs to it less 1 (a loop changes once: of two such builds
+that `Dot` reads, the second keeps its array), and the pass `filters` puts it
+where the filter was. A build or a filter of the same count that reads the
+build, after it in its region with only pure instructions between them, refuses
+the count itself, so no `listlen` is put (`Map(g, Map(f, Range(1, n)))`, the
+indices of a gather). An `elem` outside a loop reads no length, and no `listlen`
+is put: the count is not refused, as `dce` removes a build that no instruction
+reads. An `at` at a constant index that is 0 or not an integer is NaN with no
+read of the length, so its build stays. A `listlen` is put only where its build
+is removed, so a build that stays keeps its own guard. Only the passes put
+`listlen`, and only on JavaScript, so GLSL, the interval mode and the bigint
+mode have no spelling of it. A callback with an effect (a draw, a call of a
+function of the host) or that can fail (`AssertPresent`) keeps the array, and so
+do a reader at another index (the loop of `Sum` over a `Reverse`) and an `At` of
+integers or booleans (its value out of range, NaN or `undefined`, is not a value
+of the lane).
 
 A `Sum` or a `Product` with `Limits` whose term is a flat list of numbers adds
 or multiplies the terms element by element, as the interpreter does (CE-1470):

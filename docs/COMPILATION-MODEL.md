@@ -3182,11 +3182,14 @@ of the source, with the range check of `At` and NaN out of range
 `Product`, `Mean`, `Max`, `Min`, `Reduce` and `All` of a `Filter` run one loop
 over the source; and `First` of a
 `Filter`, `Find` and `Any` stop at the first element kept. The values are the
-same. A view keeps its array where its callback has an effect or can fail
-(each element is then computed, "Known limitations"), where its length is a
-count known only at run time that no list holds (`Map(f, Range(1, n))`: the
-code refuses a list of 2^32 elements), at another reader (`Sum` of a
-`Reverse`), and for `At` of a `Map` of integers or booleans
+same. A view whose length is a count known only at run time
+(`Map(f, Range(1, n))`, `Tabulate(f, n)`, `Repeat(x, n)`, a `Filter` of
+`Range(1, n)`) is read the same way, and where the code reads the count, it
+refuses a count of 2^32 or more where the list was, with the `RangeError` of
+the list: `Sum(Map(f, Range(1, n)))` and the gather `Sum(At(L, Range(a, b)))`
+are one loop. A view keeps its array where its callback has an effect or can
+fail (each element is then computed, "Known limitations"), at another reader
+(`Sum` of a `Reverse`), and for `At` of a `Map` of integers or booleans
 (`compilation/ir/README.md`, "Lists").
 
 An argument on the complex lane at a parameter declared `real` declines

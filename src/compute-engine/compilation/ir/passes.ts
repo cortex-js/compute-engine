@@ -921,11 +921,13 @@ const dce: Pass = (p, rows) => {
 
 /** The integer values of `p` below 2^32, which a build or a filter of that
  *  length does not refuse: a length parameter (of a list that exists), the
- *  count of a filter, a constant, and the least of two of them. The guard of
- *  a loop of `n` passes refuses more than 2^32 passes, where a build of `n`
- *  elements refuses 2^32, so `forward` reads a list at its place only where
- *  its length is one of these: the loop that reads it then refuses what the
- *  build refused, nothing. */
+ *  count of a filter, a constant, the value of a `listlen` (which refuses
+ *  the others), and the least of two of them. The guard of a loop of `n`
+ *  passes refuses more than 2^32 passes, where a build of `n` elements
+ *  refuses 2^32, so a list of another length that `forward` or `filters`
+ *  reads at its place has a `listlen` of its length where the build was,
+ *  which the loop that reads it reads: the program refuses what the build
+ *  refused (`guardFor()`). */
 function boundedLengths(p: Program): Set<V> {
   const bounded = new Set<V>();
   const walk = (r: Region) =>
@@ -939,6 +941,7 @@ function boundedLengths(p: Program): Set<V> {
       )
         bounded.add(i.out);
       if (i.k === 'region' && i.op === 'filter') bounded.add(i.outs[0]);
+      if (i.k === 'op' && i.op === 'listlen') bounded.add(i.out);
       if (
         i.k === 'op' &&
         i.op === 'min.int' &&
@@ -1048,6 +1051,16 @@ function siteIndex(p: Program) {
  * The build, unread, is then removed by `dce`. A list read twice, or by
  * another instruction (a call, a list, a yield: the result, an argument of
  * a function of the host), stays.
+ *
+ * A build of a length that the program does not know to be below 2^32 (a
+ * count known at run time, `Map(f, Range(1, n))`) refuses 2^32 elements,
+ * where the loop that reads it accepts 2^32 passes. So it is read at its
+ * place only where the program still refuses that length there: an `at`
+ * reads the length of a `listlen` put where the build was, a loop runs to
+ * that length less 1, and a build or a filter of the same length, after
+ * the build in its region with only pure instructions between them,
+ * refuses it itself. An `elem` outside a loop reads no length: no `listlen`
+ * is put, as `dce` removes a build that no instruction reads.
  */
 const forward: Pass = (p, rows) => {
   const fx = effects(p, rows);
@@ -1099,43 +1112,129 @@ const forward: Pass = (p, rows) => {
         (typeof hi === 'number' && typeof top === 'number' && hi < top))
     );
   };
-  // The reads to rewrite, each with its build.
-  const plan = new Map<Instr, Instr & { k: 'region' }>();
+  // Where the build of a length `n` not known to be below 2^32 is read at
+  // its place, the instructions put before it (a `listlen` of `n`, and the
+  // last index of the loop that reads it), and the length that the read
+  // reads: `undefined` where the read refuses `n` itself or reads no
+  // length, and `false` where the read keeps the list.
+  const guards = new Map<Instr, Instr[]>();
+  const loopsGuarded = new Set<Instr>();
+  // The new last index of each such loop, set once every read is planned,
+  // so that `reads()` reads the loops as they were.
+  const lasts = new Map<Instr & { k: 'loop' }, V>();
+  const guard = (
+    i: Instr & { k: 'region' },
+    site: { region: Region; around: Instr[] },
+    read: Site
+  ): V | undefined | false => {
+    const n = i.args[0];
+    const path = between(read, site);
+    const x = path.find((y) => y.k !== 'if');
+    if (read.i.k !== 'op') return false;
+    if (read.i.op === 'elem' && x === undefined) return undefined;
+    if (read.i.op === 'elem' && x?.k === 'region') {
+      // A build or a filter of `n` elements refuses `n` where the build
+      // did, when nothing between them can fail or has an effect.
+      const { body } = site.region;
+      const from = body.indexOf(i);
+      const to = body.indexOf(x);
+      return x === path[0] &&
+        x.args[0] === n &&
+        from >= 0 &&
+        to > from &&
+        body.slice(from + 1, to).every((y) => fx.of(y) === 'pure')
+        ? undefined
+        : false;
+    }
+    if (read.i.op === 'at') {
+      // A constant index that is 0 or not an integer gives NaN with no read
+      // of the length, so the `listlen` would be removed: the list stays.
+      const c = constants.get(read.i.args[1]);
+      if (
+        c !== undefined &&
+        (typeof c !== 'number' || !Number.isInteger(c) || c === 0)
+      )
+        return false;
+      const code: Instr[] = [];
+      const g = guardFor(p, n, code);
+      guards.set(i, code);
+      return g;
+    }
+    // A loop to `n - 1` (`reads()`), which now runs to the length of the
+    // `listlen` less 1; one such change per loop and pass.
+    const last = x?.k === 'loop' ? def.get(x.hi) : undefined;
+    if (
+      x?.k !== 'loop' ||
+      loopsGuarded.has(x) ||
+      last?.k !== 'op' ||
+      last.op !== 'sub.int' ||
+      last.args[0] !== n
+    )
+      return false;
+    const code: Instr[] = [];
+    const g = guardFor(p, n, code);
+    const hi = fresh(p, scalarType('integer'));
+    code.push({
+      k: 'op',
+      out: hi,
+      op: 'sub.int',
+      args: [g, integer(p, 1, code)],
+    });
+    loopsGuarded.add(x);
+    lasts.set(x, hi);
+    guards.set(i, code);
+    return g;
+  };
+  // The reads to rewrite, each with its build and the length it reads.
+  const plan = new Map<Instr, { build: Instr & { k: 'region' }; n: V }>();
   for (const [i, site] of sites) {
-    if (!forwardable(fx, i) || !bounded.has(i.args[0])) continue;
+    if (!forwardable(fx, i)) continue;
     const readers = only(i.outs[0]) ?? [];
     const [read] = readers;
     if (
-      read !== undefined &&
-      read.i.k === 'op' &&
-      (read.i.op === 'elem' || read.i.op === 'at') &&
-      read.i.args[0] === i.outs[0] &&
-      readers.length === 1 &&
-      reads(read.i, between(read, site), i.args[0])
+      read === undefined ||
+      read.i.k !== 'op' ||
+      (read.i.op !== 'elem' && read.i.op !== 'at') ||
+      read.i.args[0] !== i.outs[0] ||
+      readers.length !== 1 ||
+      !reads(read.i, between(read, site), i.args[0])
     )
-      plan.set(read.i, i);
+      continue;
+    const n = bounded.has(i.args[0]) ? i.args[0] : guard(i, site, read);
+    if (n !== false) plan.set(read.i, { build: i, n: n ?? i.args[0] });
   }
+  for (const [x, hi] of lasts) x.hi = hi;
   if (plan.size === 0) return { changed: false, resolve: (v) => v };
+  const done = new Set<Instr>();
   return rewrite(p, (i, { subst }) => {
-    const build = plan.get(i);
-    if (build === undefined || i.k !== 'op') return undefined;
-    const [r] = build.regions;
+    const code = guards.get(i);
+    if (code !== undefined && !done.has(i)) {
+      done.add(i);
+      return [...code, i];
+    }
+    const planned = plan.get(i);
+    if (planned === undefined || i.k !== 'op') return undefined;
+    const [r] = planned.build.regions;
     const index = i.args[1];
     if (i.op === 'elem') {
       const { body, y } = copyBody(p, r, index);
       subst.set(i.out, y);
       return body;
     }
-    return atElement(
-      p,
-      i.out,
-      build.args[0],
-      index,
-      constants.get(index),
-      (j) => copyBody(p, r, j)
+    return atElement(p, i.out, planned.n, index, constants.get(index), (j) =>
+      copyBody(p, r, j)
     );
   });
 };
+
+/** The `listlen` of the length `n` of a list that is not built, appended
+ *  to `out`: `n`, and it refuses 2^32 or more as a build of `n` elements
+ *  does (`boundedLengths()`). */
+function guardFor(p: Program, n: V, out: Instr[]): V {
+  const g = fresh(p, scalarType('integer'));
+  out.push({ k: 'op', out: g, op: 'listlen', args: [n] });
+  return g;
+}
 
 /** The instructions that give `out` the value of `At` of a list of reals of
  *  the length `n` at the index `k` (the constant `c`, when it is one):
@@ -1240,7 +1339,9 @@ function atElement(
  *   is kept, and which counts them; nothing between the two reads the list
  *   or the count.
  * A loop over the source has as many passes as the filter; one that stops
- * has the guard of a loop with an exit (`print-js.ts`).
+ * has the guard of a loop with an exit (`print-js.ts`). The length of the
+ * source, where it is not known to be below 2^32, is a `listlen` where the
+ * filter was (`bounds`).
  */
 const filters: Pass = (p, rows) => {
   const fx = effects(p, rows);
@@ -1262,12 +1363,16 @@ const filters: Pass = (p, rows) => {
   // the value that replaces the value of a read.
   const replaced = new Map<Instr, Instr[]>();
   const renamed = new Map<Instr, V>();
-  /** `0`, `1`, and the index `n - 1` of the last element of `n`. */
-  const bounds = (n: V, out: Instr[]) => {
+  /** `0`, `1`, and the index `n - 1` of the last element of `n`. A
+   *  length `n` not known to be below 2^32 is read through a `listlen`,
+   *  appended to `at`, where the filter was: the loop refuses what the
+   *  filter refused (`guardFor()`). */
+  const bounds = (n: V, out: Instr[], at = out) => {
+    const m = bounded.has(n) ? n : guardFor(p, n, at);
     const zero = integer(p, 0, out);
     const one = integer(p, 1, out);
     const hi = fresh(p, scalarType('integer'));
-    out.push({ k: 'op', out: hi, op: 'sub.int', args: [n, one] });
+    out.push({ k: 'op', out: hi, op: 'sub.int', args: [m, one] });
     return { zero, one, hi };
   };
   for (const [x, site] of sites) {
@@ -1278,7 +1383,6 @@ const filters: Pass = (p, rows) => {
       x.regions.length !== 1 ||
       body.params.length !== 1 ||
       body.yields.length !== 2 ||
-      !bounded.has(x.args[0]) ||
       !body.body.every((y) => fx.of(y) === 'pure')
     )
       continue;
@@ -1453,7 +1557,8 @@ const filters: Pass = (p, rows) => {
       continue;
     // Where the count is read after the loop (`Mean`, `Max`), the loop
     // counts the elements kept.
-    const { zero, one, hi } = bounds(n, out);
+    const head: Instr[] = [];
+    const { zero, one, hi } = bounds(n, out, head);
     const carried = l.body.params.slice(1);
     const nexts = carried.map((v) => fresh(p, p.types[v]));
     const then: Region = {
@@ -1492,7 +1597,7 @@ const filters: Pass = (p, rows) => {
       otherwise.yields.push(c);
     }
     out.push(loop);
-    replaced.set(x, []);
+    replaced.set(x, head);
     replaced.set(last, []);
     replaced.set(l, out);
     renamed.set(read.i, value);

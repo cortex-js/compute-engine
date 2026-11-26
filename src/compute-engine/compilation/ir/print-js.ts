@@ -297,6 +297,7 @@ export const JS: Syntax = deepFreeze({
       ].map((op) => [op, { text: '_present($0, $1)', helpers: ['_present'] }])
     ),
     'count.int': { text: '_count($0)', helpers: ['_count'] },
+    'listlen': { text: '_listlen($0)', helpers: ['_listlen'] },
     'count.round': 'Math.round($0)',
     'linspace.count': { text: '_lincount($0)', helpers: ['_lincount'] },
     'linspace': { text: '_linspace($0, $1, $2, $3)', helpers: ['_linspace'] },
@@ -464,6 +465,9 @@ export const JS: Syntax = deepFreeze({
     _round: 'const _round = (x) => (x < 0 ? -Math.round(-x) : Math.round(x));',
     _at: 'const _at = (l, i) => { const k = i > 0 ? i - 1 : l.length + i; return Number.isInteger(i) && i !== 0 && k >= 0 && k < l.length ? l[k] : NaN; };',
     _atu: 'const _atu = (l, i) => { const k = i > 0 ? i - 1 : l.length + i; return Number.isInteger(i) && i !== 0 && k >= 0 && k < l.length ? l[k] : undefined; };',
+    // The length of a list that is not built (`listlen`): the guard of a
+    // build of that length.
+    _listlen: `const _listlen = (n) => { ${guard('n', 'a list')} return n; };`,
     // The index from 0 of the write `ReplaceAt(L, i, v)` or `AddTo(At(L,
     // i), e)` in a list of `n` elements; the interpreter's value of an
     // index that is 0, not an integer or out of range is an error.

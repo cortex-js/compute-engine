@@ -61,8 +61,15 @@
   `sum(filter(map(x => x * 2, L), c => c > 2))` one loop instead of three, and
   `first(map(x => x * 2, L))` no longer builds the list. The values are the
   same. A view stays a list as the result, as an argument of a function of the
-  host, where it is read twice, where its callback has an effect, and where
-  its length is a count known only at run time (`map(f, 1..n)`).
+  host, where it is read twice, and where its callback has an effect.
+
+- **Compiled JavaScript reads a view whose length is a count known at run time
+  where it is** (CE-1806). With `n`, `a` and `b` integers, `sum(map(f, 1..n))`,
+  `Max(Tabulate(x ↦ x², n))`, `Sum(Repeat(x, n))`,
+  `sum(filter(1..n, c => c > 2))` and the gather `Sum(At(L, Range(a, b)))` now
+  run one loop and build no list; the gather built two lists and ran three
+  loops. The values are the same, and where the code reads the count, a count
+  of 2^32 or more throws the same `RangeError` as the list did.
 
 - **Compiled JavaScript builds a list of lists whose rows have run-time
   lengths** (CE-1736, #638). With `g: list<list<integer>>`,

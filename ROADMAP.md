@@ -727,33 +727,16 @@ of `f_Bm` (a Desmos `with` lowered to a `Block` of two statements) calls
 to be bound before the first statement and to stay valid across any assignment
 the statements make to a symbol the call reads.
 
-### CE-253. `Sum(At(P, Range(a, b)))` materializes the range on the JavaScript target
-
-**Status:** ready; capability. Approved 2026-11-01. **Witness:** corpus;
-Proposed optimization counts 24 corpus `Array.from` sites but no measured cost
-and no wrong value.
-
-The 24 `Array.from` range sites in the corpus are all places where the range is
-needed as a list (7 gather indices, 15 spread elements, 2 broadcast operands);
-no site needs only a counting loop. The 7 gather sites need a gather/reduce
-fusion, which is a new lowering.
-
 ### CE-1806. Compiled JavaScript still builds the array of some `Map` and `Filter` views
 
-**Status:** ready; performance, M. Approved 2026-11-25. Related: CE-253.
-**Witness:** plausible; `sum(map(f, 1..n))` with `n: integer`, and `first(map(x => x * 2, 1..30))`.
+**Status:** ready; performance, M. Approved 2026-11-25.
+**Witness:** plausible; `first(map(x => x * 2, 1..30))`, and `First(Map(x ↦ hostSq(x t), [1, 2, 3]))` with a host function `hostSq`.
 
 The passes `forward` and `filters` of `compilation/ir/passes.ts` read a `Map`
 or a `Filter` with a pure callback where it is, with no array
 (`docs/COMPILATION-MODEL.md`, "Where a view is a list"). These views keep the
 array:
 
-- **CE-1806.4** A source whose length is a count known at run time
-  (`map(f, 1..n)`, `Repeat(x, n)`, `Max(Tabulate(x ↦ x², n))` with
-  `n: integer`). A build refuses 2^32 elements and a loop accepts 2^32 passes,
-  so the passes take only a length known to be below 2^32.
-  A guard operation that refuses the same count gives these views back; it
-  adds an operation to `operators.ts` and `print-js.ts`.
 - **CE-1806.5** A read of one position of a `Map` of integers or booleans
   (`first(map(x => x * 2, 1..30))`): the IR has no value of those lanes for an
   index out of range.
