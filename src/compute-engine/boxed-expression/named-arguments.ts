@@ -23,6 +23,7 @@ import {
 import {
   armAdmission,
   diagnoseNoMatch,
+  instantiateArms,
   isMoreSpecific,
   overloadArms,
   resolveOverload,
@@ -1008,6 +1009,17 @@ function applyPermutation(
   return ops;
 }
 
+/** The boxed written arguments reordered by `permutation` (source slot →
+ * declaration slot), as {@link applyPermutation} reorders the raw ones. */
+function permuteBoxed(
+  ops: ReadonlyArray<Expression>,
+  permutation: ReadonlyArray<number>
+): Expression[] {
+  const out = new Array<Expression>(ops.length);
+  for (let j = 0; j < ops.length; j++) out[permutation[j]] = ops[j];
+  return out;
+}
+
 /** Do two arms consume the written arguments in the same order? */
 function sameOrder(
   a: ReadonlyArray<number>,
@@ -1112,12 +1124,29 @@ function normalizeAgainstArms(
   }
 
   const emitted = applyPermutation(split, winner);
-  const reordered = new Array<Expression>(ops.length);
-  for (let j = 0; j < ops.length; j++) reordered[winner[j]] = ops[j];
+  const reordered = permuteBoxed(ops, winner);
+
+  // The tri-state admission and the specificity ranking below compare
+  // parameters, so they read each arm in its GROUND form at this call (the
+  // §4.2 ground invariant, as in `resolvedArm`): an open `indexed_collection<T>`
+  // admits no operand. Each surviving arm is instantiated on the operands in
+  // its own order; an eliminated arm, on the emitted order, which is the order
+  // the runtime dispatch reads it in. Index-aligned with `arms`.
+  const ground = arms.map(
+    (arm, k) =>
+      instantiateArms(
+        [arm],
+        permutations[k] === undefined
+          ? reordered
+          : permuteBoxed(ops, permutations[k]!),
+        undefined,
+        ce._typeResolver
+      )[0]
+  );
 
   // Which arm do the SURVIVORS give the call, by the same tri-state procedure
   // the runtime clause dispatch uses?
-  const survivorPick = triStateSelect(ops, arms, permutations);
+  const survivorPick = triStateSelect(ops, ground, permutations);
 
   // Every surviving arm refutes the call. Under R5 that verdict is the call's:
   // the names chose these arms, and a type they refuse may not be quietly
@@ -1137,6 +1166,7 @@ function normalizeAgainstArms(
       ce,
       reordered,
       arms,
+      ground,
       permutations,
       winner,
       clauseLiterals !== undefined
@@ -1220,6 +1250,9 @@ function plainCallIsFaithful(
   ce: ComputeEngine,
   reordered: ReadonlyArray<Expression>,
   arms: ReadonlyArray<FunctionSignature>,
+  /** `arms` in their ground form at this call, index-aligned with `arms`:
+   * what admission and specificity read. */
+  ground: ReadonlyArray<FunctionSignature>,
   permutations: ReadonlyArray<number[] | undefined>,
   winner: ReadonlyArray<number>,
   dispatches: boolean
@@ -1234,14 +1267,14 @@ function plainCallIsFaithful(
 
   /** The surviving arms this call definitely admits, read in the emitted
    * order — the arms that beat a less specific one at every dispatch. */
-  const admitted = arms.filter(
+  const admitted = ground.filter(
     (arm, k) =>
       permutations[k] !== undefined &&
       sameOrder(permutations[k]!, winner) &&
       armAdmission(reordered, arm) === 'admit'
   );
 
-  return arms.every((arm, k) => {
+  return ground.every((arm, k) => {
     if (permutations[k] !== undefined) return true; // a survivor
     if (armAdmission(reordered, arm) === 'refute') return true;
     return admitted.some((s) => isMoreSpecific(s, arm, reordered.length));

@@ -181,6 +181,14 @@
 
 ### Resolved Issues
 
+- **A named call of `Slice` selects its arm** (CE-1838). In Epsil,
+  `slice([1, 2, 3, 4, 5], start: 2, end: 4)` gave an `unexpected-argument`
+  error, and now gives `[2, 3, 4]`, as the positional call does;
+  `slice("abcde", start: 2, end: 4)` gives `"bcd"` and
+  `slice([1, 2, 3, 4, 5], span: 2..4)` gives `[2, 3, 4]`. A named call of
+  any overload set whose arms have a type variable (`where T: …`) failed the
+  same way when the names ruled out some of its arms.
+
 - **An element-wise operation on a numeric indexed collection is typed so
   that it holds a point** (CE-1583). With `u: indexed_collection<number>`,
   `u / 5`, `Sin(u)` and `Mod(u / 5, 1)` were typed `list<…>`, but for
