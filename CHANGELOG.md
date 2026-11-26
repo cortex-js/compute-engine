@@ -273,6 +273,16 @@
 
 ### Resolved Issues
 
+- **The numeric value of a `Limit` with no direction is the two-sided
+  limit** (CE-1852). `Limit(Abs(x)/x, 0).N()` gave `1`, the limit from
+  above, and `Limit(Floor(x), 2).N()` gave `2`. Both now give `NaN`: the
+  limits from above and from below differ. A side on which the function has
+  no real value is not counted, so `Limit(x * Ln(x), 0).N()` is still `0`.
+  A limit with a direction and a limit at `±Infinity` are not changed, and
+  `NLimit` with no direction is still the limit from above. `NLimit` with
+  the direction `0` now compares the two sides with a relative tolerance
+  when the limit is large.
+
 - **`IsSatisfiable`, `IsTautology`, `TruthTable`, `PrimeImplicants`,
   `PrimeImplicates`, `MinimalDNF` and `MinimalCNF` stay unevaluated for a
   formula that holds a comparison** (CE-1850). These functions tried `True`

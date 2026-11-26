@@ -6405,6 +6405,35 @@ function implicitLiteralParameters(
 }
 
 /**
+ * The direction of the numeric two-sided limit at the finite point `x` of a
+ * function with no non-real constant, as `limit()` reads it: 0 for both
+ * sides, 1 for the limit from above, -1 for the limit from below.
+ *
+ * A side is left out when the function has no real value near the point on
+ * that side (`ln(x)` below 0, `arccos(x)` above 1, `x^x` below 0): the
+ * limit is then the limit from the other side. `isNotReal(t)` tells that
+ * the value at `t` is a number with an imaginary part. It must hold at each
+ * of three arguments near the point: a sample that is `NaN` is not a sign of
+ * such a side, because it can come from an overflow where the function has
+ * real values (`e^(1/x)/(1 + e^(1/x))` is `∞/∞` at 0.001, with the limit 1
+ * from above and 0 from below). A function that is real on neither side
+ * keeps both sides, and its limit is `NaN`.
+ */
+function limitDirection(
+  isNotReal: (x: number) => boolean,
+  x: number
+): number {
+  const scale = Math.max(1, Math.abs(x));
+  const notReal = (side: 1 | -1): boolean =>
+    [1e-3, 1e-6, 1e-9].every((h) => isNotReal(x + side * h * scale));
+  const above = !notReal(1);
+  const below = !notReal(-1);
+  if (above && !below) return 1;
+  if (below && !above) return -1;
+  return 0;
+}
+
+/**
  * The numeric limit of the function literal `f` at the point `x`, by
  * Richardson extrapolation, as a float. `undefined` when the point has no
  * numeric value; `NaN` when the samples do not converge.
@@ -6416,12 +6445,20 @@ function implicitLiteralParameters(
  * part are extrapolated separately, and the limit exists when both
  * converge. Its samples come from the interpreter, because a compiled
  * function answers `NaN` for some functions of a complex argument (`Gamma`).
+ *
+ * Without `dir`, the limit is from above, or, when `twoSided` is set and the
+ * point is finite, the two-sided limit: `NaN` when the limits from above and
+ * from below differ (`|x|/x` at 0). A side on which the function has no
+ * real value near the point is not a side of the limit: `x·ln(x)` at 0 has
+ * the limit from above, 0 (`limitDirection()`). A function with a non-real
+ * constant has both sides.
  */
 function numericLimitValue(
   engine: ComputeEngine,
   f: Expression,
   x: Expression,
-  dir: Expression | undefined
+  dir: Expression | undefined,
+  twoSided = false
 ): Expression | undefined {
   const point = x.N();
   let target = point.re;
@@ -6431,13 +6468,15 @@ function numericLimitValue(
   // and answer a wrong value: `lim_{x→i} 1/(x² + 1)` gave `1`, the value at
   // 0. A limit at such a point is declined.
   if (point.im !== 0 && !Number.isNaN(point.im)) return undefined;
-  const direction = dir ? dir.re : 1;
 
   // The extrapolation reaches an infinite point through positive arguments
   // only. A limit at `−∞` is the limit of `t ↦ f(−t)` at `+∞`.
   const mirrored = target === -Infinity;
   if (mirrored) target = Infinity;
   const at = (t: number): number => (mirrored ? -t : t);
+
+  // An infinite point has one side.
+  const bothSides = twoSided && Number.isFinite(target);
 
   if (!hasNonRealConstant(f)) {
     // The iteration budget keeps a single sample on the extrapolation
@@ -6463,10 +6502,29 @@ function numericLimitValue(
               throw e;
             }
           };
+    const sampled = (t: number): number => fn(at(t));
+    // The interpreter tells a value that is not real (`ln(x)` below 0)
+    // from one that overflows: the first is a complex number, and a compiled
+    // sample is `NaN` for both.
+    let direction = 1;
+    if (dir) direction = dir.re;
+    else if (bothSides) {
+      const apply = applicable(f);
+      direction = limitDirection((t) => {
+        const y = apply([engine.number(t)])?.N();
+        return (
+          y !== undefined &&
+          isNumber(y) &&
+          Number.isFinite(y.re) &&
+          Number.isFinite(y.im) &&
+          y.im !== 0
+        );
+      }, target);
+    }
     // A numeric limit is a float, even when its value is an integer
     return engine.number(
       engine._inexactNumericValue(
-        limit((t) => fn(at(t)), target, direction, engine._deadline) + 0
+        limit(sampled, target, direction, engine._deadline) + 0
       )
     );
   }
@@ -6483,6 +6541,7 @@ function numericLimitValue(
     }
     return v;
   };
+  const direction = dir ? dir.re : bothSides ? 0 : 1;
   const re = limit((t) => sample(t)[0], target, direction, engine._deadline);
   const im = Number.isNaN(re)
     ? NaN
@@ -10517,7 +10576,7 @@ volumes
         },
         {
           description:
-            '1 for the limit from above, -1 for the limit from below; by default, the two-sided limit, which stays unevaluated when the one-sided limits differ; in the form `Limit(f, x, a)`, the point, and the direction is a fourth argument.',
+            '1 for the limit from above, -1 for the limit from below; by default, the two-sided limit, which stays unevaluated when the one-sided limits differ (its numeric value is `NaN`); in the form `Limit(f, x, a)`, the point, and the direction is a fourth argument.',
           sample: '1',
         },
       ],
@@ -10688,7 +10747,7 @@ volumes
         // variable-dependent bound runs an arbitrarily long loop that no
         // deadline check can reach (see LIMIT_PROBE_ITERATION_BUDGET).
         if (numericApproximation) {
-          return numericLimitValue(engine, f, x, dir);
+          return numericLimitValue(engine, f, x, dir, true);
         }
         return undefined;
       },
