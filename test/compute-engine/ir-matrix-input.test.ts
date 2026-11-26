@@ -436,6 +436,17 @@ describe('a matrix input: operations on its elements', () => {
     ['a local', ['Block', ['Declare', 'c', "'unknown'", ['Add', 'M', 1]], ['Add', 'c', 'c']]],
     ['a local that holds a transpose', ['Block', ['Declare', 'c', "'unknown'", ['Transpose', 'M']], ['Add', 'c', 'A']]],
     ['the arms of an If', ['If', ['Greater', 'n', 2], ['Multiply', 2, 'M'], ['Add', 'M', 1]]],
+    // Read where a list of rows is read whole (the result, a local, an
+    // element read), a result is its rows (step 4 of the plan).
+    ['arms of two sizes, as the result', ['If', ['Greater', 'n', 2], ['Multiply', 2, 'M'], ['Multiply', 2, 'A']]],
+    ['an arm that is the input, as the result', ['If', ['Greater', 'n', 2], ['Add', 'M', 1], 'A']],
+    // Arms of one size are a matrix of that size.
+    ['a matrix operator of arms of one size', ['Transpose', ['If', ['Greater', 'n', 2], ['Multiply', 2, 'M'], ['Add', 'M', 1]]]],
+    ['a matrix operator of an input and a result of its size', ['Trace', ['If', ['Greater', 'n', 2], 'A', ['Multiply', 2, 'A']]]],
+    ['an operation on a local that holds arms of one size', ['Block', ['Declare', 'c', "'unknown'", ['If', ['Greater', 'n', 2], ['Multiply', 2, 'M'], ['Multiply', 3, 'M']]], ['Add', 'c', 1]]],
+    ['an element', ['At', ['At', ['Multiply', 2, 'M'], 1], 1]],
+    ['an element at an index known at run time', ['At', ['At', ['Add', 'M', 'M'], 'n'], -1]],
+    ['a local that is written again', ['Block', ['Declare', 'c', "'unknown'", 'M'], ['Assign', 'c', ['Add', 'c', 1]], ['Assign', 'c', ['Transpose', 'c']], 'c']],
   ])('a reader of the result: %s', (_, json) => {
     check(json);
   });
@@ -470,10 +481,8 @@ describe('a matrix input: operations on its elements', () => {
     ['Equal of two matrices', ['Equal', 'M', 'A'], /Equal of a list/],
     ['the sum of the rows', ['Sum', ['Multiply', 2, 'M']], /a term that is not a number/],
     ['RowReduce', ['RowReduce', ['Multiply', 2, 'M']], /RowReduce of a matrix whose number of rows is known at run time only/],
-    ['a row of the result', ['At', ['Add', 'M', 'A'], 1], /an index that can be out of range/],
-    ['an element of the result', ['At', ['At', ['Multiply', 2, 'M'], 1], 2], /an index that can be out of range/],
-    ['arms of two sizes', ['If', ['Greater', 'n', 2], ['Multiply', 2, 'M'], ['Multiply', 2, 'A']], /arms of two types/],
-    ['an arm that is the input', ['If', ['Greater', 'n', 2], ['Add', 'M', 1], 'A'], /arms of two types/],
+    ['a row of the result as the value', ['At', ['Add', 'M', 'A'], 1], /a row at an index known at run time as the result/],
+    ['a matrix operator of arms of two sizes', ['Transpose', ['If', ['Greater', 'n', 2], ['Multiply', 2, 'M'], ['Multiply', 2, 'A']]], /Transpose of a list of lists of run-time length \(its rows can have different lengths\)/],
     ['a call result', ['Add', ['inc', 'M'], 1], /a list of lists of run-time length read whole/],
     ['a join', ['Add', ['Join', 'M', 'A'], 1], /a list of lists of run-time length read whole/],
   ])('declines: %s', (_, json, message) => {

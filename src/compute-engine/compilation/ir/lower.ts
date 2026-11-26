@@ -1109,6 +1109,10 @@ function lowerOnce(
   /** The list of rank 2 that a value of the lane `rows` reads (`rows.of`):
    *  an input of the entry of a matrix type (`input()`). */
   const matrixOf = new Map<V, V>();
+  /** The value of the lane `rows` that a list of rank 2 was read from
+   *  (`asMatrix()`), which is visible wherever that list is: an input of
+   *  the entry, the operand of a region `rows.matrix`. */
+  const rowsFrom = new Map<V, V>();
   let rowsRead: Expression | undefined;
   /** The count of the elements of a row `At(g, i)` of such a name at an
    *  index known at run time (0 where `i` is out of range), and the value
@@ -2210,10 +2214,47 @@ function lowerOnce(
   const wholeRows = (e: Expression): V => {
     rowsRead = e;
     try {
-      return value(e)!;
+      // A matrix of run-time size is read as its rows where a value of the
+      // lane `rows` is read whole (a reader of the rows, a local, an arm,
+      // the result).
+      const v = value(e)!;
+      return freeMatrix(v) ? rowsOfMatrix(v) : v;
     } finally {
       rowsRead = undefined;
     }
+  };
+
+  /** `v` is a matrix whose rows have a run-time length: a list of rank 2 of
+   *  reals or integers, no list of points, whose second length is a
+   *  value. */
+  const freeMatrix = (v: V): boolean => {
+    const t = type(v);
+    return (
+      t.shape.length === 2 &&
+      typeof t.shape[1] === 'object' &&
+      (t.lane === 'real' || t.lane === 'integer') &&
+      !tuples.has(v)
+    );
+  };
+
+  /** The list of rank 2 `v` of reals or integers as a value of the lane
+   *  `rows` (`rows.of`): the same array of arrays, whose count and whose
+   *  row length are its two lengths, and which `asMatrix()` reads as `v`
+   *  again (`matrixOf`). */
+  const rowsOfMatrix = (v: V): V => {
+    const made = rowsFrom.get(v);
+    if (made !== undefined) return made;
+    const t = type(v);
+    const [n, w] = t.shape.map((x) =>
+      typeof x === 'number' ? b.constant(x, 'integer') : x.v
+    );
+    const out = b.op('rows.of', [v], scalarType('rows'));
+    rowsParams.add(out);
+    rowsElements.set(out, t.lane as 'integer' | 'real');
+    matrixOf.set(out, v);
+    rowCounts.set(out, n);
+    rowWidths.set(out, w);
+    return out;
   };
 
   /** The node whose value `value()` admits whole (`wholeRows()`) while it
@@ -2265,13 +2306,16 @@ function lowerOnce(
     if (matrix !== undefined) return matrix;
     const n =
       rowCounts.get(v) ?? b.op('rows.count', [v], scalarType('integer'));
-    return region(
+    const [out] = region(
       lane === 'integer' ? 'rows.matrix.int' : 'rows.matrix',
       [v, n, w],
       [],
       () => [],
       site
-    )[0];
+    );
+    // `v` is visible wherever `out` is: its rows are `v` (`rowsOfMatrix()`).
+    rowsFrom.set(out, v);
+    return out;
   };
 
   let lowered = 0;
@@ -5111,6 +5155,7 @@ function lowerOnce(
       });
       param = b.entryOp('rows.of', [matrix], scalarType('rows'));
       matrixOf.set(param, matrix);
+      rowsFrom.set(matrix, param);
       rowCounts.set(param, rows);
       rowWidths.set(param, columns);
     } else param = b.param(name, { lane: ir.lane, shape });
@@ -5324,6 +5369,21 @@ function lowerOnce(
           out,
           ex === 'real' || ey === 'real' ? 'real' : 'integer'
         );
+        // Arms of one number of rows, or of one row length, give a value
+        // that has it (two matrices of one size): one value, which is made
+        // outside the arms, or equal constants.
+        const one = (table: Map<V, V>): V | undefined => {
+          const [p, q] = [table.get(x), table.get(y)];
+          if (p === undefined || q === undefined) return undefined;
+          if (p === q) return p;
+          const [cp, cq] = [constant(p), constant(q)];
+          return cp !== undefined && cp === cq
+            ? b.constant(cp, 'integer')
+            : undefined;
+        };
+        const [count, width] = [one(rowCounts), one(rowWidths)];
+        if (count !== undefined) rowCounts.set(out, count);
+        if (width !== undefined) rowWidths.set(out, width);
       }
       return out;
     };
@@ -8037,6 +8097,8 @@ function lowerOnce(
     value,
     scalar,
     wholeRows,
+    asMatrix,
+    rowsOfMatrix,
     rowsParams,
     root,
     heldParams: new Set<V>(),

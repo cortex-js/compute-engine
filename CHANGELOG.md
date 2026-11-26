@@ -415,9 +415,13 @@
   at `B = [[1, 2, 3]]`, `A + B` throws
   `RangeError: incompatible-dimensions: lists of lengths 2 and 1`,
   where the interpreter gives the error `incompatible-dimensions`.
+  The transpose of a list of rows of a stated length compiles too, where
+  it declined ("Transpose of a matrix whose number of rows is known at run
+  time only"): with `P: list<list<real^2>>` at `P = [[1, 2], [3, 4], [5, 6]]`,
+  `Transpose(P)` gives `[[1, 3, 5], [2, 4, 6]]`.
   A `list<list<real>>` argument and a call result at a parameter of a
-  matrix type, `RowReduce` of a matrix of run-time size, an element or a
-  row of the result of such an operation (`(A + B)[1]`), matrices of complex
+  matrix type, `RowReduce` of a matrix of run-time size, a row of the
+  result of such an operation as the value (`(A + B)[1]`), matrices of complex
   numbers or of booleans, a matrix of one stated dimension
   (`matrix<real^2x?>`), GLSL, the interval target and the `bigint` mode
   decline.

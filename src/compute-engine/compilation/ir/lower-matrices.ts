@@ -1,7 +1,7 @@
 /**
  * The lowering of the matrix operators (`README.md`, "Matrices"): a matrix
- * is a list of rank 2 whose rows have one stated length, the shape that a
- * build can make. Each operator settles the shape of its value from the
+ * is a list of rank 2 whose rows have one length, stated or (on JavaScript)
+ * a value. Each operator settles the shape of its value from the
  * shapes of its operands and declines a shape it cannot settle. The
  * operators that read whole rows and columns in a data-dependent order
  * (`Determinant`, `Inverse`, `MatrixPower`, `RowReduce`) are the kernels
@@ -21,6 +21,11 @@ import { decline, type Fn, type Lowering } from './lower-context.js';
 import { MAX_MATRIX_POWER_EXPONENT } from '../../numerics/value-scaled-caps.js';
 import type { listLowering } from './lower-lists.js';
 
+/** The decline of the operator `head` of a matrix whose rows have a
+ *  run-time length. */
+const RUN_TIME_SIZE = (head: string) =>
+  `${head} of a matrix whose number of rows is known at run time only (a list of lists of run-time length)`;
+
 /** The heads that `matrix()` lowers. */
 export const MATRIX_HEADS: readonly string[] = Object.freeze([
   'Matrix',
@@ -38,31 +43,6 @@ export const MATRIX_HEADS: readonly string[] = Object.freeze([
   'Flatten',
   'Reshape',
   'Cross',
-]);
-
-/** The heads that read a list of lists of run-time length whose rows have
- *  one length (CE-1736, `rowWidths` of the lowering). */
-const TABLE_HEADS: ReadonlySet<string> = new Set([
-  'Transpose',
-  'ConjugateTranspose',
-  'Trace',
-  'MatrixMultiply',
-  'Rank',
-  'Shape',
-  'Diagonal',
-  'Determinant',
-  'Inverse',
-  'MatrixPower',
-]);
-
-/** The operators of a square matrix: a list of rank 2 of a run-time size
- *  is read as its rows (`matrixRows()`), whose order is checked at run
- *  time (`rowsKernel()`, `agree()`). */
-const SQUARE_HEADS: ReadonlySet<string> = new Set([
-  'Trace',
-  'Determinant',
-  'Inverse',
-  'MatrixPower',
 ]);
 
 export function matrixLowering(
@@ -87,22 +67,17 @@ export function matrixLowering(
    *  tuple and no list of tuples (the interpreter reads a tuple as one
    *  element of a matrix), of rank at most `rank`. */
   const numbers = (e: Fn, x: Expression, rank = 2): V => {
-    // A list of lists of run-time length that the program made (the lane
-    // `rows`, CE-1736): its rows can have different lengths. `Flatten`
-    // reads it (`matrix()`), and `Transpose`, `MatrixMultiply` and `Trace`
-    // read one whose rows have one length (`rowWidths`, `table()`); the
-    // other operators need an order known at compile time. A name is read
-    // whole too (a local that holds such a value).
+    // A list of lists of run-time length (the lane `rows`, CE-1736). One
+    // whose rows have one length (`rowWidths`: an input or a parameter of a
+    // matrix type, a build) is a matrix, read as a list of rank 2 of its
+    // two lengths (`asMatrix()`). `Flatten` reads another one (`matrix()`),
+    // whose rows can have different lengths; the other operators decline
+    // it. A name is read whole too (a local that holds such a value).
     const v = cx.wholeRows(x);
     if (type(v).lane === 'rows' && cx.rowsParams.has(v)) {
+      const m = cx.asMatrix(e, v);
+      if (m !== undefined) return m;
       if (e.operator === 'Flatten' && cx.rowsElements.has(v)) return v;
-      if (cx.rowWidths.has(v) && cx.rowsElements.has(v)) {
-        if (TABLE_HEADS.has(e.operator)) return v;
-        decline(
-          e,
-          `${e.operator} of a matrix whose number of rows is known at run time only (a list of lists of run-time length)`
-        );
-      }
       decline(
         e,
         `${e.operator} of a list of lists of run-time length (its rows can have different lengths)`
@@ -152,33 +127,11 @@ export function matrixLowering(
     );
   };
 
-  /** The transpose of the matrix `m`: its number of rows must be stated
-   *  (the length of the rows of the result). */
+  /** The transpose of the matrix `m`: the rows of the elements of each
+   *  column, whose length is the number of rows of `m`. */
   const transpose = (e: Fn, m: V): V => {
-    const [r, c] = type(m).shape;
-    if (typeof r !== 'number')
-      decline(
-        e,
-        `${e.operator} of a matrix whose number of rows is known at run time only (a list of lists of run-time length)`
-      );
-    return build(e, length(c), (j) =>
-      build(e, integer(r), (i) => at(at(m, i), j))
-    );
-  };
-
-  /** The number of rows of `m`, of the lane `rows` (`rowCounts`). */
-  const rowCount = (m: V): V =>
-    cx.rowCounts.get(m) ?? b.op('rows.count', [m], scalarType('integer'));
-
-  /** The element at the row `i` and the column `j` of `m`, of the lane
-   *  `rows`. */
-  const rowsAt = (m: V, i: V, j: V): V => {
-    const lane = cx.rowsElements.get(m)!;
-    return b.op(
-      lane === 'integer' ? 'rows.get.int' : 'rows.get',
-      [m, i, j],
-      scalarType(lane)
-    );
+    const [r, c] = type(m).shape.map(length);
+    return build(e, c, (j) => build(e, r, (i) => at(at(m, i), j)));
   };
 
   /** The values `x` and `y` are one number at run time: one value, or
@@ -256,68 +209,35 @@ export function matrixLowering(
     return cx.region('build', [n], [i], () => [row()], e)[0];
   };
 
-  /** `Transpose`, `ConjugateTranspose`, `Trace`, `Rank` and `Shape` of `m`,
-   *  a value of the lane `rows` of reals or integers whose rows have one
-   *  length (CE-1736, `rowWidths`): the transpose, rows of the elements of
-   *  a column, whose rows have the number of rows of `m` as their length;
-   *  the trace, whose number of rows and length of the rows are compared
-   *  (`agree()`); the rank 2 and the tuple of the number of rows and the
-   *  length of the rows (the interpreter's empty list of rows has rank 1,
-   *  a known limitation of `docs/COMPILATION-MODEL.md`). */
-  const table = (e: Fn, m: V): V => {
-    const w = cx.rowWidths.get(m)!;
-    const n = rowCount(m);
-    if (e.operator === 'Rank') return integer(2);
-    if (e.operator === 'Shape') {
-      const v = cx.list(e, [n, w]);
-      cx.tuples.set(v, 0);
-      return v;
-    }
-    if (e.operator === 'Trace') {
-      const [cn, cw] = [cx.constant(n), cx.constant(w)];
-      if (cn !== undefined && cw !== undefined && cn !== cw)
-        decline(e, 'Trace of a matrix that is not square');
-      const zero = agree(n, w, 'rows.square');
-      return sum(e, n, (k) => rowsAt(m, k, k), zero);
-    }
-    if (e.operator === 'Diagonal')
-      return build(e, cx.apply(e, 'Min', [n, w]), (k) => rowsAt(m, k, k));
-    if (
-      e.operator === 'Determinant' ||
-      e.operator === 'Inverse' ||
-      e.operator === 'MatrixPower'
-    )
-      return rowsKernel(e, m, n, w);
-    return build(e, w, (j) => build(e, n, (i) => rowsAt(m, i, j)));
-  };
-
-  /** `Determinant`, `Inverse` and `MatrixPower` of `m`, a value of the lane
-   *  `rows` whose rows have one length, of `n` rows of `w` elements: the
-   *  kernels of a square matrix, of the order `n`. Where `same()` does not
-   *  prove `n` and `w` equal, the order is `rows.order`, which throws a
-   *  `RangeError` where they differ (the interpreter's
-   *  `expected-square-matrix`); each kernel reads the order, so that the
-   *  check runs before it, and the rows of `Inverse` and `MatrixPower` have
-   *  that order as their count and their length, so that a reader of the
-   *  result that reads no element runs the check too. */
-  const rowsKernel = (e: Fn, m: V, n: V, w: V): V => {
+  /** `Determinant`, `Inverse` and `MatrixPower` of `m`, a matrix of a size
+   *  known at run time: the kernels of a square matrix, of the order of its
+   *  number of rows. Where `same()` does not prove the two lengths equal,
+   *  the order is `rows.order`, which throws a `RangeError` where they
+   *  differ (the interpreter's `expected-square-matrix`); each kernel reads
+   *  the order, so that the check runs before it, and the value of
+   *  `Inverse` and of `MatrixPower`, of the lane `rows`, has that order as
+   *  its count and its row length, so that a reader of the result that
+   *  reads no element runs the check too. */
+  const kernel = (e: Fn, m: V): V => {
+    const [n, w] = type(m).shape.map(length);
     const [cn, cw] = [cx.constant(n), cx.constant(w)];
     if (cn !== undefined && cw !== undefined && cn !== cw)
       decline(e, `${e.operator} of a matrix that is not square`);
     const order = same(n, w)
       ? n
       : b.op('rows.order', [n, w], scalarType('integer'));
-    // The kernel reads the elements row by row (`rows.flat`) and the order;
-    // its value at the order 1 is the element.
+    // The kernel reads the rows (the same array) and the order; the value
+    // of the determinant at the order 1 is the element.
+    const rows = cx.rowsOfMatrix(m);
     if (e.operator === 'Determinant')
       return cx.apply(e, op('mdet'), [
-        rowsFlat(e, m, cx.rowsElements.get(m)!),
+        rowsFlat(e, rows, cx.rowsElements.get(rows)!),
         order,
       ]);
     const out =
       e.operator === 'Inverse'
-        ? b.op('rows.inverse', [m, order], scalarType('rows'))
-        : b.op('rows.power', [m, exponent(e), order], scalarType('rows'));
+        ? b.op('rows.inverse', [rows, order], scalarType('rows'))
+        : b.op('rows.power', [rows, exponent(e), order], scalarType('rows'));
     cx.rowsParams.add(out);
     cx.rowsElements.set(out, 'real');
     cx.rowCounts.set(out, order);
@@ -347,19 +267,19 @@ export function matrixLowering(
    *  the order of the inner index. */
   const product = (e: Fn): V => {
     const [a, c] = e.ops.map((x) => numbers(e, x));
-    if (type(a).lane === 'rows' || type(c).lane === 'rows')
-      return tableProduct(e, a, c);
     const [sa, sc] = [type(a).shape, type(c).shape];
     if (sa.length === 0 || sc.length === 0)
       decline(e, 'MatrixMultiply of a scalar');
-    const [ka, kc] = [sa[sa.length - 1], sc[0]];
-    if (typeof ka === 'number' && typeof kc === 'number' && ka !== kc)
+    const [ka, kc] = [length(sa[sa.length - 1]), length(sc[0])];
+    const [ca, cc] = [cx.constant(ka), cx.constant(kc)];
+    if (ca !== undefined && cc !== undefined && ca !== cc)
       decline(e, 'MatrixMultiply of operands of two inner lengths');
-    // A stated inner length, when there is one, so that a short sum is
+    // A constant inner length, when there is one, so that a short sum is
     // written out.
-    const k = length(typeof ka === 'number' ? ka : kc);
-    // The check of inner lengths known at run time (`agree()`).
-    const zero = agree(length(ka), length(kc));
+    const k = ca !== undefined ? ka : kc;
+    // The check of inner lengths that are not proved equal (`agree()`): the
+    // interpreter's value of other lengths is `incompatible-dimensions`.
+    const zero = agree(ka, kc);
     const dot = (x: (p: V) => V, y: (p: V) => V): V =>
       sum(e, k, (p) => cx.apply(e, 'Multiply', [x(p), y(p)]), zero);
     if (sa.length === 1 && sc.length === 1)
@@ -390,60 +310,6 @@ export function matrixLowering(
     });
   };
 
-  /** `MatrixMultiply(A, B)` where `A` or `B` is a value of the lane `rows`
-   *  whose rows have one length (CE-1736), and the other is such a value,
-   *  a matrix or a vector. Inner lengths that are not one value or equal
-   *  constants are compared at run time (`agree()`): the interpreter's
-   *  value of other lengths is the error `incompatible-dimensions`. */
-  const tableProduct = (e: Fn, a: V, c: V): V => {
-    type Table = { rows: V; columns: V; at: (i: V, j: V) => V };
-    type Operand = Table | { length: V; at: (k: V) => V };
-    const operand = (m: V): Operand => {
-      const shape = type(m).shape;
-      if (type(m).lane === 'rows')
-        return {
-          rows: rowCount(m),
-          columns: cx.rowWidths.get(m)!,
-          at: (i: V, j: V) => rowsAt(m, i, j),
-        };
-      if (shape.length === 2)
-        return {
-          rows: length(shape[0]),
-          columns: length(shape[1]),
-          at: (i: V, j: V) => at(at(m, i), j),
-        };
-      if (shape.length === 1)
-        return { length: length(shape[0]), at: (k: V) => at(m, k) };
-      decline(e, 'MatrixMultiply of a scalar');
-    };
-    const [x, y] = [operand(a), operand(c)];
-    const inner = 'columns' in x ? x.columns : x.length;
-    const other = 'rows' in y ? y.rows : y.length;
-    const [ci, co] = [cx.constant(inner), cx.constant(other)];
-    if (ci !== undefined && co !== undefined && ci !== co)
-      decline(e, 'MatrixMultiply of operands of two inner lengths');
-    // A constant inner length, when there is one, so that a short sum is
-    // written out; the check of the inner lengths (`agree()`).
-    const k = ci !== undefined ? inner : other;
-    const zero = agree(inner, other);
-    const dot = (f: (p: V) => V, g: (p: V) => V): V =>
-      sum(e, k, (p) => cx.apply(e, 'Multiply', [f(p), g(p)]), zero);
-    if ('length' in x) {
-      const m = y as Table;
-      return build(e, m.columns, (j) => dot(x.at, (p) => m.at(p, j)));
-    }
-    if ('length' in y)
-      return build(e, x.rows, (i) => dot((p) => x.at(i, p), y.at));
-    return build(e, x.rows, (i) =>
-      build(e, y.columns, (j) =>
-        dot(
-          (p) => x.at(i, p),
-          (p) => y.at(p, j)
-        )
-      )
-    );
-  };
-
   /** `Reshape(x, Tuple(d1, …, dk))` of constant positive integers: the
    *  elements of `x`, row by row, cycled to fill the shape, as the
    *  interpreter's. */
@@ -467,6 +333,8 @@ export function matrixLowering(
         'Reshape to a shape that is not a tuple of constant positive integers'
       );
     if (type(x).shape.length === 0) decline(e, 'Reshape of a scalar');
+    if (type(x).shape.length === 2 && typeof type(x).shape[1] !== 'number')
+      decline(e, RUN_TIME_SIZE('Reshape'));
     const flat = type(x).shape.length === 1 ? x : flatten(e, x);
     const n = lists.listSource(flat).length;
     const level = (j: number, prefix: V | undefined): V =>
@@ -595,39 +463,8 @@ export function matrixLowering(
       if (v !== undefined) return v;
     }
     const m = numbers(e, e.ops[0]);
-    // The matrix operators of a list of lists of run-time length whose
-    // rows have one length (CE-1736).
-    if (type(m).lane === 'rows' && h !== 'Flatten') return table(e, m);
-    // An operator of a square matrix of a list of rank 2 of a run-time
-    // size (a build of a constant row length): its rows, whose order is
-    // checked at run time.
-    // Any operator of a list of rank 2 whose rows have a run-time length
-    // (an input of a matrix type read whole, an operation on the elements
-    // of one) reads its rows too.
-    const free =
-      checks &&
-      type(m).shape.length === 2 &&
-      typeof type(m).shape[1] !== 'number';
-    if (
-      checks &&
-      type(m).shape.length === 2 &&
-      type(m).shape.some((d) => typeof d !== 'number') &&
-      (SQUARE_HEADS.has(h) || (free && TABLE_HEADS.has(h)))
-    ) {
-      const rows = lists.matrixRows(e, m);
-      if (rows !== undefined) return table(e, rows);
-    }
-    if (free && h === 'Flatten' && flattenDepth(e) !== 0) {
-      const rows = lists.matrixRows(e, m);
-      if (rows !== undefined) return rowsFlat(e, rows, cx.rowsElements.get(rows)!);
-    }
-    if (free && h === 'RowReduce')
-      decline(
-        e,
-        'RowReduce of a matrix whose number of rows is known at run time only (a list of lists of run-time length)'
-      );
-    // `Flatten` of a list of lists of run-time length that the program
-    // made (CE-1736): the elements of its rows.
+    // `Flatten` of a list of lists of run-time length whose rows can have
+    // different lengths (CE-1736): the elements of its rows.
     if (type(m).lane === 'rows') {
       if (flattenDepth(e) === 0)
         decline(
@@ -636,33 +473,57 @@ export function matrixLowering(
         );
       return rowsFlat(e, m, cx.rowsElements.get(m)!);
     }
-    const rank = type(m).shape.length;
+    const shape = type(m).shape;
+    const rank = shape.length;
+    // A matrix whose rows have a run-time length (an input or a parameter
+    // of a matrix type, a table that the program builds, an operation on
+    // the elements of one), and one of a size known at run time.
+    const free = rank === 2 && typeof shape[1] !== 'number';
+    const sized = rank === 2 && shape.some((d) => typeof d !== 'number');
     // A matrix whose number of rows is known at run time only has rank 2:
     // the interpreter's empty list of rows has rank 1 and the shape `(0)`,
     // a known limitation of `docs/COMPILATION-MODEL.md`.
     if (h === 'Rank') return integer(rank);
     if (h === 'Shape') {
       if (rank === 0) decline(e, 'Shape of a scalar (an empty tuple)');
-      const v = cx.list(e, type(m).shape.map(length));
+      const v = cx.list(e, shape.map(length));
       cx.tuples.set(v, 0);
       return v;
     }
     if (h === 'Flatten') {
       // A depth of 0 leaves the rows; any other flattens the one nesting
-      // level a matrix has (`+oo` is complete).
+      // level a matrix has (`+oo` is complete). Rows of a run-time length
+      // are copied one after the other (`rows.flat`).
       const depth = flattenDepth(e);
-      return rank === 0
-        ? cx.list(e, [m])
-        : rank === 1 || depth === 0
-          ? m
-          : flatten(e, m);
+      if (rank === 0) return cx.list(e, [m]);
+      if (rank === 1 || depth === 0) return m;
+      return free
+        ? rowsFlat(e, cx.rowsOfMatrix(m), type(m).lane as 'integer' | 'real')
+        : flatten(e, m);
     }
-    if (h === 'Transpose' || h === 'ConjugateTranspose')
+    if (h === 'Transpose' || h === 'ConjugateTranspose') {
+      // The rows of the result have the number of rows of `m` as their
+      // length: a run-time length on JavaScript only.
+      if (rank === 2 && typeof shape[0] !== 'number' && !checks)
+        decline(e, RUN_TIME_SIZE(h));
       return rank < 2 ? m : transpose(e, m);
+    }
     if (h === 'Trace') {
       if (rank === 0) return m;
-      const n = integer(order(e, m));
-      return sum(e, n, (k) => at(at(m, k), k));
+      if (rank !== 2) decline(e, 'Trace of a value that is not a matrix');
+      // The numbers of rows and of columns are compared (`agree()`): the
+      // interpreter's value of a matrix that is not square is the error
+      // `expected-square-matrix`.
+      const [n, w] = shape.map(length);
+      const [cn, cw] = [cx.constant(n), cx.constant(w)];
+      if (cn !== undefined && cw !== undefined && cn !== cw)
+        decline(e, 'Trace of a matrix that is not square');
+      if (sized && !checks && !same(n, w))
+        decline(
+          e,
+          'Trace of a matrix whose number of rows is known at run time only'
+        );
+      return sum(e, n, (k) => at(at(m, k), k), agree(n, w, 'rows.square'));
     }
     if (h === 'Diagonal') {
       if (rank === 0) return m;
@@ -698,6 +559,7 @@ export function matrixLowering(
     // matrix).
     if (h === 'RowReduce') {
       if (rank !== 2) decline(e, 'RowReduce of a value that is not a matrix');
+      if (free) decline(e, RUN_TIME_SIZE(h));
       // The interpreter chops the entries at the engine's tolerance at the
       // evaluation (`ce.chop()`); the code holds it at the compilation.
       return cx.apply(e, op('mrowreduce'), [
@@ -705,6 +567,9 @@ export function matrixLowering(
         b.constant(e.engine.tolerance, 'real'),
       ]);
     }
+    // A square matrix of a size known at run time: its order is checked
+    // at run time (`kernel()`), on JavaScript.
+    if (sized && checks) return kernel(e, m);
     const n = order(e, m);
     if (h === 'Determinant')
       return n === 1

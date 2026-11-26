@@ -1262,21 +1262,12 @@ export function functionLowering(
         }
         // A list of lists of two lengths not stated is read whole: a body of
         // run-time inner lengths is of the lane `rows` (CE-1736).
-        const whole =
+        const body =
           grid !== undefined
             ? cx.wholeRows(literal.ops[0])
             : list || open || points !== undefined || shaped || record
               ? cx.value(literal.ops[0])!
               : cx.scalar(literal.ops[0]);
-        // A matrix whose rows have a run-time length (an operation on the
-        // elements of a parameter of a matrix type) is its rows: a call
-        // gives one length, the number of rows.
-        const body =
-          grid !== undefined &&
-          type(whole).shape.length === 2 &&
-          typeof type(whole).shape[1] !== 'number'
-            ? (lists.matrixRows(literal, whole) ?? whole)
-            : whole;
         const t = type(body);
         // A result that is not a scalar: a record, of the nominal type of
         // the result type when it is one.

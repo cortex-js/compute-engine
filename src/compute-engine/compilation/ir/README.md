@@ -2679,13 +2679,17 @@ of lists of a run-time length (an input of type `list<list<real>>`, a build
 whose rows have a run-time length) is the lane `rows` ("The rows lane"), which
 the matrix operators decline (`docs/COMPILATION-MODEL.md`), except a value
 whose rows have one length (`rowWidths`: a build, an input or a parameter of
-a matrix type): `Transpose` and `ConjugateTranspose` of it are the rows of its
-columns (`rows.get`), whose length is its number of rows; `Trace` of it is the
-sum of its diagonal; `MatrixMultiply` of it and such a value, a matrix or a
-list is the product; `Rank` of it is 2 and `Shape` the tuple of `rows.count`
-(or its `rowCounts`) and its `rowWidths`; `Diagonal` of it is the build of
-its `Min(rows, columns)` diagonal elements; `Determinant`, `Inverse` and
-`MatrixPower` of it are the kernels of its order (`rowsKernel()`, below).
+a matrix type), a matrix of run-time size: the operators read it as a list
+of rank 2 of the shape `[{v: r}, {v: c}]` of its number of rows and the
+length of its rows (`numbers()` of `lower-matrices.ts`, which gives
+`asMatrix()` of it), so each operator has one lowering, which reads the
+shape of its operand, for a stated and for a run-time size: `at(at(m, i), j)`
+is the element, and the lengths are those of the shape. The two forms of a
+matrix of run-time size are one array of arrays: the list of rank 2
+(`rows.matrix`, or the parameter of an input of the entry) and the value of
+the lane `rows` (`rows.of`), which `rowsOfMatrix()` of `lower.ts` gives where
+a value of the lane is read whole (`wholeRows()`: a reader of the rows, a
+local, an arm, the result, a parameter of that lane, the kernels below).
 
 An input of the entry of a matrix type of no stated dimensions (a name read
 at the entry, a positional parameter of a root function literal: `input()` of
@@ -2729,16 +2733,17 @@ lengths that are two constants (`knownLength()`), a matrix with a list (`A + v`,
 the interpreter adds `v[i]` to the row `i`), a tuple operand, a target that
 compares no length (`checks`) and a row that does not thread decline as
 before ("lists of different lengths or ranks"). The result is a list of rank
-2 of run-time lengths. The matrix operators read one whose rows have a
-run-time length as its rows (`matrixRows()`, a `rows.build` of them): the
-operators of `TABLE_HEADS` and `Flatten`; `RowReduce` of it declines, as of a
-value of the lane. A parameter of a matrix type takes it the same way, and
-the body of a user function whose value it is gives its rows, since a call
-gives one length (`call()` of `lower-functions.ts`): the result of the call
-has no row length, so `inc(A) + 1` declines where `inc := m ↦ m + 1`. Not
-lowered here: an element or a row of such a result (`At(A + B, 1)`), an `If`
-whose arms are two such results of two sizes, and the reductions of a matrix
-(`Sum(A)`), which decline.
+2 of run-time lengths, which the matrix operators read as any matrix;
+`RowReduce` and `Reshape` of it decline. Where a value of the lane `rows` is
+read whole (`wholeRows()`), it is its rows (`rows.of`): a parameter of a
+matrix type takes it, the body of a user function whose value it is gives
+its rows (a call gives one length, `call()` of `lower-functions.ts`: the
+result of the call has no row length, so `inc(A) + 1` declines where
+`inc := m ↦ m + 1`), an `If` whose arms are two such results of two sizes
+joins them as rows, a local holds it and is written again, and an element
+`At(At(A + B, i), j)` is read (`rows.at`). The row `At(A + B, 1)` as the
+value, a matrix operator of such an `If`, and the reductions of a matrix
+(`Sum(A)`) decline.
 
 Two lengths that must be equal (the inner lengths of
 `MatrixMultiply`, the numbers of rows and of columns of `Trace`) and that
@@ -2769,11 +2774,14 @@ the order is the last argument of the kernel, the order of its matrix of
 NaN). Their value is of the lane `rows`, of reals, whose `rowCounts` and
 `rowWidths` are the order, so a reader that reads no element (`Length`,
 `Shape`) reads the check too; `Rank`, a constant, and a statement whose
-value is dropped do not (a known limitation). A list of rank 2 of a run-time size (a build
-of a constant row length) is read as its rows (`matrixRows()` of
-`lower-lists.ts`) by `Trace`, `Determinant`, `Inverse` and `MatrixPower`
-(`SQUARE_HEADS`), so its order is checked the same way. `RowReduce` and the
-other operators decline it. The matrix operators (`lower-matrices.ts`) settle
+value is dropped do not (a known limitation). A matrix of which one length
+only is known at run time (a build of a constant row length,
+`P: list<list<real^2>>`) is read the same way, so its order is checked the
+same way (`kernel()`), and its transpose has rows of a run-time length. In
+the bigint mode, which compares no length and has no value of the lane
+`rows`, `Trace`, the transpose and the kernels of a matrix of a size known
+at run time decline. `RowReduce` of a matrix whose rows have a run-time
+length declines. The matrix operators (`lower-matrices.ts`) settle
 the shape of their value from the shapes of their operands; a tuple, a list of
 tuples, complex and boolean elements, a rank above 2 and another number of
 operands decline. On JavaScript:
@@ -2793,8 +2801,8 @@ operands decline. On JavaScript:
   cycled from the first when there are fewer, as the interpreter's; another
   shape (an input, a `List`) declines.
 - `Transpose(m)` and `ConjugateTranspose(m)` (of reals) are the build of the
-  columns; the number of rows must be stated (it is the length of the rows of
-  the result), so `Transpose(P)` of `P: list<list<real^2>>` declines. A scalar
+  columns, whose length is the number of rows, a run-time length for
+  `Transpose(P)` of `P: list<list<real^2>>`. A scalar
   and a list are themselves, as in the interpreter.
 - `Trace(m)` is the sum from 0 of the diagonal of a square matrix (a scalar is
   itself). `Diagonal(m)` of a matrix is the build of its `Min(rows, columns)`

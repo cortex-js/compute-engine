@@ -1878,8 +1878,10 @@ result is read (`Length(Inverse(M))`, `Shape(MatrixPower(M, 2))`). At `M = [[1, 
 `[1, 5]`, and `Determinant(M)` and `Length(Inverse(M))` throw
 `RangeError: expected-square-matrix: a matrix of 2 rows and 3 columns`.
 `Inverse` of a singular matrix is a matrix of NaN, as for a matrix of
-stated order. `RowReduce`, `Reshape` and the transpose of such a list of
-rank 2 decline. A `list<list<…>>` input, a value after
+stated order. `RowReduce` and `Reshape` of such a list of
+rank 2 decline; its transpose compiles (with `P: list<list<real^2>>` at
+`P = [[1, 2], [3, 4], [5, 6]]`, `Transpose(P)` gives `[[1, 3, 5], [2, 4, 6]]`).
+A `list<list<…>>` input, a value after
 an `If` or a `Coalesce`, a value that a loop carries, the result of a call, a
 join and a literal decline, since their rows can have different lengths:
 with `g: list<list<integer>>`, `Transpose(g)` and
@@ -1923,9 +1925,11 @@ the number of rows and the length of the rows, once, before the loops. At
 (`A + v` with `v: list<real>`, where the interpreter adds `v[i]` to the row
 `i`), a `list<list<real>>` input (`g + g`: its rows can have different
 lengths; declare it `matrix<real>`), the result of a call
-(`inc(A) + 1`), an element or a row of the result (`(A + B)[1][2]`; write
-`A[1][2] + B[1][2]`), an `If` whose arms are two such results of two sizes,
-and a reduction of a matrix (`Sum(A)`).
+(`inc(A) + 1`), a row of the result as the value (`(A + B)[1]`), a matrix
+operator of an `If` whose arms are two such results of two sizes, and a
+reduction of a matrix (`Sum(A)`). An element of the result compiles
+(`(A + B)[1][2]`, NaN out of range), and so does such an `If` as the value
+of the program or of a local.
 
 Compiled `Equal` and `NotEqual` on numeric operands are the IEEE 754
 comparison (`===` on JavaScript, `==` on the shader targets), with no
