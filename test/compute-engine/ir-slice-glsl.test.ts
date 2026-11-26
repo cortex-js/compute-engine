@@ -58,6 +58,9 @@ describe('IR slice: GLSL text', () => {
       'sort', 'sort.int', 'ordering', 'median',
       'mode', 'quartile1', 'quartile3', 'skewness', 'kurtosis', 'covariance', 'pcovariance', 'correlation',
       'rbinomial', 'fibonacci.int',
+      // The write and the read of a variable of the engine around a call of
+      // the host.
+      ...OPERATORS.flatMap((r) => r.signatures.map(([, , op]) => op)).filter((op) => op.startsWith('state.')),
       'isundef', 'present.int', 'present', 'cpresent', 'present.bool', 'count.int',
       // The length of a list that the pass `forward` does not build (CE-1806).
       'listlen',

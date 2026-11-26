@@ -336,7 +336,7 @@ arrays of two cell types are `incompatible-type`.
 This is the exchange of a program that computes into a second buffer (a
 cellular automaton, a blur): it writes `next` from `cur`, then
 `swap(cur, next)`, and `cur` names the current cells at every step. The same
-exchange by assignment, `(cur, next) = (next, cur)`, assigns two variables
+exchange by assignment, `(cur, next) := (next, cur)`, assigns two variables
 and changes which array each name holds. `Swap` assigns none: it also
 exchanges two arrays that no name holds (`swap(r.pixels, scratch)` for a
 raster that is a tuple, whose field cannot be assigned).
@@ -605,14 +605,14 @@ that is a number, a boolean or an array:
   arms of an `If` give each one, and a user function that reaches a host
   call, itself or through its calls, takes and returns each one.
 - A variable of an array type is in `assigns` like a variable of a number:
-  `board = next` and `(cur, next) = (next, cur)` compile, in the root
+  `board = next` and `(cur, next) := (next, cur)` compile, in the root
   function and in a user function where the same assignment of a number
   compiles. Its write and its read are one reference.
 - A call that throws keeps the values written at the last host call before
   the throw, and the values that a host function assigned. With no host call
   before the throw it writes nothing, as today.
 
-So `t => do { step(); (cur, next) = (next, cur); draw(cur) }` and
+So `t => do { step(); (cur, next) := (next, cur); draw(cur) }` and
 `t => do { s = s + t; hostDraw(s) }` compile. These decline:
 
 - a list variable, or a variable that is a list of lists, in `assigns` of a
@@ -1100,7 +1100,7 @@ interpreter and compiled JavaScript.
     compiles, and the host function reads the new `s` in the engine when it
     runs. A host function that assigns `s` changes the value that the code
     reads after the call. The Game of Life of case 12a with
-    `(cur, next) = (next, cur)` in the body of the callback, in place of the
+    `(cur, next) := (next, cur)` in the body of the callback, in place of the
     `swap` in `step()`, compiles and gives the same cells. A host call in a
     `Loop` that assigns `s` at each pass shows each value to the host. After
     a throw that follows a host call, the engine holds the values written at

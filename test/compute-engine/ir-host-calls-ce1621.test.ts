@@ -280,10 +280,12 @@ describe('a call of a function of the host that declines', () => {
     expect(declined(fn(ce, 'f'))).toMatch(/more than 4 arguments/);
   });
 
-  test('a function that assigns a variable of the engine', () => {
-    const { ce, calls } = engine(`let s = 0.5
-let f = (t: real) => do { s = s + t; hostDraw(s) }`);
-    expect(declined(fn(ce, 'f'))).toMatch(/assigns a variable of the engine/);
+  test('a function that assigns a list variable of the engine', () => {
+    const { ce, calls } = engine(`let L = [0.5]
+let f = (t: real) => do { L = L + [t]; hostDraw(t) }`);
+    expect(declined(fn(ce, 'f'))).toMatch(
+      /in a function that assigns the list variable L of the engine/
+    );
     expect(calls).toEqual([]);
   });
 

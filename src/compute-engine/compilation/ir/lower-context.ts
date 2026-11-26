@@ -474,10 +474,12 @@ export type Lowering = {
    *  writes, itself or through the user functions that it calls
    *  (`uses`), and those that it writes (`writes`), in the order of
    *  `Program.assigns` (CE-1776). Both empty for a function that touches
-   *  none. */
+   *  none. `host`: a function of the host that it calls, itself or through
+   *  its calls (`hostCall()`). */
   stateOf(key: object): {
     readonly uses: readonly Assigned[];
     readonly writes: readonly string[];
+    readonly host?: string;
   };
   /** The binding of the variable `name` of the engine (a name of
    *  `Program.assigns`) that the call `e` of a user function that writes

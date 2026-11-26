@@ -1225,7 +1225,9 @@ export function functionLowering(
           if (fn.self.length > 0 || fn.called || fn.recursive.length > 0)
             decline(
               literal,
-              `a recursive function ${e.operator} that assigns the variable ${fn.writes[0]} of the engine`
+              state.host === undefined
+                ? `a recursive function ${e.operator} that assigns the variable ${fn.writes[0]} of the engine`
+                : `a recursive function ${e.operator}, or one on a cycle of calls, that calls the function ${state.host} of the host, in a function that assigns the variable ${fn.writes[0]} of the engine`
             );
           return [
             cx.pack(literal, [
@@ -1585,6 +1587,9 @@ export function functionLowering(
               ('whole' in p && p.whole) ||
               // A parameter that can hold a record (`held()`).
               ('record' in p && p.record !== undefined) ||
+              // A parameter of an array type, which takes the IR type of
+              // its argument, an array of its cells (`held()`).
+              ('array' in p && p.array !== undefined) ||
               // A parameter that takes the shape of its argument, one
               // function per shape (`laneKey()`; CE-1652, step 4b).
               ('point' in p && p.point !== undefined) ||
@@ -1962,16 +1967,15 @@ export function functionLowering(
     // record of its value and of the new value of each variable, which
     // rebinds the variable here, in the order of the program.
     if (fn.writes.length > 0) {
+      const host = cx.stateOf(fn.key).host;
+      const writes =
+        host === undefined
+          ? `which assigns the variable ${fn.writes[0]} of the engine`
+          : `which calls the function ${host} of the host, in a function that assigns the variable ${fn.writes[0]} of the engine`;
       if (lowering.has(fn))
-        decline(
-          e,
-          `a recursive call of ${e.operator}, which assigns the variable ${fn.writes[0]} of the engine`
-        );
+        decline(e, `a recursive call of ${e.operator}, ${writes}`);
       if (mapping > 0)
-        decline(
-          e,
-          `a call of ${e.operator} that maps over a list, which assigns the variable ${fn.writes[0]} of the engine`
-        );
+        decline(e, `a call of ${e.operator} that maps over a list, ${writes}`);
       const r = b.newValue(type(fn.ir.body.yields[0]));
       b.emit({ k: 'call', outs: [r], fn: fn.ir.name, args: all });
       fn.writes.forEach((n, k) => (cx.stateWrite(e, n).v = cx.field(r, k + 1)));

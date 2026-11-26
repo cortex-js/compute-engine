@@ -532,10 +532,17 @@ let ok = (i: integer) => a[i] + 1
     ['d8', /a store of a value of type real in an array<integer<0..255>>/],
     ['d9', /a store of a value of type boolean/],
     ['d10', /in the body of a function literal that is an operand or a value/],
-    ['d11', /an assignment of a, of type array/],
   ])('%s declines: %p', (name, message) => {
     const { ce } = engine(source);
     expect(declined(ce, name)).toMatch(message);
+  });
+
+  test('an assignment of a name that holds an array compiles (section 10.7)', () => {
+    const { ce } = engine(source);
+    const result = compile(fn(ce, 'd11'), { to: 'javascript', fallback: false });
+    expect(result.assigns).toEqual(['a']);
+    expect((result.run as Run)(1, 2)).toBe(0);
+    expect(array(ce, 'a')).toBe(array(ce, 'b'));
   });
 
   test('a declined function runs on the interpreter with fallback', () => {
@@ -860,5 +867,107 @@ let hd = (n: integer) => do { for k in 1..n { draw(k) } }
     const { ce, drawn } = engine(source);
     expect(compiled(ce, 'hd').run(5)).toBeNaN();
     expect(drawn.map((x) => x.re)).toEqual([1, 2, 3, 4, 5]);
+  });
+});
+
+describe('A PARAMETER DECLARED AS AN ARRAY', () => {
+  /** `f(…args)` compiled on one engine and interpreted on another: both
+   *  values, and the cells of `a` and `b` in each engine after the call. */
+  const both = (source: string, args: number[]) => {
+    const c = engine(source);
+    const i = engine(source);
+    const code = compiled(c.ce, 'f').run(...args);
+    const value = interpreted(i.ce, 'f', ...args);
+    const names = ['a', 'b'];
+    return {
+      code: [code, ...names.map((n) => cells(c.ce, n))],
+      interpreted: [value, ...names.map((n) => cells(i.ce, n))],
+    };
+  };
+  const arrays = `let a = arrayFrom([5, 6, 7], "Byte")
+let b = arrayFrom([1, 2], "Byte")
+`;
+
+  test.each([
+    ['a function', 'function g(x: array<Byte>, i: integer) { x[i] }'],
+    [
+      'a function of a declared result',
+      'function g(x: array<Byte>, i: integer) -> integer { x[i] }',
+    ],
+    ['a function literal', 'let g = (x: array<Byte>, i: integer) => x[i]'],
+  ])('a read through %s', (_, g) => {
+    const r = both(arrays + g + '\nlet f = (i: integer) => g(a, i)', [2]);
+    expect(r.code[0]).toBe(6);
+    expect(r.code).toEqual(r.interpreted);
+  });
+
+  test('a store goes to the cells of the argument', () => {
+    const r = both(
+      arrays +
+        `function set(x: array<Byte>, i: integer, v: integer) { x[i] = v }
+let f = (i: integer) => do { set(a, i, 9); a[i] }`,
+      [2]
+    );
+    expect(r.code).toEqual([9, [5, 9, 7], [1, 2]]);
+    expect(r.code).toEqual(r.interpreted);
+  });
+
+  test('a function called with two arrays', () => {
+    const r = both(
+      arrays +
+        `function set(x: array<Byte>, i: integer, v: integer) { x[i] = v; length(x) }
+let f = (i: integer) => do { let n = set(a, i, 9); let m = set(b, 1, 4); n * 10 + m + a[i] + b[1] }`,
+      [3]
+    );
+    expect(r.code).toEqual([45, [5, 6, 9], [4, 2]]);
+    expect(r.code).toEqual(r.interpreted);
+  });
+
+  test('an array given through a field of a record', () => {
+    const r = both(
+      arrays +
+        `let r = Raster(3, 1, a)
+function set(x: array<Byte>, i: integer, v: integer) { x[i] = v }
+let f = (i: integer) => do { set(r.pixels, i, 8); a[i] + r.pixels[i] }`,
+      [1]
+    );
+    expect(r.code).toEqual([16, [8, 6, 7], [1, 2]]);
+    expect(r.code).toEqual(r.interpreted);
+  });
+
+  test('a function that calls the host', () => {
+    const source =
+      arrays +
+      `let s = 0
+function show(x: array<Byte>, i: integer) scope { s = s + x[i]; draw(x); s }
+let f = (i: integer) => do { a[i] = 3; let p = show(a, i); let q = show(b, 1); p * 10 + q }`;
+    const c = engine(source);
+    const run = compiled(c.ce, 'f').run;
+    const i = engine(source);
+    expect(run(2)).toBe(interpreted(i.ce, 'f', 2));
+    expect(c.ce.box('s').evaluate().re).toBe(i.ce.box('s').evaluate().re);
+    expect(c.drawn).toHaveLength(2);
+    expect(c.drawn[0] === array(c.ce, 'a')).toBe(true);
+    expect(c.drawn[1] === array(c.ce, 'b')).toBe(true);
+  });
+
+  test('a function given by name to Map declines', () => {
+    const { ce } = engine(
+      arrays +
+        `function g(x: array<Byte>) { length(x) }
+let f = (i: integer) => sum(map(g, [a, b])) + i`
+    );
+    expect(declined(ce, 'f')).toMatch(/a list or a tuple of arrays/);
+  });
+
+  test('a parameter of expression cells or of the bare type array declines', () => {
+    const { ce } = engine(`let e = arrayFrom([1, 2], "rational")
+let a = arrayFrom([5, 6, 7], "Byte")
+function g(x: array<rational>, i: integer) { 1 }
+function h(x: array, i: integer) { 1 }
+let f = (i: integer) => g(e, i)
+let k = (i: integer) => h(a, i)`);
+    expect(declined(ce, 'f')).toMatch(/an array of expression cells/);
+    expect(declined(ce, 'k')).toMatch(/the bare type array/);
   });
 });

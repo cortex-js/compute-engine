@@ -452,6 +452,13 @@ export const OPERATORS: readonly OperatorRow[] = Object.freeze([
   row(undefined,      1,          [[[I], 'array', 'arr.ref']], list),
   row(undefined,      2,          [[['list', I], 'array', 'arr.from.list'], [['array', I], 'array', 'arr.from.copy']], { ...list, effect: 'effectful' }),
   row(undefined,      3,          [[[R, R, I], 'array', 'arr.from.fill'], [['record', R, I], 'array', 'arr.from.fillrec']], { ...list, effect: 'effectful' }),
+  // A variable of the engine of `Program.assigns` around a call of a
+  // function of the host (`hostCall()` of `lower.ts`): the write of the
+  // value of the variable of the index `j` to the engine before the call
+  // (`state.put`, whose value NaN is not read), and its read after it
+  // (`state.get`), on its lane. Both keep their place and order.
+  row(undefined,      2,          [[[I, R], R, 'state.put'], [[I, B], R, 'state.put.bool'], [[I, 'array'], R, 'state.put.arr']], { ...list, effect: 'effectful' }),
+  row(undefined,      1,          [[[I], R, 'state.get'], [[I], I, 'state.get.int'], [[I], B, 'state.get.bool'], [[I], 'array', 'state.get.arr']], { ...list, effect: 'effectful' }),
   // The discharges (`absent()` of `lower.ts`): the test of an absent
   // number (NaN) and, on JavaScript, of an absent boolean (`undefined`);
   // `AssertPresent` of the test and the value, which fails where the test

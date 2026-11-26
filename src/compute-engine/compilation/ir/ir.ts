@@ -318,13 +318,19 @@ export type HostCall = {
  *  change at each call: the entry takes its length, then the list, and
  *  returns the list. With `rows`, a list of lists of elements of that lane
  *  (CE-1721): the entry takes the host's array of arrays (the lane `rows`)
- *  and returns the list of rank 2 that the body writes. */
+ *  and returns the list of rank 2 that the body writes. With `array`, of
+ *  the lane `array`, an array of the engine of those cells: the entry takes
+ *  and returns the reference. With `read`, an array that the program only
+ *  reads, in a program that calls the host: the code reads it again after
+ *  each call of the host (`hostCall()`), and `run()` writes nothing back. */
 export type Assigned = {
   readonly name: string;
   readonly definition: BoxedValueDefinition;
   readonly lane: Lane;
   readonly list?: true;
   readonly rows?: true;
+  readonly array?: ArrayCells;
+  readonly read?: true;
 };
 
 /** A sign that the declared type of an input proves. */

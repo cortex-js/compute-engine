@@ -206,6 +206,7 @@ import {
   arrayCells,
   arrayIRType,
   arrayLowering,
+  arrayType,
   callbackScan,
   holdsArray,
 } from './lower-arrays.js';
@@ -773,11 +774,16 @@ function lowerOnce(
   // For each user function that the root function literal calls, the
   // variables of the engine of `assigns` that it reads or writes, itself or
   // through its calls (`Lowering.stateOf()`; set by `assignedNames()`).
+  // `host`: a function of the host that it calls, itself or through its
+  // calls, which reads and writes each variable (`hostCall()`).
   const stateUses = new Map<
     object,
-    { uses: readonly Assigned[]; writes: readonly string[] }
+    { uses: readonly Assigned[]; writes: readonly string[]; host?: string }
   >();
-  const noState = { uses: [], writes: [] } as const;
+  const noState: { uses: []; writes: []; host?: string } = {
+    uses: [],
+    writes: [],
+  };
   // The user functions whose bodies `assignedNames()` scanned, called or
   // named (`Map(f, L)`, whose call `f(_p1)` the lowering makes): a
   // variable of `assigns` that another function reads declines
@@ -1357,6 +1363,13 @@ function lowerOnce(
       for (const x of s.uses) info.names.add(x.name);
       for (const n of s.writes) info.writes.add(n);
     }
+    // A call of a function of the host reads and writes each variable of
+    // `assigns` (`hostCall()`).
+    if (!user && assigns.length > 0 && isHostDefinition(e))
+      for (const x of assigns) {
+        info.names.add(x.name);
+        info.writes.add(x.name);
+      }
     // A handler's answer is read in place of the node (its names, its loops).
     for (const op of typeof answer === 'object' ? [...e.ops, answer] : e.ops) {
       const t = facts(op);
@@ -4671,6 +4684,23 @@ function lowerOnce(
     t: Type,
     def?: BoxedValueDefinition
   ): V => {
+    // A variable of `assigns` that holds an array, read by the body of a
+    // user function (`define()`): an input of the function of its cells.
+    const assigned = assigns.find((x) => x.name === name);
+    if (
+      assigned?.array !== undefined &&
+      cx.inFunction !== undefined &&
+      lookup(name) === undefined
+    )
+      return fns.capture(
+        e,
+        name,
+        t,
+        t,
+        assigned.definition,
+        false,
+        arrayType(assigned.array)
+      );
     // A name whose value is an array, which a function that `e` calls reads.
     const array = held(name);
     if (
@@ -6981,10 +7011,14 @@ function lowerOnce(
       );
     // A `Loop` carries the variable (`loop()`); a frame of a loop (the
     // body of a `Sum`, of a callback of `Map`) does not.
+    const user = userBinding(e);
+    const host = user === undefined ? undefined : stateOf(user.key).host;
     if (known.outer)
       decline(
         e,
-        `a write of the variable ${name} of the engine by a user function, in a loop`
+        host === undefined
+          ? `a write of the variable ${name} of the engine by a user function, in a loop`
+          : `a call of ${e.operator}, which calls the function ${host} of the host, in a body that is evaluated several times (a Sum, a callback of Map or Filter, a function given to an operator), in a function that assigns the variable ${name} of the engine: the body carries no variable`
       );
     // A `Loop` of this body that does not carry the binding: its facts
     // miss the write (a `Declare` of the name later in the loop body).
@@ -7867,7 +7901,10 @@ function lowerOnce(
       // result of the code do not hold (spec section 10.6).
       if (parallel !== undefined)
         decline(parallel, 'an array in a parallel for');
-      if (entryOf(p).results.some(holdsArray))
+      // The value of an assigned variable after the body is not a result
+      // of the code: `run()` writes it to the engine (`assigningRun()`).
+      const results = entryOf(p).results;
+      if (results.slice(0, results.length - assigns.length).some(holdsArray))
         decline(
           root,
           'an array as the result of the compiled code, alone or in a record or a list (the result holds no reference of the engine)'
@@ -7995,16 +8032,31 @@ function lowerOnce(
    *  value of the root function literal or of a user function whose result
    *  is `nothing` (`nothingPlace()`; NaN there, as the interpreter's
    *  `Nothing` is). Plain JavaScript only: the shader targets cannot call the host,
-   *  the interval and `bigint` modes have no lane of its values. A function
-   *  that assigns a variable of the engine (`assignedNames()`) declines: the
-   *  host function would read the variable before the code writes it back. */
+   *  the interval and `bigint` modes have no lane of its values. In a
+   *  function that assigns variables of the engine (`assignedNames()`), the
+   *  code writes the value of each one to the engine before the call and
+   *  reads it again after it (`state.put`, `state.get`), since the host
+   *  function can read and assign it; the call rebinds each one, as a call
+   *  of a user function that writes it does (`stateWrite()`). A list
+   *  variable declines, and so does a call in a body that is evaluated
+   *  several times (the body of a `Sum`, a callback of `Map`), which carries
+   *  no variable. */
   const hostCall = (e: Fn, want: boolean): V | undefined => {
     const name = e.operator;
     const why = (reason: string, code?: DeclineReason): never =>
       decline(e, `a call of the function ${name} of the host, ${reason}`, code);
     if (!options.javascript || interval || bigint) why('on this target');
-    if (assigns.length > 0)
-      why('in a function that assigns a variable of the engine');
+    const list = assigns.find((s) => s.list || s.rows);
+    if (list !== undefined)
+      why(
+        `in a function that assigns the list variable ${list.name} of the engine (a list is not carried to the host)`
+      );
+    for (const s of assigns)
+      if (lookup(s.name)?.outer)
+        why(
+          `in a body that is evaluated several times (a Sum, a callback of Map or Filter), in a function that assigns the variable ${s.name} of the engine: the body carries no variable`
+        );
+    const state = assigns.map((s) => stateWrite(e, s.name));
     if (e.nops > MAX_HOST_ARGUMENTS)
       why(`with more than ${MAX_HOST_ARGUMENTS} arguments`);
     const t = e.type.type;
@@ -8095,11 +8147,33 @@ function lowerOnce(
         result: result!,
       });
     }
+    // Each variable of `assigns`, by its index `j`: its value to the
+    // engine before the call, and the value of the engine after it, of
+    // the lane of the variable.
+    const suffix = (l: Lane) =>
+      l === 'array' ? '.arr' : l === 'boolean' ? '.bool' : '';
+    // A name that the code only reads (`Assigned.read`) is not written.
+    state.forEach((x, j) => {
+      if (!assigns[j].read)
+        b.op(
+          `state.put${suffix(assigns[j].lane)}`,
+          [b.constant(j, 'integer'), x.v],
+          scalarType('real')
+        );
+    });
     const v = b.op(
       hostCallOp(k),
       args,
       scalarType(result === 'nothing' ? 'real' : result!)
     );
+    state.forEach((x, j) => {
+      const l = assigns[j].lane;
+      x.v = b.op(
+        `state.get${l === 'integer' ? '.int' : suffix(l)}`,
+        [b.constant(j, 'integer')],
+        l === 'array' ? type(x.v) : scalarType(l)
+      );
+    });
     return result === 'nothing' && !want ? undefined : v;
   };
 
@@ -8115,13 +8189,26 @@ function lowerOnce(
    *  writes, on the plain JavaScript target; another one declines. So
    *  are the names that a user function that `f` calls assigns, itself or
    *  through its calls, where the name in its body is that variable: a
-   *  scalar only (CE-1776). Each such function reads and writes them as
-   *  inputs and results (`stateOf()`). */
+   *  scalar or an array only (CE-1776). Each such function reads and writes
+   *  them as inputs and results (`stateOf()`); one that calls a function of
+   *  the host, itself or through its calls, reads and writes each one that
+   *  is not a list (`hostCall()`). A variable of an array type of machine
+   *  cells is the engine's array, which the code takes and returns. */
   const assignedNames = (f: Fn): Assigned[] => {
     const out: Assigned[] = [];
+    // The names that the body reads outside a user function, and whether
+    // it calls a function of the host there.
+    const rootReads = new Set<string>();
+    let rootHost = false;
     // For each user function that the body calls: the variables of the
-    // engine that its body reads and writes, and the functions it calls.
-    type Touch = { reads: Set<string>; writes: Set<string>; calls: object[] };
+    // engine that its body reads and writes, the functions it calls, and a
+    // function of the host that it calls.
+    type Touch = {
+      reads: Set<string>;
+      writes: Set<string>;
+      calls: object[];
+      host?: string;
+    };
     const touched = new Map<object, Touch>();
     // A name of the body of a user function that is the variable of the
     // engine of that name (not a local or a parameter of the function).
@@ -8152,6 +8239,10 @@ function lowerOnce(
     ): void => {
       if (isSymbol(x) && helper !== undefined && !bound.has(x.symbol))
         if (engineName(x, outer)) helper.reads.add(x.symbol);
+      if (isSymbol(x) && helper === undefined && !bound.has(x.symbol))
+        rootReads.add(x.symbol);
+      if (helper === undefined && isFunction(x) && isHostDefinition(x))
+        rootHost = true;
       // A user function named as an operand (`Map(f, L)`): its body, as
       // for a call.
       const named =
@@ -8162,6 +8253,13 @@ function lowerOnce(
       if (!isFunction(x) && named === undefined) return;
       // A call of a user function: its body, once.
       const user = isFunction(x) ? userBinding(x) : named;
+      if (
+        helper !== undefined &&
+        user === undefined &&
+        isFunction(x) &&
+        isHostDefinition(x)
+      )
+        helper.host ??= x.operator;
       if (user !== undefined) {
         scanned.add(user.key);
         helper?.calls.push(user.key);
@@ -8271,6 +8369,19 @@ function lowerOnce(
           out.push(s);
           continue;
         }
+        // An array of machine cells (`lower-arrays.ts`): its reference.
+        const array = arrays.cellsOf(x, def.type.type);
+        if (array !== undefined) {
+          const s: Assigned = {
+            name: t.symbol,
+            definition: def,
+            lane: 'array',
+            array,
+          };
+          scalar(s);
+          out.push(s);
+          continue;
+        }
         const ir = inputType(def.type.type);
         const list = ir?.shape.length === 1 && ir.shape[0] === 'run-time';
         const lane = ir?.shape.length === 0 || list ? ir!.lane : undefined;
@@ -8288,10 +8399,37 @@ function lowerOnce(
       x.ops.forEach((op) => visit(op, inner, helper, scope));
     };
     visit(f, new Set());
+    // In a program that calls the host, itself or through a user function,
+    // each name that holds an array and that the program reads: the host
+    // function can assign the name another array (`hostCall()`).
+    if (rootHost || [...touched.values()].some((t) => t.host !== undefined))
+      for (const name of [
+        ...rootReads,
+        ...[...touched.values()].flatMap((t) => [...t.reads]),
+      ]) {
+        const h = held(name);
+        if (
+          out.some((s) => s.name === name) ||
+          h === undefined ||
+          h.library ||
+          h.definition.isConstant ||
+          !isMutableArray(h.value)
+        )
+          continue;
+        const array = arrays.cellsOf(f, h.value.type.type)!;
+        out.push({
+          name,
+          definition: h.definition,
+          lane: 'array',
+          array,
+          read: true,
+        });
+      }
     // The variables that each function reads and writes, through its
     // calls too.
     const closure = (key: object) => {
       const [reads, writes] = [new Set<string>(), new Set<string>()];
+      let host: string | undefined;
       const seen = new Set<object>();
       const walk = (k: object) => {
         if (seen.has(k)) return;
@@ -8299,19 +8437,26 @@ function lowerOnce(
         const t = touched.get(k)!;
         t.reads.forEach((n) => reads.add(n));
         t.writes.forEach((n) => writes.add(n));
+        host ??= t.host;
         t.calls.forEach(walk);
       };
       walk(key);
-      return { reads, writes };
+      // A call of the host reads and writes each variable but a list,
+      // whose call declines (`hostCall()`).
+      if (host !== undefined)
+        for (const s of out)
+          if (!s.list && !s.rows) [reads, writes].forEach((x) => x.add(s.name));
+      return { reads, writes, host };
     };
     if (out.length > 0)
       for (const key of touched.keys()) {
-        const { reads, writes } = closure(key);
+        const { reads, writes, host } = closure(key);
         const uses = out.filter((s) => reads.has(s.name) || writes.has(s.name));
         if (uses.length > 0)
           stateUses.set(key, {
             uses,
             writes: uses.filter((s) => writes.has(s.name)).map((s) => s.name),
+            ...(host === undefined ? {} : { host }),
           });
       }
     // A lazy collection whose callback reads a variable of `assigns`
@@ -8331,8 +8476,6 @@ function lowerOnce(
           x,
           'a lazy collection whose callback reads a variable of the engine through a user function, and that reads no variable of the engine itself: the interpreter can compute each element when it is read'
         );
-    // The facts of a call count the variables that it reads and writes.
-    if (stateUses.size > 0) known = new WeakMap();
     return out;
   };
   // A root function literal: its parameters, by position, come first. A
@@ -8464,10 +8607,18 @@ function lowerOnce(
           continue;
         }
         b.positional += 1;
-        const v = b.param(s.name, scalarType(s.lane));
+        // An array: the engine's array, a local that the body can bind to
+        // another array of the same cells.
+        const v = b.param(
+          s.name,
+          s.array !== undefined ? arrayType(s.array) : scalarType(s.lane)
+        );
         frames[0].names.set(s.name, { v, lane: s.lane, role: 'local' });
       }
       assigns = states;
+      // The facts of a call count the variables that it reads and writes:
+      // of a user function (`stateOf()`), and of a function of the host.
+      known = new WeakMap();
       const hidden = Object.fromEntries(states.map((s) => [s.name, true]));
       const v = withVarsValuesHidden(root, hidden, () =>
         want ? wholeRows(body) : value(body, false)

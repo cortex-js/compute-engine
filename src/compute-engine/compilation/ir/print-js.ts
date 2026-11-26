@@ -28,6 +28,7 @@ import { isCancellationError } from '../../interval/run-support.js';
 import {
   isMutableArray,
   isNumber,
+  isString,
   isSymbol,
 } from '../../boxed-expression/type-guards.js';
 import {
@@ -46,6 +47,7 @@ import {
   useIndex,
   type ArrayMaker,
   type ArrayUse,
+  type Assigned,
   type HostCall,
   type Instr,
   type IRType,
@@ -71,6 +73,7 @@ import {
   type Syntax,
 } from './print.js';
 import { TEXT, TEXT_REGIONS } from './print-js-text.js';
+import { arrayEntryCheck } from './lower-arrays.js';
 
 const IDENTIFIER = /^[A-Za-z_$][\w$]*$/;
 
@@ -326,6 +329,14 @@ export const JS: Syntax = deepFreeze({
     'arr.from.copy': '_SYS.arrays.make[$1]($0)',
     'arr.from.fill': '_SYS.arrays.make[$2]($0, $1)',
     'arr.from.fillrec': '_SYS.arrays.make[$2]($0, $1)',
+    // A variable of the engine around a call of the host (`operators.ts`).
+    'state.put': '_SYS.state.put($0, $1)',
+    'state.put.bool': '_SYS.state.put($0, $1)',
+    'state.put.arr': '_SYS.state.put($0, $1)',
+    'state.get': '_SYS.state.get($0)',
+    'state.get.int': '_SYS.state.get($0)',
+    'state.get.bool': '_SYS.state.get($0)',
+    'state.get.arr': '_SYS.state.get($0)',
     'isnan': 'Number.isNaN($0)',
     'isundef': '($0 === undefined)',
     ...Object.fromEntries(
@@ -705,11 +716,15 @@ export type JavaScriptResult = {
  *  host that the code calls, as `_SYS.hosts` (`hostCaller()`). With
  *  `arrays`, the arrays of the program (`ArrayUse`), as `_SYS.arrays`:
  *  the references and the constructions; and the step after the stores of
- *  a unit (`arrayNote()`), which a call of the host runs first. */
+ *  a unit (`arrayNote()`), which a call of the host runs first. With
+ *  `hosts` and `assigns`, the write and the read of each variable that the
+ *  code makes around a call of the host, as `_SYS.state` (`readAssigned()`,
+ *  `writeAssigned()`). */
 export function runtimeOf(
   ce?: ComputeEngine,
   hosts?: readonly HostCall[],
-  arrays?: ArrayUse
+  arrays?: ArrayUse,
+  assigns?: readonly Assigned[]
 ): SysHelpers {
   if (ce === undefined) {
     if (hosts !== undefined)
@@ -723,6 +738,16 @@ export function runtimeOf(
   if (hosts !== undefined)
     Object.defineProperty(sys, 'hosts', {
       value: Object.freeze(hosts.map((h) => hostCaller(ce, h, note))),
+    });
+  if (hosts !== undefined && assigns !== undefined)
+    Object.defineProperty(sys, 'state', {
+      value: Object.freeze({
+        put: (j: number, y: unknown) => {
+          writeAssigned(ce, assigns[j], y);
+          return NaN;
+        },
+        get: (j: number) => readAssigned(assigns[j]),
+      }),
     });
   if (arrays !== undefined)
     Object.defineProperty(sys, 'arrays', {
@@ -902,6 +927,86 @@ function hostCaller(
   };
 }
 
+/**
+ * The value of the variable `x` of the engine that a root function literal
+ * assigns (`Program.assigns`), as the code takes it: a machine number, a
+ * boolean, a list of them or a list of such lists, or the engine's array.
+ * `run()` reads it when it starts, and the code after each call of a
+ * function of the host (`_SYS.state`). An exact value (`1/30 * pi`) is read
+ * as its machine number, and a list that an interpreted call holds lazily
+ * (`Rest(List(1, 2, 3))`) by its elements. A variable that holds no value of
+ * its lane (no value, a complex number for a `number`, an array of other
+ * cells) throws a `TypeError`.
+ */
+export function readAssigned(
+  x: Assigned
+): number | boolean | Expression | (number | boolean)[] | (number | boolean)[][] {
+  const v = x.definition.value;
+  if (x.array !== undefined) {
+    arrayEntryCheck(x.array, `The variable "${x.name}"`)(v);
+    return v!;
+  }
+  // The machine value of the element `y` of the lane of `x`, or `undefined`.
+  const scalar = (y: Expression | undefined): number | boolean | undefined => {
+    if (x.lane === 'boolean') {
+      if (isSymbol(y, 'True')) return true;
+      if (isSymbol(y, 'False')) return false;
+      return undefined;
+    }
+    const n = y?.N();
+    return isNumber(n) && n.im === 0 ? n.re : undefined;
+  };
+  const elements = (y: Expression | undefined): Expression[] | undefined =>
+    y?.isFiniteCollection === true && !isString(y) ? [...y.each()] : undefined;
+  if (x.rows) {
+    // A list of lists: an array of arrays of the values of the elements.
+    const rows = elements(v)?.map((row) => elements(row)?.map(scalar));
+    if (rows?.every((row) => row?.every((y) => y !== undefined)))
+      return rows as (number | boolean)[][];
+  } else if (x.list) {
+    const items = elements(v)?.map(scalar);
+    if (items?.every((y) => y !== undefined))
+      return items as (number | boolean)[];
+  } else {
+    const y = scalar(v);
+    if (y !== undefined) return y;
+  }
+  const what = x.rows
+    ? 'list of lists of values'
+    : x.list
+      ? 'list of values'
+      : 'value';
+  throw new TypeError(
+    `The variable "${x.name}" that the compiled function assigns holds ` +
+      `${v === undefined ? 'no value' : v.toString()}, not a ` +
+      `${what} of the lane ${x.lane}.`
+  );
+}
+
+/** The write of the value `y` of the code to the variable `x` of the engine
+ *  (`readAssigned()`), as an evaluation of an assignment writes it: a
+ *  number, `True` or `False`, a `List` of them or of such lists, or the
+ *  array itself. `run()` writes each variable when it returns, and the code
+ *  before each call of a function of the host (`_SYS.state`). */
+export function writeAssigned(
+  ce: ComputeEngine,
+  x: Assigned,
+  y: unknown
+): void {
+  const box = (z: unknown): Expression =>
+    x.lane === 'boolean' ? (z ? ce.True : ce.False) : ce.number(z as number);
+  const list = (z: unknown): Expression =>
+    ce.function('List', Array.from(z as ArrayLike<unknown>, box));
+  x.definition.value =
+    x.array !== undefined
+      ? (y as Expression)
+      : x.rows
+        ? ce.function('List', Array.from(y as ArrayLike<unknown>, list))
+        : x.list
+          ? list(y)
+          : box(y);
+}
+
 /** The lists of constants (and of such lists) of at least 16 constants in
  *  all, and the lists that they hold, in any function and region, which the
  *  code computes once, when it is loaded (below 16, the literal at each call
@@ -1057,7 +1162,7 @@ export function printJavaScript(
   // The construction of `load()` of `createJavaScriptRuntime()`.
   const make = (): JavaScriptResult['run'] => {
     try {
-      const sys = runtimeOf(ce, p.hosts, p.arrays);
+      const sys = runtimeOf(ce, p.hosts, p.arrays, p.assigns);
       return (
         literal
           ? twoStageRunner(sys, preambleOnce, [], `return (${code});`)()

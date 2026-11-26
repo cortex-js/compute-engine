@@ -539,7 +539,7 @@ describe('CE-1652 acceptance: declines', () => {
     // `draw`.
     expectDeclines(
       '(t: real) => do { g = step(g)\n draw(bitmap(g, ((0, 0), (n, n)))) }',
-      /a call of the function figureBitmapRaster of the host, in a function that assigns a variable of the engine/,
+      /a call of the function figureBitmapRaster of the host, in a function that assigns the list variable g of the engine/,
       'javascript',
       LIFE
     );

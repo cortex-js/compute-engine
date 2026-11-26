@@ -22,11 +22,6 @@ import type {
 } from '../types.js';
 import { isTupleShapedType } from '../../collection-utils.js';
 import {
-  isNumber,
-  isString,
-  isSymbol,
-} from '../../boxed-expression/type-guards.js';
-import {
   bigintBroadcastError,
   checkEntry,
   normalizeRunResult,
@@ -59,7 +54,13 @@ import { realPowerReconstructionDigits } from '../../numerics/real-power.js';
 import { ALL_PASSES } from './passes.js';
 import { Decline, UntypedInputs } from './lower-context.js';
 import { compileSlice, type Extension, type Warning } from './index.js';
-import { arrayNote, runtimeOf, type JavaScriptResult } from './print-js.js';
+import {
+  arrayNote,
+  readAssigned,
+  runtimeOf,
+  writeAssigned,
+  type JavaScriptResult,
+} from './print-js.js';
 import { arrayEntryCheck } from './lower-arrays.js';
 import type { Outline } from './outline.js';
 import {
@@ -380,11 +381,14 @@ export function sliceError(e: unknown): unknown {
 /**
  * The `run()` of a function literal that assigns the variables `assigns`
  * of the engine (`Program.assigns`): each call reads their values in the
- * engine, gives them to the code after the `arity` arguments, and writes
- * the values that the code returns after the value of the body back to the
- * engine, as a call of the interpreter does. A call that throws writes
- * nothing. A variable that holds no value of its lane (no value, a complex
- * number for a `number`) throws a `TypeError` before the call.
+ * engine (`readAssigned()`), gives them to the code after the `arity`
+ * arguments, and writes the values that the code returns after the value
+ * of the body back to the engine (`writeAssigned()`), as a call of the
+ * interpreter does. A call that throws writes nothing more: the engine
+ * keeps what the code wrote before each call of a function of the host
+ * and what such a function assigned. A variable that holds no value of its
+ * lane (no value, a complex number for a `number`) throws a `TypeError`
+ * before the call.
  */
 function assigningRun(
   expr: Expression,
@@ -394,76 +398,13 @@ function assigningRun(
   inDigits: <T>(g: () => T) => T
 ): (...args: unknown[]) => unknown {
   const ce = expr.engine;
-  // The machine value of the element `v` of the lane `lane`, or `undefined`.
-  const scalar = (
-    v: Expression | undefined,
-    lane: Assigned['lane']
-  ): number | boolean | undefined => {
-    if (lane === 'boolean') {
-      if (isSymbol(v, 'True')) return true;
-      if (isSymbol(v, 'False')) return false;
-      return undefined;
-    }
-    // An exact value (`1/30 * pi`) is read as its machine number.
-    const n = v?.N();
-    return isNumber(n) && n.im === 0 ? n.re : undefined;
-  };
-  // The elements of the list `v`, or `undefined`. A list that an
-  // interpreted call wrote can be held lazily (`Rest(List(1, 2, 3))`): its
-  // elements are read.
-  const elements = (v: Expression | undefined): Expression[] | undefined =>
-    v?.isFiniteCollection === true && !isString(v) ? [...v.each()] : undefined;
-  const read = (
-    x: Assigned
-  ): number | boolean | (number | boolean)[] | (number | boolean)[][] => {
-    const v = x.definition.value;
-    if (x.rows) {
-      // A list of lists: an array of arrays of the values of the elements.
-      const rows = elements(v)?.map((row) =>
-        elements(row)?.map((y) => scalar(y, x.lane))
-      );
-      if (rows?.every((row) => row?.every((y) => y !== undefined)))
-        return rows as (number | boolean)[][];
-    } else if (x.list) {
-      const items = elements(v)?.map((y) => scalar(y, x.lane));
-      if (items?.every((y) => y !== undefined))
-        return items as (number | boolean)[];
-    } else {
-      const y = scalar(v, x.lane);
-      if (y !== undefined) return y;
-    }
-    const what = x.rows
-      ? 'list of lists of values'
-      : x.list
-        ? 'list of values'
-        : 'value';
-    throw new TypeError(
-      `The variable "${x.name}" that the compiled function assigns holds ` +
-        `${v === undefined ? 'no value' : v.toString()}, not a ` +
-        `${what} of the lane ${x.lane}.`
-    );
-  };
   return (...args: unknown[]) =>
     inDigits(() => {
       const given = Array.from({ length: arity }, (_, k) => args[k]);
-      const r = call([...given, ...assigns.map(read)]) as unknown[];
+      const r = call([...given, ...assigns.map(readAssigned)]) as unknown[];
+      // A name that the code only reads is not written back.
       assigns.forEach((x, k) => {
-        const y = r[k + 1];
-        const box = (z: unknown): Expression =>
-          x.lane === 'boolean'
-            ? z
-              ? ce.True
-              : ce.False
-            : ce.number(z as number);
-        // A list is an array of the values of its elements; a list of
-        // lists, an array of such arrays.
-        const list = (z: unknown): Expression =>
-          ce.function('List', Array.from(z as ArrayLike<unknown>, box));
-        x.definition.value = x.rows
-          ? ce.function('List', Array.from(y as ArrayLike<unknown>, list))
-          : x.list
-            ? list(y)
-            : box(y);
+        if (!x.read) writeAssigned(ce, x, r[k + 1]);
       });
       return normalizeRunResult(r[0]);
     });
@@ -604,7 +545,9 @@ function compileIr(
     const key = literal ? i : name;
     if (entry.lengthOf[k]) return;
     if (t.lane === 'array') {
-      if (arrayNames.has(name)) return;
+      // An assigned variable is checked by its read (`readAssigned()`).
+      if (arrayNames.has(name) || p.assigns?.some((x) => x.name === name))
+        return;
       if (checks)
         plan.kinds.set(key, {
           label: literal ? `argument ${i + 1}` : `"${name}"`,
@@ -773,9 +716,19 @@ function compileIr(
       : run) as CompilationResult<'javascript'>['run'],
     freeSymbols: report.freeSymbols,
     freeSymbolTypes: report.freeSymbolTypes,
-    ...(assigns.length > 0 ? { assigns: assigns.map((x) => x.name) } : {}),
+    ...(assigns.some((x) => !x.read)
+      ? { assigns: assigns.filter((x) => !x.read).map((x) => x.name) }
+      : {}),
     ...(hostCalls.length > 0 ? { hostCalls } : {}),
-    ...(arrays !== undefined ? { arrays: [...arrayNames] } : {}),
+    // With the names that the code reads again after a call of the host.
+    ...(arrays !== undefined
+      ? {
+          arrays: [
+            ...arrayNames,
+            ...assigns.filter((x) => x.read).map((x) => x.name),
+          ],
+        }
+      : {}),
     unsupported: [],
     mode,
     ...(strings ? { strings } : {}),

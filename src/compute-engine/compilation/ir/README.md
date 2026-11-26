@@ -4029,6 +4029,16 @@ How an array reaches the code (`lower-arrays.ts`, `adapter.ts`):
   `run()` reads in the engine at each call, from the definition of the name
   at the compilation, and checks; the name is in the result's `arrays`, not
   in `captures`;
+- a name whose value is an array and that the root function literal
+  assigns, itself or through a user function: a name of `Program.assigns`
+  (`Assigned.array`), not of `arrays`, which `run()` reads and writes back
+  (`assigningRun()`) and the code writes and reads around each call of the
+  host (`state.put.arr`, `state.get.arr`);
+- in a program that calls the host, itself or through a user function, a
+  name whose value is an array and that the program reads: a name of
+  `Program.assigns` with `Assigned.read`, reported in `arrays`, which the
+  code reads again after each call of the host (`state.get.arr`, no
+  `state.put`) and `run()` does not write back;
 - an array inside a value that a name holds (a named tuple): `_SYS.arrays.refs[k]`,
   bound in `runtimeOf()` as `_SYS.hosts` is, with the name in `captures`;
 - `ArrayFrom`: a call of `_SYS.arrays.make[k]`, which evaluates the engine's
@@ -4189,7 +4199,24 @@ in `adapter.ts` (JavaScript), `adapter-glsl.ts` and `adapter-interval.ts`, and
   engine (`readsVariableIn()`, the interpreter's rule of listing, without
   the names that the program binds). A write in a loop frame (a `Sum`, a
   callback of `Map`), a call that maps over a list (`mapOver()`), a recursive
-  writer and a list name written by a function decline. A warning of a
+  writer and a list name written by a function decline. A name that holds an
+  array of machine cells is such a name too (`Assigned.array`): a positional
+  parameter of its array type, a local that an `Assign` binds to another
+  array of the same cells, whose reference the entry returns and `run()`
+  writes back. A call of a function of the host in such a literal
+  (`hostCall()`) reads and writes every name of `assigns`: before the
+  `call.host<k>`, one `state.put` of the index `j` and the value of each
+  name (`_SYS.state.put(j, v)`, `writeAssigned()` of `print-js.ts`, the
+  write of `run()`), and after it one `state.get` of each, on the lane of
+  the name (`_SYS.state.get(j)`, `readAssigned()`, the read of `run()`,
+  which throws its `TypeError`), which rebinds the name
+  (`Lowering.stateWrite()`). Both operations are effectful, so they keep
+  their place around the call. The `facts()` of the call count every name,
+  so a `Loop` carries them and the arms of an `If` give them; a user
+  function that calls the host, itself or through its calls
+  (`assignedNames()` records it as `host` of `stateOf()`), reads and writes
+  every name that is not a list. A list name, and a call in a loop frame (a
+  `Sum`, a callback of `Map`), decline. A warning of a
   random frame is in `warnings` (`kind: 'correctness'`). `profile` is `'ir'`.
 - **Stored code.** The result has the fields of stored code
   (`StoredJavaScript`): `preambleOnce` (and `preamble`, the same text) holds the

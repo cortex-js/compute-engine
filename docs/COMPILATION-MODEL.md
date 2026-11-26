@@ -2782,7 +2782,11 @@ Each call of `run()` reads the value of each variable of `assigns` in the
 engine, runs the code, and writes the new values back to the engine as
 machine numbers, as an evaluation of the call writes them. An exact value
 (`1/30 * pi`, which an interpreted call can write) is read as its machine
-number. A call that throws writes nothing. A variable that holds no value,
+number. A call that throws writes nothing more: the engine keeps the
+values that the code wrote at the last call of a function of the host
+before the throw, and the values that such a function assigned ("Functions
+of the host"); with no such call, it holds the values before the call. A
+variable that holds no value,
 or a complex number for a variable of type `number`, throws a `TypeError`
 before the call, as an input of type `number` does. The `code` takes the value of each variable
 after the arguments and returns an array of the value of the function and
@@ -2794,7 +2798,8 @@ a second time.
 
 The variable is a variable of the scope of the compilation, not a local or a
 parameter of the literal, with a declared type whose lane is `real`,
-`integer` or `boolean` (`let s = 0.5` in Epsil declares `s`), or a list of
+`integer` or `boolean` (`let s = 0.5` in Epsil declares `s`), an array of
+machine cells ("Arrays": `board = next` writes the reference), or a list of
 such values of no stated length (`let L = [0, 0, 0]` declares
 `list<number>`). A list variable is a list local that the body writes whole,
 and its length can change at each call: `L = L + [1, 2, 3]`,
@@ -2914,10 +2919,41 @@ These decline:
 - a static type of the call other than `real`, `integer`, `boolean` or
   `nothing`: `(real) -> any` gives no settled shape (R3);
 - a value `nothing` read anywhere but as the value of the root function
-  literal (`[hostDraw(t)]`, `'possible-nothing'`); a statement is not read;
-- a call in a function that assigns a variable of the engine
-  (`do { s = s + t; hostDraw(s) }`): the host function could read the
-  variable before the code writes it back.
+  literal (`[hostDraw(t)]`, `'possible-nothing'`); a statement is not read.
+
+A call in a function that assigns variables of the engine ("Variables that a
+function assigns") reads and writes each one: the code writes the value of
+each variable to the engine before the call, as `run()` does when it
+returns, and reads it again after the call, since the host function can
+assign it. A variable that then holds no value of its lane throws the
+`TypeError` of `run()`. So a `Loop` around the call carries each variable,
+the two arms of an `If` give each one, and a user function that calls the
+host, itself or through its calls, takes and returns each one:
+
+```js
+ce.declare('hostDraw', {
+  signature: '(real) -> nothing',
+  evaluate: (ops) => { record(ops[0].re, ce.box('s').evaluate().re); return ce.symbol('Nothing'); },
+});
+executeEpsil(ce, `let s = 0
+let f = (t: real) => do { s = s + t; hostDraw(s) }`);
+const result = compile(ce.box('f').evaluate());
+result.assigns;            // ['s']
+result.run(1);             // record(1, 1): the host reads the new s
+result.run(2);             // record(3, 3)
+```
+
+In such a function these decline:
+
+- a list variable, or a list of lists, in `assigns` (`do { L = L + [t];
+  hostDraw(t) }`): a list is not carried as a number is;
+- a call, or a call of a user function that calls the host, in a body that
+  is evaluated several times (the body of a `Sum`, a callback of `Map` or
+  `Filter`, a user function given by its name to `Map`): that body carries
+  no variable;
+- a user function that calls the host and is mapped over a list
+  (`g([1, 2])`), and a recursive function or a cycle of functions that calls
+  the host.
 
 A function whose one parameter is a rest parameter
 (`function draw(...args) -> nothing { figureDraw(listFrom(args)) }`)
@@ -3457,6 +3493,21 @@ of two storages (`Swap`, the host's `swapCells()`) between two uses is seen.
 - A name whose value is an array: `run()` reads the array that the name
   holds at each call, so an assignment of the name between two calls needs
   no new compilation. The name is in `arrays`, not in `symbolDeps`.
+- A name whose value is an array and that the function assigns
+  (`board = next`, `(cur, next) := (next, cur)`), in the root function
+  literal or in a user function where the same assignment of a number
+  compiles: a variable of `assigns` ("Variables that a function assigns"),
+  not of `arrays`. `run()` reads the array that the name holds at each
+  call and writes the reference back when it returns, and the code does
+  so around each call of a function of the host ("Functions of the
+  host").
+- In code that calls a function of the host, itself or through a user
+  function, every name whose value is an array and that the code reads is
+  read again from the engine after each such call, with the check of the
+  entry: a host function that assigns the name another array is seen, and
+  one of other cells throws a `TypeError`. The name stays in `arrays`. A
+  call of the host in a body that is evaluated several times (a `Sum`, a
+  callback) declines in such code.
 - A name whose value holds an array (a named tuple with an array field):
   the code holds the reference that the value has when it is compiled; the
   name is in `symbolDeps`.

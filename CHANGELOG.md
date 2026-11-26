@@ -83,6 +83,29 @@
     expression cells, an array as the result of the code, a read or a store
     in a callback (`map(k => a[k], 1..n)`), GLSL and `interval-js` decline.
     Such code is not `shippable`.
+  - **A compiled function that assigns a variable can call the host.** For a
+    variable that is a number, a boolean or an array, the code writes its
+    value to the engine before each call of a function of the host and reads
+    it again after the call, so the host function sees the new value and can
+    assign another one. A name that holds an array can be assigned
+    (`board = next`, `(cur, next) := (next, cur)`); it is in `assigns`, not
+    in `arrays`. A name that holds an array and that the code only reads is
+    read again after each call of the host, so an array that the host
+    function assigns to it is seen. A call that throws keeps the values
+    written at the last call of the host before the throw.
+
+    ```js
+    executeEpsil(ce, `let s = 0
+    let f = (t: real) => do { s = s + t; hostDraw(s) }`);
+    const result = compile(ce.box('f').evaluate());
+    result.assigns;         // ['s']
+    result.run(1);          // hostDraw reads s in the engine: 1
+    result.run(2);          // 3
+    ```
+
+    A list variable in such a function declines, as before, and so does a
+    call of the host in a `Sum` or a callback of `Map`, and a recursive
+    function that calls the host.
   - The cell type is invariant: an `array<integer>` is not an
     `array<number>`. An array is not a collection: `Sum(a)`, `Map(a, f)` and
     `a + 1` are refused, and a program takes `listFrom(a)`.
