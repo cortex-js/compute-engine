@@ -3323,9 +3323,11 @@ On JavaScript a dictionary literal is a record (`compilation/ir/README.md`,
 an index that is not a constant key (`d[1]`), and every other reader
 (`Length`, `Keys`, arithmetic, `Map`) decline. As the result of the code,
 `run()` gives an object of the keys (`{a -> x + 1}` at `x = 1`:
-`{ a: 2 }`); a function of the host receives the dictionary. A list or a
-tuple value of a dictionary given to a function of the host declines: the
-code does not know it as a `List` or a `Tuple` literal. GLSL, the interval
+`{ a: 2 }`); a function of the host receives the dictionary. A value of the
+dictionary that is a `List` or a `Tuple` literal reaches the host as that
+literal (`figureDraw({p -> (t, 1)})`); a value that the interpreter can hold
+as a lazy collection (`{p -> Range(1, 3)}`, `{p -> [t, 1] + 1}`) declines, as
+it does in a tuple given to a function of the host. GLSL, the interval
 mode and the `bigint` mode decline a dictionary literal ("records compile on
 javascript only").
 

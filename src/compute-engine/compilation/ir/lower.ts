@@ -864,17 +864,19 @@ function lowerOnce(
     return r;
   };
   const inputLengths = new Set<V>();
-  // The calls of the program that have each call or each symbol as an
-  // operand, with the position of the operand. One boxed expression in two
-  // places (`If(IsMissing(r), K, r)`) has one entry for each place. Each
-  // node is visited once.
-  const readers = new Map<Expression, [reader: Fn, position: number][]>([
-    [root, []],
-  ]);
+  // The calls of the program that have each call, each symbol or each
+  // dictionary as an operand, with the position of the operand, and the
+  // dictionaries that have it as a value, with the position of the value
+  // (`{p -> (t, 1)}`: the `Tuple` is a node of the program). One boxed
+  // expression in two places (`If(IsMissing(r), K, r)`) has one entry for
+  // each place. Each node is visited once.
+  const readers = new Map<Expression, [reader: Expression, position: number][]>(
+    [[root, []]]
+  );
   const reach = (e: Expression): void => {
-    if (!isFunction(e)) return;
-    e.ops.forEach((op, i) => {
-      if (!isFunction(op) && !isSymbol(op)) return;
+    const parts = isFunction(e) ? e.ops : isDictionary(e) ? e.values : [];
+    parts.forEach((op, i) => {
+      if (!isFunction(op) && !isSymbol(op) && !isDictionary(op)) return;
       const known = readers.get(op);
       if (known !== undefined) return void known.push([e, i]);
       readers.set(op, [[e, i]]);
@@ -916,10 +918,10 @@ function lowerOnce(
   //   that the program reaches has the name (`heldAsAbsent()`); the places
   //   in the value are known once the value is lowered.
   // Any other place (a binding, an argument of a function, an element of a
-  // list or of a tuple, another list operator) can give the value to a
-  // reader that tells an absent list from a list of NaN. Another node that
-  // is not in the program (an expression of a compile handler) has no known
-  // reader.
+  // list or of a tuple, a value of a dictionary, another list operator) can
+  // give the value to a reader that tells an absent list from a list of
+  // NaN. Another node that is not in the program (an expression of a
+  // compile handler) has no known reader.
   const bodies = new Map<Expression, { nan: () => boolean; read: boolean }>();
   // For each held value that `expression()` lowers, the names that hold it,
   // and whether one of them is read other than by a node of the program
@@ -969,6 +971,7 @@ function lowerOnce(
     const h = holders.get(e);
     known =
       (readers.get(e) ?? (body || h ? [] : undefined))?.every(([reader, i]) => {
+        if (!isFunction(reader)) return false;
         if (reader === root && reader.operator === 'Function') return i === 0;
         if (!isLibrary(reader)) return false;
         switch (reader.operator) {
@@ -7842,9 +7845,10 @@ function lowerOnce(
       places.length > 0 &&
       places.every(
         ([r, i]) =>
-          (r === root && r.operator === 'Function' && i === 0) ||
-          (r.operator === 'Block' && i === r.nops - 1 && nothingPlace(r)) ||
-          (r.operator === 'Typed' && i === 0 && nothingPlace(r))
+          isFunction(r) &&
+          ((r === root && r.operator === 'Function' && i === 0) ||
+            (r.operator === 'Block' && i === r.nops - 1 && nothingPlace(r)) ||
+            (r.operator === 'Typed' && i === 0 && nothingPlace(r)))
       )
     );
   };

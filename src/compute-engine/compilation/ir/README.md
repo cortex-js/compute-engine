@@ -3850,9 +3850,12 @@ two types"); `admits()` refuses the lane there too.
   or inferred type is a `dictionary` or a `record` type declines ("not a
   scalar"). As the result of the code a dictionary is an object of its keys, and
   at a function of the host it is the engine's dictionary of its keys
-  (`boxValue()` of `print-js.ts`). The nodes in a dictionary are not in
-  `readers`, so a list or a tuple value of a dictionary is not listed
-  (`Listed`), and a function of the host that receives it declines.
+  (`boxValue()` of `print-js.ts`). The values of a dictionary are nodes of
+  the program (`readers` of `lower.ts`, with the dictionary as their reader),
+  so a `List` or a `Tuple` literal that is a value of a dictionary is listed
+  (`Listed`) and a function of the host receives it
+  (`figureDraw({p -> (t, 1)})`). A value of a dictionary is not a place where
+  a list of NaN stands for an absent list (`nanForAbsent()`).
 - **Protocol methods.** A call whose head is the dispatcher of a protocol member
   (`rotateAbout(c, a, p)`, and the member call `c.rotateAbout(a, p)`, which has
   the same canonical form) and whose first operand is a record of a named type

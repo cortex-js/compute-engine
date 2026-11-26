@@ -125,6 +125,17 @@
 
 ### Improvements
 
+- **A dictionary with a list or a tuple value compiles as the argument of a
+  custom function** (CE-1802). With `figureDraw` declared with `ce.declare()`
+  and an `evaluate` handler, `(t) => figureDraw({p -> (t, 1)})` declined with
+  "an argument that holds a list or a tuple … that the code does not know as
+  a List or a Tuple literal", so it ran interpreted. It now compiles to
+  JavaScript, and the function receives the same dictionary as in the
+  interpreter, here `{p -> (2, 1)}` at `t = 2`. So do a list value
+  (`{dash -> [t, 4, 2]}`), a tuple of tuples and a dictionary in a
+  dictionary. A value that can be a lazy collection (`{p -> Range(1, 3)}`)
+  still declines.
+
 - **A function that reads a variable whose value is the empty list compiles
   to JavaScript** (CE-1808). With `let x: list<string> = []`, the function
   `f(t: real) = length(x) + t` declined with "an empty list" and now
