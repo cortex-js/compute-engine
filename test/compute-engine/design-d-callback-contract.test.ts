@@ -160,7 +160,7 @@ describe('phase 0: `CountIf` converts to the contextual signature', () => {
     // `callback<S>` constructor is retired from converted signatures
     // (`docs/TYPE-SYSTEM.md`).
     expect(ce.type(declaredSignature(ce, 'CountIf')).toString()).toBe(
-      '(collection<T>, predicate: (T) any -> boolean) -> integer where T'
+      '(xs: collection<T>, predicate: (T) any -> boolean) -> integer where T'
     );
     // Read through `typeToString`, not `ce.type()`: the slot is OPEN (it
     // mentions the arm's `T`), and an open type is deliberately not boxable.
@@ -248,7 +248,7 @@ describe('phase 0b: `Filter` converts, on the LAZY path', () => {
     const ce = new ComputeEngine();
     // Design E phase E2: honest, effect-top arrow (the constructor is gone).
     expect(ce.type(declaredSignature(ce, 'Filter')).toString()).toBe(
-      '(collection<T>, predicate: (T) any -> boolean) -> collection where T'
+      '(xs: collection<T>, predicate: (T) any -> boolean) -> collection where T'
     );
     expect(hasCallbackMetadata(ce, 'Filter')).toBe(false);
     // §7 rule 1: the result stays with the `type:` handler — the source's
@@ -397,33 +397,36 @@ describe('phase 1: the single-clause single-collection family converts', () => {
   const CONVERTED: ReadonlyArray<[string, string]> = [
     [
       'Find',
-      '(indexed_collection<T>, predicate: (T) any -> boolean) -> any where T: any',
+      '(xs: indexed_collection<T>, predicate: (T) any -> boolean) -> any where T: any',
     ],
     [
       'IndexWhere',
-      '(indexed_collection<T>, predicate: (T) any -> boolean) -> integer where T',
+      '(xs: indexed_collection<T>, predicate: (T) any -> boolean) -> integer where T',
     ],
     [
       'Position',
-      '(indexed_collection<T>, predicate: (T) any -> boolean) -> list<integer> where T: any',
+      '(xs: indexed_collection<T>, predicate: (T) any -> boolean) -> list<integer> where T: any',
     ],
     [
       'Any',
-      '(collection<T>, predicate: ((T) any -> boolean)?) -> boolean where T',
+      '(xs: collection<T>, predicate: ((T) any -> boolean)?) -> boolean where T',
     ],
     [
       'All',
-      '(collection<T>, predicate: ((T) any -> boolean)?) -> boolean where T',
+      '(xs: collection<T>, predicate: ((T) any -> boolean)?) -> boolean where T',
     ],
     [
       'TakeWhile',
-      '(indexed_collection<T>, predicate: (T) any -> boolean) -> indexed_collection where T',
+      '(xs: indexed_collection<T>, predicate: (T) any -> boolean) -> indexed_collection where T',
     ],
     [
       'DropWhile',
-      '(indexed_collection<T>, predicate: (T) any -> boolean) -> indexed_collection where T',
+      '(xs: indexed_collection<T>, predicate: (T) any -> boolean) -> indexed_collection where T',
     ],
-    ['FlatMap', '(collection<T>, mapping: (T) any -> U) -> list where T, U'],
+    [
+      'FlatMap',
+      '(xs: collection<T>, mapping: (T) any -> U) -> list where T, U',
+    ],
   ];
 
   it.each(CONVERTED)(
@@ -805,15 +808,15 @@ describe('phase 2: the folds convert — `Reduce` / `Scan` / `Fold`', () => {
   const CONVERTED: ReadonlyArray<[string, string]> = [
     [
       'Reduce',
-      '(collection<T>, reducer: (unknown, T) any -> unknown, initial: value?) -> value where T',
+      '(xs: collection<T>, reducer: (unknown, T) any -> unknown, initial: value?) -> value where T',
     ],
     [
       'Scan',
-      '(indexed_collection<T>, reducer: (unknown, T) any -> unknown, initial: value?) -> indexed_collection where T',
+      '(xs: indexed_collection<T>, reducer: (unknown, T) any -> unknown, initial: value?) -> indexed_collection where T',
     ],
     [
       'Fold',
-      '(reducer: (unknown, T) any -> unknown, initial: value, collection<T>) -> value where T',
+      '(reducer: (unknown, T) any -> unknown, initial: value, xs: collection<T>) -> value where T',
     ],
   ];
 
@@ -1028,7 +1031,7 @@ describe('phase 2: `Partition` — R-D4 resolve-then-stamp at SLOT granularity',
   // arrow's result would swallow the `| integer` and the slot would parse as
   // `(T) any -> (boolean | integer)`.
   const DECLARED =
-    '(indexed_collection<T>, ((T) any -> boolean) | integer, integer?) -> list<list<T>> where T: any';
+    '(xs: indexed_collection<T>, count: ((T) any -> boolean) | integer, step: integer?) -> list<list<T>> where T: any';
 
   it('declares the union slot, displays it honestly, and drops the metadata', () => {
     const ce = new ComputeEngine();
@@ -1556,10 +1559,10 @@ describe('runtime signature display is the HONEST declared polytype', () => {
   // everywhere: `.type`, the `Signature` operator, `toJSON()`, the scope
   // listing, and the VALUE-definition surface for a user's own signature.
   const COUNT_IF_E =
-    '(collection<T>, predicate: (T) any -> boolean) -> integer where T';
+    '(xs: collection<T>, predicate: (T) any -> boolean) -> integer where T';
   // Design E phase E2: `Filter` converted — honest polytype display (§8).
   const FILTER =
-    '(collection<T>, predicate: (T) any -> boolean) -> collection where T';
+    '(xs: collection<T>, predicate: (T) any -> boolean) -> collection where T';
 
   it('a boxed operator NAME reports the signature honestly', () => {
     const ce = new ComputeEngine();

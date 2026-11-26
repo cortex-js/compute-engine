@@ -65,6 +65,22 @@
   where the definition writes `Join([1, 2], [3, 4])`), and the `@example`
   tags of a `///` comment.
 
+- **The functions of the collections library document their parameters,
+  and several of their parameters have names.** The signature help and the
+  completion of a call of `take`, `filter`, `insert` and the other 85
+  functions with an Epsil spelling show a description and a sample of each
+  parameter, and the reference page lists them. A call may pass a named
+  parameter by name, in any order:
+  `insert(xs: [1, 2, 4], index: 3, element: 3)` gives `[1, 2, 3, 4]`. The
+  names are `xs` (the collection, in `all`, `any`, `filter`, `find`,
+  `reduce` and others), `count` (`chunk`, `partition`), `index` and
+  `element` (`insert`, `replaceAt`, `deleteAt`, `indexOf`), `n`
+  (`rotateLeft`, `rotateRight`), `needle` (`rangeOf`, `containsSequence`),
+  `start` and `end` (`interval`), `f` (`iterate`), `step` (`partition`) and
+  `k` and `n` (`residueClass`). The type string of
+  these signatures shows the names: `Filter` is
+  `(xs: collection<T>, predicate: (T) any -> boolean) -> collection where T`.
+
 - **`epsilProgramSites()` gives the sites of the names of an Epsil program,
   each with the binding it resolves to** (CE-1628, CE-1255.2). It is exported
   from `@cortex-js/compute-engine/epsil` and reads the source without running

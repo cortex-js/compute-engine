@@ -12512,6 +12512,12 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // `Set` of restricted cells.
     threadsConditionals: true,
     signature: '(any) -> integer | infinity',
+    parameters: [
+      {
+        description: 'The collection or string to measure.',
+        sample: '[5, 6, 7]',
+      },
+    ],
     // An absent collection has no length: `Length(Missing)` answers the
     // marker of the codomain, `NaN`, as every collection operator does for
     // an absent operand (user decision 2026-09-25;
@@ -12768,6 +12774,13 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       'A list of points: zips collection components into a List of point-tuples (Desmos point-list idiom); a plain point when no component is a collection.',
     complexity: 8200,
     signature: '(any+) -> any',
+    parameters: [
+      {
+        description:
+          'A component of the points: a collection gives one coordinate per point, a single value the same coordinate for every point.',
+        sample: '[1, 2, 3]',
+      },
+    ],
     // A component that is a point (a tuple), a collection without positions
     // (a set) or a list of points is refused when the call is boxed
     // (`isRefusedPointListComponentType`): a coordinate is a number or a
@@ -13125,6 +13138,12 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // `Set` of restricted cells.
     threadsConditionals: true,
     signature: '(dictionary<any>) -> list<string>',
+    parameters: [
+      {
+        description: 'The dictionary whose keys are listed.',
+        sample: '{"a" -> 1, "b" -> 2}',
+      },
+    ],
     // Complete precondition: the evaluate guard (`isDictionary`) is the
     // handler's only decline — see `canEnumerate` (types-definitions.ts).
     canEnumerate: (expr) =>
@@ -13155,6 +13174,13 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // `Set` of restricted cells.
     threadsConditionals: true,
     signature: '(dictionary<any>) -> list',
+    parameters: [
+      {
+        description:
+          'The dictionary whose values are listed, in the order of its entries.',
+        sample: '{"a" -> 1, "b" -> 2}',
+      },
+    ],
     type: ([dict], context) => {
       const t = dict.type;
       if (typeof t === 'object' && t.kind === 'dictionary')
@@ -13696,12 +13722,16 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     description:
       'Open(x): the endpoint x of an Interval, marked as excluded. A marker with no value of its own.',
     signature: '(number) -> number',
+    parameters: [{ description: 'The endpoint to exclude.', sample: '0' }],
   },
   Closed: {
     examples: ['1 in Interval(0, Closed(1))'],
     description:
       'Closed(x): the endpoint x of an Interval, marked as included. A marker with no value of its own; Interval normalizes it away.',
     signature: '(number) -> number',
+    parameters: [
+      { description: 'The endpoint to include in the interval.', sample: '1' },
+    ],
   },
 
   Interval: {
@@ -13710,7 +13740,19 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       'A set of real numbers between two endpoints. The endpoints may or may not be included.',
     complexity: 8200,
     lazy: true,
-    signature: '(number, number) -> set<real>',
+    signature: '(start: number, end: number) -> set<real>',
+    parameters: {
+      start: {
+        description:
+          'The lower endpoint, included unless it is wrapped in `Open`; it may be `-oo`.',
+        sample: '0',
+      },
+      end: {
+        description:
+          'The upper endpoint, included unless it is wrapped in `Open`; it may be `+oo`.',
+        sample: '1',
+      },
+    },
     canonical: ([lo, hi], { engine }) => {
       if (!lo || !hi) return null;
       // Endpoints may be wrapped in `Open`/`Closed` markers and may be
@@ -13973,6 +14015,19 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       'A sequence of evenly spaced numbers between a start and end value, both endpoints included.',
     complexity: 8200,
     signature: '(start: number, end: number?, count: number?) -> list<number>',
+    parameters: {
+      start: {
+        description:
+          'The first value; when it is the only argument, it is the last value and the sequence starts at 1.',
+        sample: '0',
+      },
+      end: { description: 'The last value.', sample: '1' },
+      count: {
+        description:
+          'The number of values, 50 by default; 1 gives the start alone, and 0 or less an empty list.',
+        sample: '5',
+      },
+    },
     // A `list<T>` (since 2026-09-29; it was a bare `indexed_collection`, with
     // no element type, which a symbol declared `list` or `list<number>`
     // refused). The samples lie between the endpoints, so they are real when
@@ -14162,7 +14217,18 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // (`SEARCHED_VALUE_POLICY`).
     missingBehavior: 'propagate',
     missingStrip: [0],
-    signature: '(collection<any>, element: any) -> boolean',
+    signature: '(xs: collection<any>, element: any) -> boolean',
+    parameters: {
+      xs: {
+        description:
+          'The collection to search; the elements of a string are its characters.',
+        sample: '[1, 2, 3]',
+      },
+      element: {
+        description: 'The value to find, compared structurally.',
+        sample: '2',
+      },
+    },
     // Peek through membership-preserving wrappers (incl. `Unique`) so an eager
     // Sort/RandomShuffle isn't materialized just to test membership (see
     // `peekMembershipPreserving`).
@@ -14242,7 +14308,25 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // The optional third operand is a level specification (Wolfram's
     // `Count[expr, pattern, levelspec]`), for the value form: see
     // `countAtLevels`.
-    signature: '(collection<any>, any?, any?) -> integer | infinity',
+    signature:
+      '(xs: collection<any>, element: any?, levels: any?) -> integer | infinity',
+    parameters: {
+      xs: {
+        description:
+          'The collection; with no other argument, the result is its number of elements, `+oo` for an unbounded one.',
+        sample: '[1, 2, 1, 3, 1]',
+      },
+      element: {
+        description:
+          'The value to count, compared structurally, or a predicate that each counted element satisfies.',
+        sample: '1',
+      },
+      levels: {
+        description:
+          'The levels of a nested list to count in, with a value to count: `n` for the levels 1 to `n`, `[n]` for the level `n` only, `[from, to]` for a range.',
+        sample: '2',
+      },
+    },
     // Only the 1-arg cardinality form can answer an infinity: it reports
     // `xs.count` as it stands, and an unbounded source counts infinitely many
     // elements (`Count(Range(1, +oo))` and `Count(Repeat(5))` are both `+oo`).
@@ -14534,6 +14618,9 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // `Set` of restricted cells.
     threadsConditionals: true,
     signature: '(collection<any>) -> boolean',
+    parameters: [
+      { description: 'The collection or string to test.', sample: '[1, 2, 3]' },
+    ],
     // Peek through count-preserving wrappers so an eager Sort/RandomShuffle isn't
     // materialized just to test emptiness (see `peekCountPreserving`).
     canonical: (ops, { engine: ce }) => {
@@ -14592,7 +14679,19 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // `Set` of restricted cells.
     threadsConditionals: true,
     signature:
-      '(collection<T>, predicate: ((T) any -> boolean)?) -> boolean where T',
+      '(xs: collection<T>, predicate: ((T) any -> boolean)?) -> boolean where T',
+    parameters: {
+      xs: {
+        description:
+          'The collection to test; for an empty collection the result is False.',
+        sample: '[1, 3, 4]',
+      },
+      predicate: {
+        description:
+          'The test of each element; without it, an element must be True.',
+        sample: 'x => x > 1',
+      },
+    },
     canonical: (ops, { engine }) => {
       const collection = checkCollectionOperand(engine, ops[0]);
       if (isInvalidNonCollection(collection)) return null;
@@ -14655,7 +14754,19 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // `Set` of restricted cells.
     threadsConditionals: true,
     signature:
-      '(collection<T>, predicate: ((T) any -> boolean)?) -> boolean where T',
+      '(xs: collection<T>, predicate: ((T) any -> boolean)?) -> boolean where T',
+    parameters: {
+      xs: {
+        description:
+          'The collection to test; for an empty collection the result is True.',
+        sample: '[2, 4, 6]',
+      },
+      predicate: {
+        description:
+          'The test of each element; without it, each element must be True.',
+        sample: 'x => x > 1',
+      },
+    },
     canonical: (ops, { engine }) => {
       const collection = checkCollectionOperand(engine, ops[0]);
       if (isInvalidNonCollection(collection)) return null;
@@ -14729,6 +14840,18 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     //    so an n-ary zip mapping remains unstamped when its arity differs.
     signature:
       '(mapping: (T) any -> U, collection<T>+) -> indexed_collection where T, U',
+    parameters: [
+      {
+        description:
+          'The function applied to each element, with one argument per collection.',
+        sample: 'x => x^2',
+      },
+      {
+        description:
+          'A collection; with several, the result has the length of the shortest.',
+        sample: '[1, 2, 3]',
+      },
+    ],
     // The mapped collection keeps the source's shape/indexed-ness, but its
     // elements are the lambda's RESULT type — not the source element type.
     // (If the input collection is indexed, the output collection is indexed.)
@@ -15185,7 +15308,17 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // indexedness", so converting the slot deliberately does not convert the
     // result (§7, rule 1).
     signature:
-      '(collection<T>, predicate: (T) any -> boolean) -> collection where T',
+      '(xs: collection<T>, predicate: (T) any -> boolean) -> collection where T',
+    parameters: {
+      xs: {
+        description: 'The collection to filter.',
+        sample: '[1, 2, 3, 4, 5, 6]',
+      },
+      predicate: {
+        description: 'The test that each kept element passes.',
+        sample: 'x => x > 2',
+      },
+    },
     // If the input collection is indexed, the output collection is indexed —
     // but NOT the source's own type. Filtering changes the length, so echoing
     // the source type claimed `vector<3>` for a filtered 3-vector, `tuple<…>`
@@ -15568,7 +15701,24 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // (`signatureParamsPropagateAbsence`) does not read as a collection.
     missingBehavior: 'propagate',
     signature:
-      '(collection<T>, reducer: (unknown, T) any -> unknown, initial: value?) -> value where T',
+      '(xs: collection<T>, reducer: (unknown, T) any -> unknown, initial: value?) -> value where T',
+    parameters: {
+      xs: {
+        description:
+          'The collection to fold; an empty one gives `initial`, or `Nothing` without it.',
+        sample: '[1, 2, 3, 4]',
+      },
+      reducer: {
+        description:
+          'The function of the accumulated value and the next element that gives the new accumulated value.',
+        sample: '(a, b) => a * b',
+      },
+      initial: {
+        description:
+          'The accumulated value before the first element; without it, the first element.',
+        sample: '1',
+      },
+    },
     canonical: (ops, { engine }) =>
       withFixpointRecord(engine, () => {
         const collection = checkCollectionOperand(engine, ops[0]);
@@ -15709,7 +15859,23 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // `Fold(f, xs)` has no seed (Wolfram's `Fold[f, list]`): it is
     // `Reduce(xs, f)`, which starts from the first element.
     signature:
-      '(reducer: (unknown, T) any -> unknown, initial: value, collection<T>) -> value where T',
+      '(reducer: (unknown, T) any -> unknown, initial: value, xs: collection<T>) -> value where T',
+    parameters: {
+      reducer: {
+        description:
+          'The function of the accumulator and the next element, which returns the new accumulator.',
+        sample: '(acc, x) => acc + x',
+      },
+      initial: {
+        description:
+          'The accumulator before the first element, and the result for an empty collection.',
+        sample: '0',
+      },
+      xs: {
+        description: 'The collection, read from its first element to its last.',
+        sample: '[1, 2, 3, 4]',
+      },
+    },
     canonical: (ops, { engine }) =>
       withFixpointRecord(engine, () => {
         const unseeded = ops.length === 2;
@@ -15792,7 +15958,24 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // type is refused when the call is evaluated (`settleHeldEagerSources()`
     // in `boxed-expression/boxed-function.ts`).
     signature:
-      '(indexed_collection<T>, reducer: (unknown, T) any -> unknown, initial: value?) -> indexed_collection where T',
+      '(xs: indexed_collection<T>, reducer: (unknown, T) any -> unknown, initial: value?) -> indexed_collection where T',
+    parameters: {
+      xs: {
+        description:
+          'The collection to scan, in its order; an empty collection gives an empty result.',
+        sample: '[1, 2, 3, 4]',
+      },
+      reducer: {
+        description:
+          'A function of the running result and the next element that returns the new running result.',
+        sample: '(acc, x) => acc + x',
+      },
+      initial: {
+        description:
+          'The value the running result starts from; without it, the first element of the result is the first element of the collection.',
+        sample: '0',
+      },
+    },
     // Same shape as the source, but elements are the fold's result type
     // (mirrors Map). A source type without positions (`collection<T>`,
     // which can also hold a list) gives an indexed collection: a set source
@@ -15956,6 +16139,13 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // wider type is refused when the call is evaluated
     // (`settleHeldEagerSources()` in `boxed-expression/boxed-function.ts`).
     signature: '(indexed_collection<any>) -> indexed_collection',
+    parameters: [
+      {
+        description:
+          'The list of numbers; a list of one element gives an empty list.',
+        sample: '[1, 4, 9, 16]',
+      },
+    ],
     type: (ops, context) => {
       const elt = collectionElementType(ops[0].type) ?? 'number';
       // Each element is a SUBTRACTION of two source elements, so echoing the
@@ -16070,7 +16260,19 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // the call is evaluated (`settleHeldEagerSources()` in
     // `boxed-expression/boxed-function.ts`).
     signature:
-      '(indexed_collection<T>, predicate: (T) any -> boolean) -> indexed_collection where T',
+      '(xs: indexed_collection<T>, predicate: (T) any -> boolean) -> indexed_collection where T',
+    parameters: {
+      xs: {
+        description:
+          'The collection whose leading elements are taken; a string gives a string.',
+        sample: '[1, 2, 3, 10, 4]',
+      },
+      predicate: {
+        description:
+          'A function of one element that returns `True` for an element to keep.',
+        sample: 'x => x < 5',
+      },
+    },
     type: (ops, context) =>
       BoxedType.forResult(
         orderedRunResultType(ops[0].type),
@@ -16258,7 +16460,18 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // handler (§7 rule 1), and the source must have positions: the dropped
     // prefix is read in the order of the source, and a set has no order.
     signature:
-      '(indexed_collection<T>, predicate: (T) any -> boolean) -> indexed_collection where T',
+      '(xs: indexed_collection<T>, predicate: (T) any -> boolean) -> indexed_collection where T',
+    parameters: {
+      xs: {
+        description: 'The collection whose leading elements are dropped.',
+        sample: '[1, 2, 3, 10, 4]',
+      },
+      predicate: {
+        description:
+          'The test of the leading elements; dropping stops at the first element that fails it.',
+        sample: 'x => x < 5',
+      },
+    },
     type: (ops, context) =>
       BoxedType.forResult(
         orderedRunResultType(ops[0].type),
@@ -16395,7 +16608,15 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // was not an indexed collection, and a list result materialized as a
     // `Set` of restricted cells.
     threadsConditionals: true,
-    signature: '(collection<T>, mapping: (T) any -> U) -> list where T, U',
+    signature: '(xs: collection<T>, mapping: (T) any -> U) -> list where T, U',
+    parameters: {
+      xs: { description: 'The collection to map over.', sample: '[1, 2, 3]' },
+      mapping: {
+        description:
+          'The function applied to each element; a collection result other than a string is spliced into the result, and a string or any other value is kept as one element.',
+        sample: 'x => [x, x]',
+      },
+    },
     // `FlatMap` gives each cell of its source to the callback as it is, an
     // absent cell too (it is in `ABSENT_CELLS_PASS_THROUGH`,
     // `broadcast-lift-type.ts`), so the source comes here with the `missing`
@@ -16743,6 +16964,13 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     threadsConditionals: true,
     signature:
       '((T+) -> T where T: string) & ((collection<any>*) -> collection)',
+    parameters: [
+      {
+        description:
+          'A collection or string whose elements are spliced into the result (strings alone give their concatenation), or another value, such as a tuple, added as one element.',
+        sample: '"ab"',
+      },
+    ],
     // Same-head flatten: `Join(Join(…inner), …outer)` → `Join(…inner, …outer)`
     // (Change 2 of `docs/COLLECTIONS-MODEL.md`).
     // Exact by construction — the head is unchanged, so every operand keeps
@@ -16818,7 +17046,9 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
   // list (`Append([(1,2)], (3,4))` → 2 points) are load-bearing behaviors.
   Append: {
     examples: ['Append([1, 2], 3, 4)'],
-    description: ['Add one or more elements to the end of a collection.'],
+    description: [
+      'Return the collection with one or more elements added at its end.',
+    ],
     complexity: 8200,
     // A restricted collection, `[1,2]{c}`, is ONE held restriction over the list
     // and is threaded whole (user decision 2026-09-25): the result is computed
@@ -16840,6 +17070,13 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     missingBehavior: 'propagate',
     missingStrip: [0],
     signature: '(collection<any>, any+) -> collection',
+    parameters: [
+      { description: 'The collection to extend.', sample: '[1, 2]' },
+      {
+        description: 'An element to add, after the elements before it.',
+        sample: '3',
+      },
+    ],
     // Same-head flatten: `Append(Append(c, …vs), …ws)` → `Append(c, …vs, …ws)`,
     // so an accumulator loop (`xs = Append(xs, v)`) builds a node of bounded
     // DEPTH — every structural walker (serialization, hashing, `isSame`,
@@ -17077,7 +17314,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
   Field: {
     examples: ['{x -> 1, y -> 2}.y'],
     description: [
-      'Access a named field of a value: `p.x` in Epsil.',
+      'Return the named field of a value: `p.x` in Epsil.',
       'On a record or dictionary value, `Field(d, "x")` behaves exactly as `d["x"]` (`At` semantics, including the absence marker for a key a dictionary may not have).',
       'On a value of a NOMINAL type whose definition body has named fields (a record body, or a named-tuple body), the field is resolved through the type definition — the sanctioned accessor window of the nominal-types design (D6/§4.5b D16). This does not make the value a collection: `First(p)` and `p["x"]` keep rejecting.',
       'A field name that is not in a record/named-tuple definition is a static defect (the result type is `error`); on an unknown-typed operand the expression stays symbolic.',
@@ -17085,6 +17322,14 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     ],
     complexity: 8200,
     signature: '(value: any, field: string) -> unknown',
+    parameters: {
+      value: {
+        description:
+          'The record, the dictionary, or the value of a nominal type with named fields.',
+        sample: '{x -> 1, y -> 2}',
+      },
+      field: { description: 'The name of the field.', sample: '"y"' },
+    },
     // The operands are canonical (`Field` is not lazy). A record type is
     // closed, so a read of a field that the type of the operand does not
     // list cannot select a value: it is refused here, before anything runs,
@@ -18510,8 +18755,8 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
   Drop: {
     examples: ['Drop([1, 2, 3, 4, 5], 2)', 'Drop([1, 2, 3, 4, 5], -2)'],
     description: [
-      'Return the indexed collection without its first `n` elements.',
-      'A negative `n` counts from the end: `Drop(xs, -n)` is the collection without its last `n` elements.',
+      'Return the indexed collection without its first `count` elements.',
+      'A negative `count` counts from the end: `Drop(xs, -n)` is the collection without its last `n` elements.',
       'A count past the length is clamped: the result is empty.',
     ],
     complexity: 8200,
@@ -18536,6 +18781,14 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     threadsConditionals: true,
     signature:
       '((xs: T, count: number) -> T where T: string) & ((xs: indexed_collection<T>, count: number) -> list<T> where T: any)',
+    parameters: {
+      xs: { description: 'The list or string.', sample: '[1, 2, 3, 4, 5]' },
+      count: {
+        description:
+          'The number of elements to drop; a negative count drops the last elements, and a count past the length gives an empty result.',
+        sample: '2',
+      },
+    },
     type: ([xs], context) =>
       BoxedType.forResult(
         selectorResultTypeD(xs),
@@ -18687,6 +18940,14 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // (Wolfram's `First[expr, def]`): `First([], 0)` is `0`, and a collection
     // that has an element ignores it.
     signature: '(xs: indexed_collection<any>, default: any?) -> any',
+    parameters: {
+      xs: { description: 'The list or string.', sample: '[7, 8, 9]' },
+      default: {
+        description:
+          'The result for an empty collection; without it, an empty collection gives the absent value of its elements, `NaN` for numbers and `Missing` otherwise.',
+        sample: '0',
+      },
+    },
     missingBehavior: 'handle',
     // A restricted collection `L {c}` whose condition is not decided moves
     // out of the application: `First((1, 2) {0 < t})` is `1 {0 < t}`
@@ -18707,6 +18968,13 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     description: 'The second element of a collection.',
     complexity: 8200,
     signature: '(xs: indexed_collection<any>) -> any',
+    parameters: {
+      xs: {
+        description:
+          'The collection; one with fewer than two elements gives `Missing`, or `NaN` when its elements are numbers.',
+        sample: '[7, 8, 9]',
+      },
+    },
     missingBehavior: 'handle',
     threadsConditionals: true,
     type: ([xs], context) =>
@@ -18724,6 +18992,13 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     description: 'The third element of a collection.',
     complexity: 8200,
     signature: '(xs: indexed_collection<any>) -> any',
+    parameters: {
+      xs: {
+        description:
+          'The collection; one with fewer than three elements gives `Missing`, or `NaN` when its elements are numbers.',
+        sample: '[7, 8, 9]',
+      },
+    },
     missingBehavior: 'handle',
     threadsConditionals: true,
     type: ([xs], context) =>
@@ -18766,6 +19041,13 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       'The x-coordinate of a point, broadcasting over a list of points.',
     complexity: 8200,
     signature: '(xs: collection<any> | tuple) -> any',
+    parameters: {
+      xs: {
+        description:
+          'A point, or a collection of points whose x-coordinates are listed.',
+        sample: '(3, 4)',
+      },
+    },
     missingBehavior: 'propagate',
     // A restricted point `P {c}` whose condition is not decided moves out of
     // the application: `PointX((1, 2) {0 < t})` is `1 {0 < t}`
@@ -18796,6 +19078,13 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       'The y-coordinate of a point, broadcasting over a list of points.',
     complexity: 8200,
     signature: '(xs: collection<any> | tuple) -> any',
+    parameters: {
+      xs: {
+        description:
+          'A point, or a collection of points whose y-coordinates are listed.',
+        sample: '(3, 4)',
+      },
+    },
     missingBehavior: 'propagate',
     threadsConditionals: true,
     type: ([xs], context) =>
@@ -18823,6 +19112,13 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       'The z-coordinate of a point, broadcasting over a list of points.',
     complexity: 8200,
     signature: '(xs: collection<any> | tuple) -> any',
+    parameters: {
+      xs: {
+        description:
+          'A point of at least three coordinates, or a collection of such points whose z-coordinates are listed.',
+        sample: '(3, 4, 5)',
+      },
+    },
     missingBehavior: 'propagate',
     threadsConditionals: true,
     // A point with no z-coordinate is a DIMENSION mismatch, not an absent
@@ -18872,6 +19168,14 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // The optional second operand is the value of an empty collection, as for
     // `First`.
     signature: '(xs: indexed_collection<any>, default: any?) -> any',
+    parameters: {
+      xs: { description: 'The collection or string.', sample: '[7, 8, 9]' },
+      default: {
+        description:
+          'The value returned when the collection is empty; without it, an empty collection gives the absent value of its elements, `NaN` for numbers and `Missing` otherwise.',
+        sample: '0',
+      },
+    },
     missingBehavior: 'handle',
     threadsConditionals: true,
     type: ([xs, fallback], context) =>
@@ -18918,6 +19222,13 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     threadsConditionals: true,
     signature:
       '((T) -> T where T: string) & ((indexed_collection<T>) -> list<T> where T: any)',
+    parameters: [
+      {
+        description:
+          'The collection or string; an empty one gives an empty result.',
+        sample: '"abc"',
+      },
+    ],
     type: ([xs], context) =>
       BoxedType.forResult(
         selectorResultTypeD(xs),
@@ -19007,6 +19318,13 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     threadsConditionals: true,
     signature:
       '((T) -> T where T: string) & ((indexed_collection<T>) -> list<T> where T: any)',
+    parameters: [
+      {
+        description:
+          'The collection; an empty collection gives an empty result, and a string gives a string.',
+        sample: '[7, 8, 9]',
+      },
+    ],
     type: ([xs], context) =>
       BoxedType.forResult(
         selectorResultTypeD(xs),
@@ -19161,6 +19479,27 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // `Set` of restricted cells.
     threadsConditionals: true,
     signature: SLICE_SIGNATURE_TEXT,
+    parameters: {
+      value: {
+        description: 'The collection to slice; a string gives a string.',
+        sample: '[10, 20, 30, 40, 50]',
+      },
+      span: {
+        description:
+          'An ascending range of 1-based indices; the indices past the end are left out.',
+        sample: '2..4',
+      },
+      start: {
+        description:
+          'The 1-based index of the first element; a negative index counts from the end (`-1` is the last element).',
+        sample: '2',
+      },
+      end: {
+        description:
+          'The 1-based index of the last element, included; a negative index counts from the end, an index past the end is the end, and an `end` before `start` gives an empty result.',
+        sample: '4',
+      },
+    },
     // Returning `undefined` leaves the type of the resolver's arm in place,
     // which keeps `Slice("abc", 2..3)` typed exactly `string`.
     type: (ops, context) =>
@@ -19308,6 +19647,13 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     threadsConditionals: true,
     signature:
       '((T) -> T where T: string) & ((T) -> T where T: list) & ((indexed_collection<T>) -> list<T> where T: any)',
+    parameters: [
+      {
+        description:
+          'The collection to reverse; a string gives the string of its characters in reverse order.',
+        sample: '[1, 2, 3]',
+      },
+    ],
     collection: refusingUnindexedSource({
       isEnumerable: enumerableFromSmallSource,
       isLazy: (_expr) => true,
@@ -19385,7 +19731,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
   Insert: {
     examples: ['Insert([1, 2, 4], 3, 3)'],
     description: [
-      'Return a copy of the indexed collection with `value` inserted before the 1-based `index`.',
+      'Return a copy of the indexed collection with `element` inserted before the 1-based `index`.',
       '`index` may range from 1 to n+1 (n+1 appends). A negative index counts from the end, with -1 appending at the end (Elixir semantics).',
       'An out-of-range, zero, or non-integer index leaves the expression unevaluated.',
     ],
@@ -19417,7 +19763,20 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // the result.
     missingBehavior: 'propagate',
     missingStrip: [0],
-    signature: '(indexed_collection<T>, integer, T) -> list<T> where T: any',
+    signature:
+      '(xs: indexed_collection<T>, index: integer, element: T) -> list<T> where T: any',
+    parameters: {
+      xs: {
+        description: 'The collection; a string gives a list of its characters.',
+        sample: '[1, 2, 4]',
+      },
+      index: {
+        description:
+          'The 1-based position of the inserted element, from 1 to n + 1; a negative index counts from the end, -1 appending.',
+        sample: '3',
+      },
+      element: { description: 'The value to insert.', sample: '3' },
+    },
     // The signature gives the result type, except for a value typed
     // `unknown`: the solve of `T` drops it, so `Insert(Range(1, u), 1, t)`,
     // with a parameter `t` whose type is not inferred, was typed
@@ -19589,7 +19948,24 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // (a record type is a subtype of `dictionary<V>` for the join `V` of
     // its fields). The `type` handler below gives the precise record type.
     signature:
-      '((T, integer) -> T where T: string) & ((indexed_collection<T>, integer) -> list<T> where T: any) & ((dictionary<V>, string) -> dictionary<V> where V: any)',
+      '((xs: T, index: integer) -> T where T: string) & ((xs: indexed_collection<T>, index: integer) -> list<T> where T: any) & ((xs: dictionary<V>, key: string) -> dictionary<V> where V: any)',
+    parameters: {
+      xs: {
+        description:
+          'The list, string, dictionary or record to copy without one element.',
+        sample: '[1, 2, 3, 4]',
+      },
+      index: {
+        description:
+          'The 1-based position of the element to remove; a negative index counts from the end, and 0 or an index out of range leaves the call unevaluated.',
+        sample: '2',
+      },
+      key: {
+        description:
+          'The key of the entry to remove; a key that is not there gives the value unchanged.',
+        sample: '"b"',
+      },
+    },
     type: ([xs, key], { engine: ce }) => {
       if (xs === undefined || key === undefined) return undefined;
       const t = deleteFieldType(xs.type, stringLiteralOf(key));
@@ -19716,7 +20092,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       'ReplaceAt([[1, 2], [3, 4]], 2, 1, 9)',
     ],
     description: [
-      'Return a copy of the indexed collection with the element at the 1-based `index` replaced by `value`.',
+      'Return a copy of the indexed collection with the element at the 1-based `index` replaced by `element`.',
       'A negative index counts from the end. An out-of-range, zero, or non-integer index leaves the expression unevaluated.',
       'With more than one position, as `At` takes them, the last operand is the value, and each position selects one level of a nested collection (e.g., a matrix).',
     ],
@@ -19758,7 +20134,19 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // when it reaches that level, and the compiled code throws. The `type`
     // handler below gives the result type of this arm.
     signature:
-      '((indexed_collection<T>, integer, T) -> list<T> where T: any) & ((indexed_collection<any>, integer, integer, any+) -> list<any>)',
+      '((xs: indexed_collection<T>, index: integer, element: T) -> list<T> where T: any) & ((xs: indexed_collection<any>, index: integer, integer, any+) -> list<any>)',
+    parameters: {
+      xs: {
+        description: 'The collection; a string gives a list of its characters.',
+        sample: '[1, 2, 3]',
+      },
+      index: {
+        description:
+          'The 1-based position of the element to replace; a negative index counts from the end. With more positions, the position in the outermost level.',
+        sample: '2',
+      },
+      element: { description: 'The new element.', sample: '20' },
+    },
     type: (ops, { engine: ce }) => {
       if (ops.length < 3) return undefined;
       const source = ops[0].type;
@@ -19920,7 +20308,18 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // every untyped operand and claim `string` for a call that usually
     // returns a list. A bounded variable with no call-site binding does not.
     signature:
-      '((T, integer?) -> T where T: string) & ((T, integer?) -> T where T: list) & ((indexed_collection<T>, integer?) -> list<T> where T: any)',
+      '((xs: T, n: integer?) -> T where T: string) & ((xs: T, n: integer?) -> T where T: list) & ((xs: indexed_collection<T>, n: integer?) -> list<T> where T: any)',
+    parameters: {
+      xs: {
+        description: 'The collection to rotate; a string gives a string.',
+        sample: '[1, 2, 3, 4]',
+      },
+      n: {
+        description:
+          'The number of positions, 1 by default; a negative `n` rotates to the right, and `n` is taken modulo the length.',
+        sample: '2',
+      },
+    },
     collection: refusingUnindexedSource({
       isEnumerable: enumerableFromSmallSource,
       isLazy: (_expr) => true,
@@ -20037,7 +20436,18 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // every untyped operand and claim `string` for a call that usually
     // returns a list. A bounded variable with no call-site binding does not.
     signature:
-      '((T, integer?) -> T where T: string) & ((T, integer?) -> T where T: list) & ((indexed_collection<T>, integer?) -> list<T> where T: any)',
+      '((xs: T, n: integer?) -> T where T: string) & ((xs: T, n: integer?) -> T where T: list) & ((xs: indexed_collection<T>, n: integer?) -> list<T> where T: any)',
+    parameters: {
+      xs: {
+        description: 'The collection to rotate; a string gives a string.',
+        sample: '[1, 2, 3, 4]',
+      },
+      n: {
+        description:
+          'The number of positions, 1 by default; a negative `n` rotates to the left, and `n` is taken modulo the length.',
+        sample: '2',
+      },
+    },
     collection: refusingUnindexedSource({
       isEnumerable: enumerableFromSmallSource,
       isLazy: (_expr) => true,
@@ -20155,7 +20565,18 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // no first element (`First`, `At` refuse it the same way). With the wider
     // `collection<any>` a set reached the handler and answered `0` for every
     // value, present or not.
-    signature: '(indexed_collection<any>, any) -> integer',
+    signature: '(xs: indexed_collection<any>, element: any) -> integer',
+    parameters: {
+      xs: {
+        description:
+          'The list or string to search; the elements of a string are its characters.',
+        sample: '[10, 20, 30]',
+      },
+      element: {
+        description: 'The value to find, compared structurally.',
+        sample: '20',
+      },
+    },
     evaluate: ([xs, value], { engine: ce }) => {
       if (searchedValueStatus(value) === 'undecided') return undefined;
       // An unbounded source may refute membership without a walk: `Repeat(6)`
@@ -20223,7 +20644,21 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // dynamic non-value per domain"), and every operator over it gives
     // `Missing`, so `Slice(xs, RangeOf(xs, needle))` is `Missing` too.
     signature:
-      '(indexed_collection<T>, indexed_collection<T>, from: integer?) -> range | missing where T',
+      '(xs: indexed_collection<T>, needle: indexed_collection<T>, from: integer?) -> range | missing where T',
+    parameters: {
+      xs: {
+        description: 'The collection to search.',
+        sample: '[10, 20, 30, 40]',
+      },
+      needle: {
+        description: 'The run of consecutive elements to find.',
+        sample: '[30, 40]',
+      },
+      from: {
+        description: 'The 1-based index where the search starts, 1 by default.',
+        sample: '2',
+      },
+    },
     // Provable declines only. `true` is never claimed: even with both
     // operands finite, a needle that does not occur evaluates to `Missing`,
     // which is not a collection, so evaluation cannot promise one.
@@ -20290,7 +20725,18 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // fails. Both collections are threaded.
     threadsConditionals: true,
     signature:
-      '(indexed_collection<T>, indexed_collection<T>) -> boolean where T',
+      '(xs: indexed_collection<T>, needle: indexed_collection<T>) -> boolean where T',
+    parameters: {
+      xs: {
+        description: 'The list or string to search.',
+        sample: '[1, 2, 3, 4]',
+      },
+      needle: {
+        description:
+          'The run of consecutive elements to find; an empty needle is always found.',
+        sample: '[2, 3]',
+      },
+    },
     evaluate: ([xs, needle], { engine: ce }) => {
       const operands = sequenceSearchOperands(xs, needle);
       if (operands === undefined) return undefined;
@@ -20321,7 +20767,18 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // fails. Both collections are threaded.
     threadsConditionals: true,
     signature:
-      '(indexed_collection<T>, prefix: indexed_collection<T>) -> boolean where T',
+      '(xs: indexed_collection<T>, prefix: indexed_collection<T>) -> boolean where T',
+    parameters: {
+      xs: {
+        description: 'The collection or string whose start is tested.',
+        sample: '[1, 2, 3]',
+      },
+      prefix: {
+        description:
+          'The elements the collection must begin with, in order; an empty prefix matches every collection.',
+        sample: '[1, 2]',
+      },
+    },
     evaluate: ([xs, prefix], { engine: ce }) => {
       const operands = sequenceSearchOperands(xs, prefix);
       if (operands === undefined) return undefined;
@@ -20348,7 +20805,14 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // fails. Both collections are threaded.
     threadsConditionals: true,
     signature:
-      '(indexed_collection<T>, suffix: indexed_collection<T>) -> boolean where T',
+      '(xs: indexed_collection<T>, suffix: indexed_collection<T>) -> boolean where T',
+    parameters: {
+      xs: { description: 'The list or string to test.', sample: '[1, 2, 3]' },
+      suffix: {
+        description: 'The run of elements that must end the collection.',
+        sample: '[2, 3]',
+      },
+    },
     evaluate: ([xs, suffix], { engine: ce }) => {
       // This is the member that needs the subject's LENGTH, since it inspects
       // the tail. `sequenceSearchOperands` supplies it: it admits only finite
@@ -20384,7 +20848,14 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // `IndexOf`): with the wider `collection<T>` a set reached the handler and
     // answered `0` whatever the predicate.
     signature:
-      '(indexed_collection<T>, predicate: (T) any -> boolean) -> integer where T',
+      '(xs: indexed_collection<T>, predicate: (T) any -> boolean) -> integer where T',
+    parameters: {
+      xs: { description: 'The collection to search.', sample: '[1, 4, 9, 16]' },
+      predicate: {
+        description: 'The test applied to each element, in order.',
+        sample: 'x => x > 5',
+      },
+    },
     canonical: (ops, { engine }) =>
       canonicalFunctionSlot(engine, 'IndexWhere', ops, 1, PER_ELEMENT_SUPPLY),
     evaluate: ([xs, fn], { engine: ce }) => {
@@ -20450,7 +20921,17 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // first). A literal set is refused when the call is boxed, a set held by
     // a symbol of a wider declared type by `evaluate`.
     signature:
-      '(indexed_collection<T>, predicate: (T) any -> boolean) -> any where T: any',
+      '(xs: indexed_collection<T>, predicate: (T) any -> boolean) -> any where T: any',
+    parameters: {
+      xs: {
+        description: 'The collection to search, from its first element.',
+        sample: '[1, 4, 9, 16]',
+      },
+      predicate: {
+        description: 'The test that the element found passes.',
+        sample: 'x => x > 5',
+      },
+    },
     canonical: (ops, { engine }) =>
       canonicalFunctionSlot(engine, 'Find', ops, 1, PER_ELEMENT_SUPPLY),
     // Returns a single element, or the absent value of the element domain
@@ -20500,7 +20981,17 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // `(T)` contextually types an inline literal there, and the `any` effect
     // slot keeps effectful predicates admitted. The result type is unchanged.
     signature:
-      '(collection<T>, predicate: (T) any -> boolean) -> integer where T',
+      '(xs: collection<T>, predicate: (T) any -> boolean) -> integer where T',
+    parameters: {
+      xs: {
+        description: 'The collection whose elements are counted.',
+        sample: '[1, 4, 9, 16]',
+      },
+      predicate: {
+        description: 'The test that each counted element passes.',
+        sample: 'x => x > 5',
+      },
+    },
     canonical: (ops, { engine }) =>
       canonicalFunctionSlot(engine, 'CountIf', ops, 1, PER_ELEMENT_SUPPLY),
     evaluate: ([xs, fn], { engine: ce }) =>
@@ -20533,7 +21024,15 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // evaluation threw.
     threadsConditionals: true,
     signature:
-      '(indexed_collection<T>, predicate: (T) any -> boolean) -> list<integer> where T: any',
+      '(xs: indexed_collection<T>, predicate: (T) any -> boolean) -> list<integer> where T: any',
+    parameters: {
+      xs: { description: 'The collection to search.', sample: '[1, 4, 9, 16]' },
+      predicate: {
+        description:
+          'The test applied to each element; the 1-based index of each element that passes it is in the result.',
+        sample: 'x => x > 5',
+      },
+    },
     canonical: (ops, { engine }) =>
       canonicalFunctionSlot(engine, 'Position', ops, 1, PER_ELEMENT_SUPPLY),
     evaluate: ([xs, fn], { engine: ce }) =>
@@ -20562,7 +21061,15 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // `Set` of restricted cells.
     threadsConditionals: true,
     signature:
-      '(indexed_collection<T>, order: (((T) any -> unknown) | ((any, any) any -> number | boolean))?) -> list<integer> where T: any',
+      '(xs: indexed_collection<T>, order: (((T) any -> unknown) | ((any, any) any -> number | boolean))?) -> list<integer> where T: any',
+    parameters: {
+      xs: { description: 'The collection to sort.', sample: '[30, 10, 20]' },
+      order: {
+        description:
+          'A key function of one element, or a comparison of two elements (true or a negative number when the first comes first); by default the elements in ascending order.',
+        sample: 'x => -x',
+      },
+    },
     canonical: (ops, { engine }) =>
       canonicalFunctionSlot(engine, 'Ordering', ops, 1, SORT_SUPPLY),
     // Provable declines only (finite, walkable source required); success is
@@ -20610,6 +21117,20 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     threadsConditionals: true,
     signature:
       '((T, order: (((character) any -> unknown) | ((character, character) any -> number | boolean))?) -> T where T: string) & ((indexed_collection<T>, order: (((T) any -> unknown) | ((any, any) any -> number | boolean))?) -> list<T> where T: any)',
+    // By position: a name on the first slot would break the positional-only
+    // case of `named-arguments.test.ts`, which is built on it.
+    parameters: [
+      {
+        description:
+          'The collection to sort; a string gives the string of its characters in order.',
+        sample: '[3, 1, 2]',
+      },
+      {
+        description:
+          'A key function of one element, whose values are sorted in ascending order, or a comparison of two elements that returns `True` or a negative number when the first goes first; by default, ascending order.',
+        sample: 'x => -x',
+      },
+    ],
     canonical: (ops, { engine }) =>
       canonicalFunctionSlot(engine, 'Sort', ops, 1, SORT_SUPPLY),
     // Provable declines only (finite, walkable source required); success is
@@ -20643,7 +21164,19 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // was not an indexed collection, and a list result materialized as a
     // `Set` of restricted cells.
     threadsConditionals: true,
-    signature: '(collection<T>, key: (T) any -> unknown) -> value where T',
+    signature: '(xs: collection<T>, key: (T) any -> unknown) -> value where T',
+    parameters: {
+      xs: {
+        description:
+          'The collection to search; the call stays unevaluated when it is empty or infinite.',
+        sample: '["pear", "fig", "apple"]',
+      },
+      key: {
+        description:
+          'The function of one element whose largest value selects the element; the first such element wins a tie.',
+        sample: 'x => length(x)',
+      },
+    },
     canonical: (ops, { engine }) => {
       const collection = checkCollectionOperand(engine, ops[0]);
       // The call declines when the source is not a collection, so the
@@ -20683,7 +21216,19 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // was not an indexed collection, and a list result materialized as a
     // `Set` of restricted cells.
     threadsConditionals: true,
-    signature: '(collection<T>, key: (T) any -> unknown) -> value where T',
+    signature: '(xs: collection<T>, key: (T) any -> unknown) -> value where T',
+    parameters: {
+      xs: {
+        description:
+          'The collection to search; the call stays unevaluated when it is empty or infinite.',
+        sample: '["pear", "fig", "apple"]',
+      },
+      key: {
+        description:
+          'The function of one element whose smallest value selects the element; the first such element wins a tie.',
+        sample: 'x => length(x)',
+      },
+    },
     canonical: (ops, { engine }) => {
       const collection = checkCollectionOperand(engine, ops[0]);
       // The call declines when the source is not a collection, so the
@@ -20717,7 +21262,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
   ArgMax: {
     examples: ['ArgMax([3, 9, 2])'],
     description:
-      'Return the 1-based index of the element that maximizes the given key function (or the element itself when no key is given).',
+      'Return the 1-based index of the element that maximizes the given key function (or of the largest element when no key is given); of several such elements, the first.',
     complexity: 8200,
     lazy: true,
     // A restricted collection, `[1,2]{c}`, is ONE held restriction over the list
@@ -20726,7 +21271,19 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // fails. The key function is not threaded: it is not a value.
     threadsConditionals: [0],
     signature:
-      '(indexed_collection<T>, key: ((T) any -> unknown)?) -> integer where T',
+      '(xs: indexed_collection<T>, key: ((T) any -> unknown)?) -> integer where T',
+    parameters: {
+      xs: {
+        description:
+          'The collection to search; an empty collection leaves the call unevaluated.',
+        sample: '[3, 9, 2]',
+      },
+      key: {
+        description:
+          'The function whose values are compared; without it, the elements themselves are compared.',
+        sample: 'x => x^2',
+      },
+    },
     canonical: (ops, { engine }) => {
       // Optimization form `ArgMax(f, domain)` (Wolfram/Fungrim convention:
       // the locations maximizing f over a set). The engine does not evaluate
@@ -20763,7 +21320,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
   ArgMin: {
     examples: ['ArgMin([3, 9, 2])'],
     description:
-      'Return the 1-based index of the element that minimizes the given key function (or the element itself when no key is given).',
+      'Return the 1-based index of the element that minimizes the given key function (or of the smallest element when no key is given); of several such elements, the first.',
     complexity: 8200,
     lazy: true,
     // A restricted collection, `[1,2]{c}`, is ONE held restriction over the list
@@ -20772,7 +21329,19 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // fails. The key function is not threaded: it is not a value.
     threadsConditionals: [0],
     signature:
-      '(indexed_collection<T>, key: ((T) any -> unknown)?) -> integer where T',
+      '(xs: indexed_collection<T>, key: ((T) any -> unknown)?) -> integer where T',
+    parameters: {
+      xs: {
+        description:
+          'The collection to search; an empty collection leaves the call unevaluated.',
+        sample: '[3, 9, 2]',
+      },
+      key: {
+        description:
+          'The function whose values are compared; without it, the elements themselves are compared.',
+        sample: 'x => x^2',
+      },
+    },
     canonical: (ops, { engine }) => {
       // Optimization form `ArgMin(f, domain)` — see the ArgMax note.
       const optForm = canonicalOptimumForm(engine, 'ArgMin', ops);
@@ -20843,6 +21412,12 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     threadsConditionals: true,
     signature:
       '((T) random -> T where T: string) & ((indexed_collection<T>) random -> list<T> where T: any)',
+    parameters: [
+      {
+        description: 'The collection or string to shuffle.',
+        sample: '"abcd"',
+      },
+    ],
     // Provable declines only, answered from the SOURCE's facets alone — an
     // IMPURE producer must never claim `true` (the `at()` materialize
     // fallback is pure-only, so a `true` would promise a walk the indexed
@@ -20939,6 +21514,18 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
 
     lazy: true,
     signature: '(generator: function, integer+) -> list',
+    parameters: [
+      {
+        description:
+          'The function, called with one 1-based index for each dimension.',
+        sample: 'i => i^2',
+      },
+      {
+        description:
+          'The size of one dimension, one argument for each dimension; a size less than 1 gives no element in that dimension.',
+        sample: '3',
+      },
+    ],
     // Tabulate is a LIST (ordered, `at`-addressable; `list<T>` since
     // 2026-09-29, it was `indexed_collection<T>`, which a symbol declared
     // `list` refused). Report the element type so it serializes as a list
@@ -21091,8 +21678,8 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
   Table: {
     examples: ['Table(i^2, (i, 1, 5))'],
     description: [
-      'An alias for `Tabulate` (the preferred name) that additionally accepts',
-      'Mathematica-style iterator specs, e.g. `Table(i^2, {i, n})` (`i` from',
+      'Return the list of the values of a function at each index of the given dimensions, as `Tabulate` (the preferred name) does.',
+      'It also accepts Mathematica-style iterator specs, e.g. `Table(i^2, {i, n})` (`i` from',
       '1 to `n`), `Table(i^2, {i, 1, n})` or `Table(i, {i, lo, hi, step})`,',
       'and the equivalent tuple spelling `Table(i^2, (i, 1, n))`.',
     ],
@@ -21103,6 +21690,18 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // handler can reinterpret them as iterator specs.
     lazy: true,
     signature: '(function, integer+) -> collection',
+    parameters: [
+      {
+        description:
+          'The function of the indices, or an expression in the index variables of the iterator specs.',
+        sample: 'i => i^2',
+      },
+      {
+        description:
+          'The size of one dimension, or an iterator spec `(i, n)`, `(i, lo, hi)` or `(i, lo, hi, step)`.',
+        sample: '5',
+      },
+    ],
     canonical: (ops, { engine: ce }) => {
       const specs = ops.slice(1);
 
@@ -21211,6 +21810,13 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // `Set` of restricted cells.
     threadsConditionals: true,
     signature: '(collection<T>) -> tuple<list<T>, list<integer>> where T',
+    parameters: [
+      {
+        description:
+          'The collection whose elements are counted; equal elements are counted together.',
+        sample: '["a", "b", "a"]',
+      },
+    ],
     // Provable declines only (finite, walkable source required); success is
     // not cheaply decidable, so never `true` — see `canEnumerateFiniteSource`.
     canEnumerate: canEnumerateFiniteSource,
@@ -21251,7 +21857,19 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // `DeleteDuplicates[list, test]`): an element is dropped when the test
     // holds between an earlier kept element and it.
     signature:
-      '((T) -> T where T: string) & ((T, test: (character, character) any -> boolean) -> T where T: string) & ((collection<T>) -> list<T> where T: any) & ((collection<T>, test: (T, T) any -> boolean) -> list<T> where T: any)',
+      '((xs: T) -> T where T: string) & ((xs: T, test: (character, character) any -> boolean) -> T where T: string) & ((xs: collection<T>) -> list<T> where T: any) & ((xs: collection<T>, test: (T, T) any -> boolean) -> list<T> where T: any)',
+    parameters: {
+      xs: {
+        description:
+          'The collection; the first occurrence of each element is kept, and a string gives a string.',
+        sample: '[1, 2, 1, 3]',
+      },
+      test: {
+        description:
+          'A function of two elements that returns `True` when they count as the same; by default, two elements are the same when they are equal.',
+        sample: '(a, b) => abs(a) == abs(b)',
+      },
+    },
     // Provable declines only (finite, walkable source required); success is
     // not cheaply decidable, so never `true` — see `canEnumerateFiniteSource`.
     canEnumerate: canEnumerateFiniteSource,
@@ -21297,6 +21915,12 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // `Set` of restricted cells.
     threadsConditionals: true,
     signature: '(collection<any>) -> collection',
+    parameters: [
+      {
+        description: 'The collection or string to collapse.',
+        sample: '[1, 1, 2, 2, 1]',
+      },
+    ],
     // Preserve the source's element type / indexed-ness (mirrors TakeWhile),
     // but not a length the source type states (`dedupResultType`).
     type: (ops, context) =>
@@ -21487,8 +22111,8 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       'Partition([1, 2, 3, 4, 5], x => x % 2 == 0)',
     ],
     description: [
-      'Partition a collection into consecutive chunks each of size `n`; the trailing chunk may be shorter when `n` does not divide the length.',
-      'With a third argument `step`, produce sliding windows of length `n` whose starts are `step` apart, keeping only complete windows.',
+      'Partition a collection into consecutive chunks each of size `count`; the trailing chunk may be shorter when `count` does not divide the length.',
+      'With a third argument `step`, produce sliding windows of length `count` whose starts are `step` apart, keeping only complete windows.',
       'With a predicate function instead of an integer, split into two groups: elements for which the predicate is true, and those for which it is false.',
       'Asymmetry: with no `step`, the trailing partial chunk is included; with an explicit `step`, only complete windows are returned.',
       'See `Chunk` for splitting into a given number of nearly-equal groups.',
@@ -21529,7 +22153,23 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // `[[3, 1], [5]]`. A literal set is refused when the call is boxed, a set
     // held by a symbol of a wider declared type by `evaluate`.
     signature:
-      '(indexed_collection<T>, integer | ((T) any -> boolean), integer?) -> list<list<T>> where T: any',
+      '(xs: indexed_collection<T>, count: integer | ((T) any -> boolean), step: integer?) -> list<list<T>> where T: any',
+    parameters: {
+      xs: {
+        description: 'The collection or string to split.',
+        sample: '[1, 2, 3, 4, 5]',
+      },
+      count: {
+        description:
+          'The number of elements of each chunk, at least 1; or a predicate that splits the elements into those that pass it and those that do not.',
+        sample: '2',
+      },
+      step: {
+        description:
+          'The distance between the starts of two windows of `count` elements, at least 1; only complete windows are kept.',
+        sample: '1',
+      },
+    },
     // The string rule, and it covers BOTH forms: a chunk, a window and a
     // predicate group are each made of the source's own characters, so each is
     // itself a string and `Partition("abcd", 2)` is `["ab","cd"]` (ruling
@@ -21594,7 +22234,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
   Chunk: {
     examples: ['Chunk([1, 2, 3, 4, 5, 6], 3)'],
     description:
-      'Split the collection into `k` nearly equal-sized groups. See `Partition` for splitting into fixed-size chunks.',
+      'Return the collection split into `count` groups of consecutive elements. See `Partition` for splitting into fixed-size chunks.',
     complexity: 8200,
     // The LEADING arm is the string rule: each group is a contiguous run of
     // the source's own characters, so it is itself a string and
@@ -21619,7 +22259,18 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // `[[3, 1], [5]]`). A literal set is refused when the call is boxed, a
     // set held by a symbol of a wider declared type by `evaluate`.
     signature:
-      '((S, integer) -> list<string> where S: string) & ((indexed_collection, integer) -> list<list>)',
+      '((xs: S, count: integer) -> list<string> where S: string) & ((xs: indexed_collection, count: integer) -> list<list>)',
+    parameters: {
+      xs: {
+        description: 'The list or string to split.',
+        sample: '[1, 2, 3, 4, 5, 6]',
+      },
+      count: {
+        description:
+          'The number of groups, at least 1; each group has ⌈length / count⌉ elements except the last ones, which can be shorter or empty.',
+        sample: '3',
+      },
+    },
     // A group keeps the cells of the source as they are, absent ones
     // included (`Chunk([1, Missing, 3], 2)` is `[[1, Missing], [3]]`), so a
     // group of a list source has the element type of the source:
@@ -21732,7 +22383,18 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // the runs held the restricted cells of the list.
     threadsConditionals: true,
     signature:
-      '((S, key: (character) any -> unknown) -> list<string> where S: string) & ((indexed_collection<T>, key: (T) any -> unknown) -> list<list<T>> where T: any)',
+      '((xs: S, key: (character) any -> unknown) -> list<string> where S: string) & ((xs: indexed_collection<T>, key: (T) any -> unknown) -> list<list<T>> where T: any)',
+    parameters: {
+      xs: {
+        description: 'The list or string to split.',
+        sample: '[1, 3, 2, 4, 5]',
+      },
+      key: {
+        description:
+          'The function of each element; a new run starts where its value changes.',
+        sample: 'x => x % 2',
+      },
+    },
     canonical: (ops, { engine }) =>
       canonicalFunctionSlot(engine, 'ChunkBy', ops, 1, PER_ELEMENT_SUPPLY),
     evaluate: ([xs, fn], { engine: ce }) =>
@@ -21882,7 +22544,18 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // `Set` of restricted cells.
     threadsConditionals: true,
     signature:
-      '(collection<T>, key: (T) any -> unknown) -> dictionary<list> where T',
+      '(xs: collection<T>, key: (T) any -> unknown) -> dictionary<list> where T',
+    parameters: {
+      xs: {
+        description: 'The collection to group.',
+        sample: '[1, 2, 3, 4, 5]',
+      },
+      key: {
+        description:
+          'The function whose value names the group of an element; the keys of the dictionary are its values as strings.',
+        sample: 'x => x % 2',
+      },
+    },
     // A group keeps the elements of the source as they are, absent ones
     // included, so a group of a list or a set source is a list of the
     // element type of the source: `GroupBy(xs, f)` with `xs` a
@@ -21925,6 +22598,13 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // `Set` of restricted cells.
     threadsConditionals: true,
     signature: '(indexed_collection<any>+) -> list',
+    parameters: [
+      {
+        description:
+          'A collection, one for each coordinate of the tuples; the shortest collection sets the length of the result.',
+        sample: '[1, 2, 3]',
+      },
+    ],
     // Each element is a tuple of one element from every source, so the
     // result is `list<tuple<e₁, …, eₙ>>`. The precise type is what lets a
     // destructuring `for (a, b) in Zip(xs, ys)` prove its elements are pairs.
@@ -22047,7 +22727,19 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // accumulator such as `(integer, integer) -> integer`, `acc: never` is
     // uncallable). The primitive is shape-top and effect-top, which is the
     // honest statement of what is checkable here.
-    signature: '(function, initial: any?) -> list',
+    signature: '(f: function, initial: any?) -> list',
+    parameters: {
+      f: {
+        description:
+          'The function that computes each element from its 1-based index and the previous element, or from the previous element alone when it takes one argument.',
+        sample: 'x => 2x',
+      },
+      initial: {
+        description:
+          'The value before the first element, `Nothing` by default.',
+        sample: '1',
+      },
+    },
     // Every element is an answer of the function. So when a user function or
     // a symbol declared with a function type names the function, and its call
     // typed on the type of the initial value gives a type that a further call
@@ -22187,6 +22879,18 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // its own (`Repeat(Random(), 3)`) still makes the call impure.
     invokes: false,
     signature: '(value: any, count: integer?) -> list',
+    parameters: {
+      value: {
+        description:
+          'The value to repeat; a value that is not pure is evaluated again for each element.',
+        sample: '0',
+      },
+      count: {
+        description:
+          'The number of copies, 0 or less for an empty list; without it the sequence is infinite.',
+        sample: '3',
+      },
+    },
     // Every element is the repeated value, so the result is `list<T>` where
     // `T` is the type of the value, widened as a list literal widens its
     // elements (`Repeat(1, 3)` is `list<integer>`, like `[1, 1, 1]`). A
@@ -22386,6 +23090,12 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // `Set` of restricted cells.
     threadsConditionals: true,
     signature: '(list<any>) -> list',
+    parameters: [
+      {
+        description: 'The list to repeat; an empty list gives an empty list.',
+        sample: '[1, 2]',
+      },
+    ],
     // The cycle repeats the cells of the source as they are, absent ones
     // included, so it has the element type of the source: `Cycle(xs)` with
     // `xs` a `list<integer>` is a `list<integer>` (`cellsResultType`).
@@ -22475,6 +23185,13 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // An absent collection answers `Missing` — see `SetFrom`.
     missingBehavior: 'propagate',
     signature: '(value*) -> list',
+    parameters: [
+      {
+        description:
+          'A collection whose elements are added to the list in order, or another value that is added as one element.',
+        sample: '[1, 2]',
+      },
+    ],
     type: (ops, context) => {
       if (ops.length === 0)
         return BoxedType.forResult('list', context.engine._typeResolver);
@@ -22558,6 +23275,13 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // policy does not read as a collection.
     missingBehavior: 'propagate',
     signature: '(value*) -> set',
+    parameters: [
+      {
+        description:
+          'A collection whose elements go into the set, or a value that is not a collection, which goes into the set as an element.',
+        sample: '[1, 2, 2, 3]',
+      },
+    ],
     type: (ops, context) => {
       if (ops.length === 0)
         return BoxedType.forResult('set', context.engine._typeResolver);
@@ -22612,6 +23336,13 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // An absent collection answers `Missing` — see `SetFrom`.
     missingBehavior: 'propagate',
     signature: '(value*) -> tuple',
+    parameters: [
+      {
+        description:
+          'A collection whose elements go into the tuple in order, or a value that is not a collection, which goes into the tuple as an element.',
+        sample: '[1, 2, 3]',
+      },
+    ],
     // The component types, when the operand types determine them
     // (`tupleFromComponentTypes`): `TupleFrom([1, 2, 3])` is a
     // `tuple<integer, integer, integer>`.
@@ -22667,6 +23398,13 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // `Set` of restricted cells.
     threadsConditionals: true,
     signature: '(collection<any>) -> dictionary',
+    parameters: [
+      {
+        description:
+          'The (key, value) pairs; a later pair with the same key replaces an earlier one.',
+        sample: '[("a", 1), ("b", 2)]',
+      },
+    ],
     // The declared result, the bare `dictionary`, also admits absent values,
     // but leaves their type open. An absent value of a pair is a value of the
     // result as it is (`DictionaryFrom([("a", Missing)])` is

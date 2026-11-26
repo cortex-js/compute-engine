@@ -16,7 +16,8 @@
 // - A generated entry per definition: the Epsil spelling as the heading
 //   (the MathJSON name when the definition has no spelling), the MathJSON
 //   name, the signature in the engine's type syntax (or the kind, type and
-//   value of a constant), every paragraph of the description, and each
+//   value of a constant), the documented parameters (`parameterList()`),
+//   every paragraph of the description, and each
 //   example from the definition's `examples` field as an executed
 //   `// ➔`-annotated block (`library-docs-shared.ts` has the rules).
 //
@@ -27,6 +28,11 @@ import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 
 import { ComputeEngine } from '../src/compute-engine/index.js';
 import type { DocEntry } from '../src/cli/doc.js';
+import { signatureArms } from '../src/common/type/utils.js';
+import {
+  mergeParameterDocs,
+  type ParameterDoc,
+} from '../src/epsil/doc-tags.js';
 import {
   assertBalancedBackticks,
   exampleBlock,
@@ -79,13 +85,91 @@ function paragraphs(description: readonly string[]): string[] {
   return result;
 }
 
-function entrySection(row: Row, page: string): string {
+/** One parameter of a signature: its name, or its position (from 0) when
+ * it has none, with its documentation by name merged with the entry at its
+ * position of a `parameters` list, as the editor merges them
+ * (`parameterDocAt()` in `src/epsil/completion.ts`). */
+type Slot = { label: string; named: boolean; doc: ParameterDoc | undefined };
+
+/** The parameters of the arms of an operator's signature, each once: a
+ * named parameter by its name, a parameter with no name by its position. A
+ * rest parameter is the slot after the others, and documents every argument
+ * from that position on (`arguments 2, …`). */
+function parameterSlots(entry: DocEntry): Slot[] {
+  const def = engine.lookupDefinition(entry.id);
+  if (def === undefined || !('operator' in def)) return [];
+  const type = def.operator.signature?.type;
+  const arms = typeof type === 'object' ? signatureArms(type) : undefined;
+  const slots = new Map<string, Slot>();
+  for (const arm of arms ?? []) {
+    const params = [
+      ...(arm.args ?? []),
+      ...(arm.optArgs ?? []),
+      ...(arm.variadicArg ? [arm.variadicArg] : []),
+    ];
+    params.forEach((param, i) => {
+      const key = param.name ?? `#${i}`;
+      const rest = arm.variadicArg !== undefined && i === params.length - 1;
+      if (slots.has(key)) return;
+      const doc = mergeParameterDocs(
+        param.name === undefined ? undefined : entry.parameters?.[param.name],
+        entry.positionalParameters?.[i]
+      );
+      slots.set(key, {
+        label:
+          param.name ?? (rest ? `arguments ${i + 1}, …` : `argument ${i + 1}`),
+        named: param.name !== undefined,
+        doc: doc?.documentation || doc?.sample || doc?.keys ? doc : undefined,
+      });
+    });
+  }
+  return [...slots.values()];
+}
+
+/** The documented parameters of an entry, a list under its signature: the
+ * name or the position of each, its description, its sample, and the keys
+ * of an options dictionary. Empty when no parameter is documented. */
+function parameterList(slots: readonly Slot[]): string[] {
+  const lines: string[] = [];
+  for (const { label, named, doc } of slots) {
+    if (doc === undefined) continue;
+    const name = named ? `\`${label}\`` : label;
+    let line = `- ${name}`;
+    if (doc.documentation) line += ` — ${mdx(doc.documentation, false)}`;
+    if (doc.sample) line += ` Sample: \`${doc.sample}\`.`;
+    lines.push(line);
+    for (const key of doc.keys ?? []) {
+      let keyLine = `  - \`${key.name}\``;
+      if (key.type) keyLine += ` (\`${key.type}\`)`;
+      if (key.documentation) keyLine += ` — ${mdx(key.documentation, false)}`;
+      if (key.sample) keyLine += ` Sample: \`${key.sample}\`.`;
+      if (key.default) keyLine += ` Default: \`${key.default}\`.`;
+      lines.push(keyLine);
+    }
+  }
+  return lines;
+}
+
+let undocumentedParameters = 0;
+let parameterCount = 0;
+
+function entrySection(row: Row, page: string, counts: number[]): string {
   const { entry } = row;
   const lines: string[] = [
     `### ${heading(entry)}`,
     '',
     assertBalancedBackticks(headline(entry), entry.id, page),
   ];
+  const slots = parameterSlots(entry);
+  const missing = slots.filter((s) => s.doc === undefined).length;
+  counts[0] += slots.length;
+  counts[1] += missing;
+  const list = parameterList(slots);
+  if (list.length > 0)
+    lines.push(
+      '',
+      ...list.map((l) => assertBalancedBackticks(l, entry.id, page))
+    );
   for (const paragraph of paragraphs(entry.description ?? [])) {
     lines.push(
       '',
@@ -112,14 +196,17 @@ const perCategory: string[] = [];
 
 for (const section of sections) {
   const page = `reference/${section.name}.md`;
-  const entries = section.rows.map((row) => entrySection(row, page));
+  const counts = [0, 0];
+  const entries = section.rows.map((row) => entrySection(row, page, counts));
+  parameterCount += counts[0];
+  undocumentedParameters += counts[1];
   exampleCount += section.rows.reduce((n, r) => n + r.examples.length, 0);
   const withoutExamples = section.rows.filter(
     (r) => r.examples.length === 0
   ).length;
   missingExamples += withoutExamples;
   perCategory.push(
-    `${section.name}: ${section.rows.length} definitions, ${withoutExamples} without an example`
+    `${section.name}: ${section.rows.length} definitions, ${withoutExamples} without an example, ${counts[1]} of ${counts[0]} parameters undocumented`
   );
 
   const description = `The ${section.title.toLowerCase()} library of Epsil: every definition with its Epsil spelling, MathJSON name, signature, and full description.`;
@@ -155,6 +242,6 @@ ${entries.join('\n\n')}
 
 const total = sections.reduce((n, s) => n + s.rows.length, 0);
 console.log(
-  `reference/: ${sections.length} pages, ${total} definitions, ${exampleCount} examples, ${missingExamples} definitions without an example, written to src/epsil/docs/reference/`
+  `reference/: ${sections.length} pages, ${total} definitions, ${exampleCount} examples, ${missingExamples} definitions without an example, ${undocumentedParameters} of ${parameterCount} parameters undocumented, written to src/epsil/docs/reference/`
 );
 for (const line of perCategory) console.log(`  ${line}`);

@@ -310,7 +310,14 @@ function marks(
   signature: EpsilSignatureHelp['signatures'][number] | undefined
 ): Record<string, unknown>[] | undefined {
   return signature?.parameters.map(
-    ({ name: _name, type: _type, range: _range, ...rest }) => rest
+    ({
+      name: _name,
+      type: _type,
+      range: _range,
+      documentation: _documentation,
+      sample: _sample,
+      ...rest
+    }) => rest
   );
 }
 

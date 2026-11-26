@@ -565,7 +565,7 @@ conforms("abc", "Copyable")
 
 `(symbol, type: (string | symbol)?, value: any?, attributes: dictionary<any>?) scope -> any`
 
-Declare a symbol in the current scope, optionally assigning a type and an initial value. An optional trailing attributes dictionary (with keys `type`, `value`, `constant` and `holdUntil`) can further describe the definition, e.g. to declare a constant. With a value, evaluates to that value; otherwise evaluates to `Nothing`.
+Declare a symbol in the current scope, optionally assigning a type and an initial value. An optional trailing attributes dictionary (with keys `type`, `value`, `constant` and `holdUntil`) can further describe the definition, e.g. to declare a constant. Another key in that dictionary is the error `invalid-declaration-attribute`: a dictionary given as the initial value is the `value` attribute, or is followed by an attributes dictionary. With a value, evaluates to that value; otherwise evaluates to `Nothing`.
 
 ```epsil
 let x: integer = 5

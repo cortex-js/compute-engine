@@ -1127,6 +1127,17 @@ export const SETS_LIBRARY: SymbolDefinitions = {
     // collection, so it answers the marker of a boolean codomain, `Missing`.
     missingBehavior: 'propagate',
     signature: '(any, any*) -> boolean',
+    parameters: [
+      {
+        description: 'The collection tested as a strict subset.',
+        sample: '{1, 2}',
+      },
+      {
+        description:
+          'A collection that strictly contains the collection before it; with more than two arguments, each argument is tested against the next.',
+        sample: '{1, 2, 3}',
+      },
+    ],
     description:
       'Test whether the first collection is a strict subset of the second.',
     canonical: (args, { engine: ce }) =>
@@ -1149,6 +1160,14 @@ export const SETS_LIBRARY: SymbolDefinitions = {
     // collection, so it answers the marker of a boolean codomain, `Missing`.
     missingBehavior: 'propagate',
     signature: '(any, any*) -> boolean',
+    parameters: [
+      { description: 'The collection tested as a subset.', sample: '{1, 2}' },
+      {
+        description:
+          'A collection that contains the collection before it; with more than two arguments, each argument is tested against the next.',
+        sample: '{1, 2, 3}',
+      },
+    ],
     description:
       'Test whether the first collection is a subset (possibly equal) of the second.',
     canonical: (args, { engine: ce }) =>
@@ -1188,6 +1207,17 @@ export const SETS_LIBRARY: SymbolDefinitions = {
     // collection, so it answers the marker of a boolean codomain, `Missing`.
     missingBehavior: 'propagate',
     signature: '(any, any*) -> boolean',
+    parameters: [
+      {
+        description: 'The collection tested as a strict superset.',
+        sample: '{1, 2, 3}',
+      },
+      {
+        description:
+          'A collection that the collection before it strictly contains; with more than two arguments, each argument is tested against the next.',
+        sample: '{1, 2}',
+      },
+    ],
     description:
       'Test whether the first collection is a strict superset of the second.',
     canonical: (args, { engine: ce }) =>
@@ -1210,6 +1240,17 @@ export const SETS_LIBRARY: SymbolDefinitions = {
     // collection, so it answers the marker of a boolean codomain, `Missing`.
     missingBehavior: 'propagate',
     signature: '(any, any*) -> boolean',
+    parameters: [
+      {
+        description: 'The collection tested as a superset.',
+        sample: '{1, 2, 3}',
+      },
+      {
+        description:
+          'A collection that the collection before it contains; with more than two arguments, each argument is tested against the next.',
+        sample: '{1, 2}',
+      },
+    ],
     description:
       'Test whether the first collection is a superset (possibly equal) of the second.',
     canonical: (args, { engine: ce }) =>
@@ -1304,6 +1345,14 @@ export const SETS_LIBRARY: SymbolDefinitions = {
     // undeclared free variable, and a narrower parameter type would INFER a
     // declaration for it (`\Z[x]` retyping `x` for the engine's lifetime).
     signature: '(set<any>, any+) -> set',
+    parameters: [
+      { description: 'The base ring.', sample: 'integers' },
+      {
+        description:
+          'An element adjoined to the ring: an algebraic number, or a symbol for an indeterminate.',
+        sample: 'sqrt(2)',
+      },
+    ],
     type: (ops, context) =>
       BoxedType.forResult(adjoinType(ops), context.engine._typeResolver),
   },
@@ -1331,6 +1380,18 @@ export const SETS_LIBRARY: SymbolDefinitions = {
     // `any` for the modulus: see the note on `Adjoin` — a narrower parameter
     // type would infer a declaration for a free `n`/`p`.
     signature: '(set<any>, any) -> set',
+    parameters: [
+      {
+        description:
+          'The ring; only `Integers` gives a finite collection, another ring stays inert.',
+        sample: 'integers',
+      },
+      {
+        description:
+          'The generator of the ideal, the modulus `n` for `Integers`.',
+        sample: '5',
+      },
+    ],
     type: (ops, context) =>
       BoxedType.forResult(quotientRingType(ops), context.engine._typeResolver),
     collection: {
@@ -1411,7 +1472,18 @@ export const SETS_LIBRARY: SymbolDefinitions = {
     // `QuotientRing` does, and a free `k` or `n` is not inferred an integer.
     // A fraction `k` with a unit denominator reads as `u · v⁻¹`, so
     // `ResidueClass(1/3, 7)` is `ResidueClass(5, 7)`.
-    signature: '(any, any) -> residue',
+    signature: '(k: any, n: any) -> residue',
+    parameters: {
+      k: {
+        description:
+          'The representative of the class, an exact integer or a rational whose denominator is a unit mod `n`.',
+        sample: '7',
+      },
+      n: {
+        description: 'The modulus, an exact integer literal ≥ 1.',
+        sample: '5',
+      },
+    },
     // A class is a value of a VALUE KIND: this registers `residue` as a kind
     // type in every engine, which is what the recognition of a class reads
     // (`holdsKindValue()`, `residue-class.ts`). The hooks are the residue
@@ -1460,6 +1532,13 @@ export const SETS_LIBRARY: SymbolDefinitions = {
     // the subsequent sets
     wikidata: 'Q242767',
     signature: '(set<any>+) -> set',
+    parameters: [
+      {
+        description:
+          'The sets: the first one, then the sets whose elements are removed from it.',
+        sample: '{1, 2, 3, 4}',
+      },
+    ],
     type: (ops, context) => setOperationResultType(ops, 'first', context),
     description:
       'Return the elements of the first set that are not in any of the subsequent sets.',
@@ -1507,6 +1586,13 @@ export const SETS_LIBRARY: SymbolDefinitions = {
     missingBehavior: 'propagate',
     threadsConditionals: true,
     signature: '(any+) -> set',
+    parameters: [
+      {
+        description:
+          'A set or another finite collection, whose duplicate elements count once.',
+        sample: '{1, 2, 3}',
+      },
+    ],
     type: (ops, context) => setOperationResultType(ops, 'first', context),
     description: 'Return the intersection of one or more collections as a set.',
     canonical: (args, { engine: ce }) => {
@@ -1560,6 +1646,13 @@ export const SETS_LIBRARY: SymbolDefinitions = {
     missingBehavior: 'propagate',
     threadsConditionals: true,
     signature: '(any+) -> set',
+    parameters: [
+      {
+        description:
+          'A collection whose elements go into the union; an element in several collections appears once.',
+        sample: '{1, 2}',
+      },
+    ],
     type: (ops, context) => setOperationResultType(ops, 'all', context),
     description: 'Return the union of two or more collections as a set.',
     canonical: (args, { engine: ce }) => {
@@ -1633,6 +1726,17 @@ export const SETS_LIBRARY: SymbolDefinitions = {
     missingStrip: [0],
     threadsConditionals: [0],
     signature: '(set<any>, value*) -> set',
+    parameters: [
+      {
+        description: 'The set to remove elements from.',
+        sample: '{1, 2, 3, 4}',
+      },
+      {
+        description:
+          'A value to remove, or a collection whose elements are removed; a string is removed as one value.',
+        sample: '2',
+      },
+    ],
     type: (ops, context) => setOperationResultType(ops, 'first', context),
     description:
       'Return the set difference between the first set and subsequent values.',
@@ -1690,6 +1794,14 @@ export const SETS_LIBRARY: SymbolDefinitions = {
     /* Corresponds to XOR in boolean logic */
     wikidata: 'Q1147242',
     signature: '(set<any>, set<any>) -> set',
+    parameters: [
+      { description: 'The first set.', sample: '{1, 2, 3}' },
+      {
+        description:
+          'The second set; the order of the two sets does not change the result.',
+        sample: '{2, 3, 4}',
+      },
+    ],
     type: (ops, context) => setOperationResultType(ops, 'all', context),
     description:
       'Return the symmetric difference of two sets (elements in either set but not both).',

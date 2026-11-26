@@ -92,16 +92,16 @@ describe('TYPE VARIABLES / collections — declared signatures', () => {
     // what is left after removing one of a string's own characters is a
     // string, so it gained a leading string-preserving arm.
     expect(sig(ce, 'DeleteAt')).toBe(
-      '((T, integer) -> T where T: string) & ((indexed_collection<T>, integer) -> list<T> where T: any) & ((dictionary<V>, string) -> dictionary<V> where V: any)'
+      '((xs: T, index: integer) -> T where T: string) & ((xs: indexed_collection<T>, index: integer) -> list<T> where T: any) & ((xs: dictionary<V>, key: string) -> dictionary<V> where V: any)'
     );
     // UNBOUNDED (the D4 audit's spelling). A bound on `T` would also
     // constrain the SOURCE collection's elements, since the same variable
     // stands for both — see the `list<function>` source pin below.
     expect(sig(ce, 'Insert')).toBe(
-      '(indexed_collection<T>, integer, T) -> list<T> where T: any'
+      '(xs: indexed_collection<T>, index: integer, element: T) -> list<T> where T: any'
     );
     expect(sig(ce, 'ReplaceAt')).toBe(
-      '((indexed_collection<T>, integer, T) -> list<T> where T: any) & ((indexed_collection<any>, integer, integer, any+) -> list<any>)'
+      '((xs: indexed_collection<T>, index: integer, element: T) -> list<T> where T: any) & ((xs: indexed_collection<any>, index: integer, integer, any+) -> list<any>)'
     );
     // The `order`/`key` slots stay the PRIMITIVE `function`, not an arrow: a
     // function-typed SYMBOL operand must still be admitted there. `Sort` and
@@ -116,7 +116,7 @@ describe('TYPE VARIABLES / collections — declared signatures', () => {
       '((T, order: (((character) any -> unknown) | ((character, character) any -> boolean | number))?) -> T where T: string) & ((indexed_collection<T>, order: (((T) any -> unknown) | ((any, any) any -> boolean | number))?) -> list<T> where T: any)'
     );
     expect(sig(ce, 'Unique')).toBe(
-      '((T) -> T where T: string) & ((T, test: (character, character) any -> boolean) -> T where T: string) & ((collection<T>) -> list<T> where T: any) & ((collection<T>, test: (T, T) any -> boolean) -> list<T> where T: any)'
+      '((xs: T) -> T where T: string) & ((xs: T, test: (character, character) any -> boolean) -> T where T: string) & ((xs: collection<T>) -> list<T> where T: any) & ((xs: collection<T>, test: (T, T) any -> boolean) -> list<T> where T: any)'
     );
     // Promoted with `DeleteAt` in Strings Phase 2: a permutation of a
     // string's own characters is a string. The `random` effect label sits on
@@ -143,12 +143,12 @@ describe('TYPE VARIABLES / collections — declared signatures', () => {
     // Design E E3: the predicate arm is an honest arrow (reduce order puts
     // the arrow arm first).
     expect(sig(ce, 'Partition')).toBe(
-      '(indexed_collection<T>, ((T) any -> boolean) | integer, integer?) -> list<list<T>> where T: any'
+      '(xs: indexed_collection<T>, count: ((T) any -> boolean) | integer, step: integer?) -> list<list<T>> where T: any'
     );
     // …and the DISPLAYED type is the same honest polytype (the R-D5
     // grounding projection retired with the constructor).
     expect(ce.box('Partition').type.toString()).toBe(
-      '(indexed_collection<T>, ((T) any -> boolean) | integer, integer?) -> list<list<T>> where T: any'
+      '(xs: indexed_collection<T>, count: ((T) any -> boolean) | integer, step: integer?) -> list<list<T>> where T: any'
     );
     // `ChunkBy`'s `key` slot is the PRIMITIVE `function`, not a contextual
     // callback, so it takes the leading string arm: a maximal run of a
@@ -159,7 +159,7 @@ describe('TYPE VARIABLES / collections — declared signatures', () => {
     // Design E E3: both arms carry honest key arrows (the string arm's
     // element type is `character`, a ground type).
     expect(sig(ce, 'ChunkBy')).toBe(
-      '((S, key: (character) any -> unknown) -> list<string> where S: string) & ((indexed_collection<T>, key: (T) any -> unknown) -> list<list<T>> where T: any)'
+      '((xs: S, key: (character) any -> unknown) -> list<string> where S: string) & ((xs: indexed_collection<T>, key: (T) any -> unknown) -> list<list<T>> where T: any)'
     );
   });
 });

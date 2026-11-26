@@ -310,6 +310,9 @@ category.
 
 MathJSON `Adjoin` · `(set<any>, any+) -> set`
 
+- argument 1 — The base ring. Sample: `integers`.
+- arguments 2, … — An element adjoined to the ring: an algebraic number, or a symbol for an indeterminate. Sample: `sqrt(2)`.
+
 The ring obtained by adjoining one or more elements to a base ring.
 
 `Adjoin(Integers, Sqrt(2))` is ℤ[√2]; `Adjoin(Integers, ["Complex", 0, 1])` is the Gaussian integers ℤ[i]; `Adjoin(Integers, "x")` is the polynomial ring ℤ[x].
@@ -323,7 +326,10 @@ adjoin(integers, sqrt(2))
 
 ### all
 
-MathJSON `All` · `(collection<T>, predicate: ((T) any -> boolean)?) -> boolean where T`
+MathJSON `All` · `(xs: collection<T>, predicate: ((T) any -> boolean)?) -> boolean where T`
+
+- `xs` — The collection to test; for an empty collection the result is True. Sample: `[2, 4, 6]`.
+- `predicate` — The test of each element; without it, each element must be True. Sample: `x => x > 1`.
 
 Return True if the predicate holds for every element of the collection (or if every element is True when no predicate is given).
 
@@ -334,7 +340,10 @@ all([2, 4, 6], x => x % 2 == 0)
 
 ### any
 
-MathJSON `Any` · `(collection<T>, predicate: ((T) any -> boolean)?) -> boolean where T`
+MathJSON `Any` · `(xs: collection<T>, predicate: ((T) any -> boolean)?) -> boolean where T`
+
+- `xs` — The collection to test; for an empty collection the result is False. Sample: `[1, 3, 4]`.
+- `predicate` — The test of each element; without it, an element must be True. Sample: `x => x > 1`.
 
 Return True if the predicate holds for at least one element of the collection (or if any element is True when no predicate is given).
 
@@ -349,7 +358,10 @@ any([1, 3, 4], x => x % 2 == 0)
 
 MathJSON `Append` · `(collection<any>, any+) -> collection`
 
-Add one or more elements to the end of a collection.
+- argument 1 — The collection to extend. Sample: `[1, 2]`.
+- arguments 2, … — An element to add, after the elements before it. Sample: `3`.
+
+Return the collection with one or more elements added at its end.
 
 ```epsil
 append([1, 2], 3, 4)
@@ -358,9 +370,12 @@ append([1, 2], 3, 4)
 
 ### argMax
 
-MathJSON `ArgMax` · `(indexed_collection<T>, key: ((T) any -> unknown)?) -> integer where T`
+MathJSON `ArgMax` · `(xs: indexed_collection<T>, key: ((T) any -> unknown)?) -> integer where T`
 
-Return the 1-based index of the element that maximizes the given key function (or the element itself when no key is given).
+- `xs` — The collection to search; an empty collection leaves the call unevaluated. Sample: `[3, 9, 2]`.
+- `key` — The function whose values are compared; without it, the elements themselves are compared. Sample: `x => x^2`.
+
+Return the 1-based index of the element that maximizes the given key function (or of the largest element when no key is given); of several such elements, the first.
 
 ```epsil
 argMax([3, 9, 2])
@@ -369,9 +384,12 @@ argMax([3, 9, 2])
 
 ### argMin
 
-MathJSON `ArgMin` · `(indexed_collection<T>, key: ((T) any -> unknown)?) -> integer where T`
+MathJSON `ArgMin` · `(xs: indexed_collection<T>, key: ((T) any -> unknown)?) -> integer where T`
 
-Return the 1-based index of the element that minimizes the given key function (or the element itself when no key is given).
+- `xs` — The collection to search; an empty collection leaves the call unevaluated. Sample: `[3, 9, 2]`.
+- `key` — The function whose values are compared; without it, the elements themselves are compared. Sample: `x => x^2`.
+
+Return the 1-based index of the element that minimizes the given key function (or of the smallest element when no key is given); of several such elements, the first.
 
 ```epsil
 argMin([3, 9, 2])
@@ -408,9 +426,12 @@ An index that is provably not an integer (`2.5`, `3/2`, `5 + √17`), as a scala
 
 ### chunk
 
-MathJSON `Chunk` · `((S, integer) -> list<string> where S: string) & ((indexed_collection, integer) -> list<list>)`
+MathJSON `Chunk` · `((xs: S, count: integer) -> list<string> where S: string) & ((xs: indexed_collection, count: integer) -> list<list>)`
 
-Split the collection into `k` nearly equal-sized groups. See `Partition` for splitting into fixed-size chunks.
+- `xs` — The list or string to split. Sample: `[1, 2, 3, 4, 5, 6]`.
+- `count` — The number of groups, at least 1; each group has ⌈length / count⌉ elements except the last ones, which can be shorter or empty. Sample: `3`.
+
+Return the collection split into `count` groups of consecutive elements. See `Partition` for splitting into fixed-size chunks.
 
 ```epsil
 chunk([1, 2, 3, 4, 5, 6], 3)
@@ -419,7 +440,10 @@ chunk([1, 2, 3, 4, 5, 6], 3)
 
 ### chunkBy
 
-MathJSON `ChunkBy` · `((S, key: (character) any -> unknown) -> list<string> where S: string) & ((indexed_collection<T>, key: (T) any -> unknown) -> list<list<T>> where T: any)`
+MathJSON `ChunkBy` · `((xs: S, key: (character) any -> unknown) -> list<string> where S: string) & ((xs: indexed_collection<T>, key: (T) any -> unknown) -> list<list<T>> where T: any)`
+
+- `xs` — The list or string to split. Sample: `[1, 3, 2, 4, 5]`.
+- `key` — The function of each element; a new run starts where its value changes. Sample: `x => x % 2`.
 
 Split the collection into maximal runs of consecutive elements over which the key function yields the same value.
 
@@ -434,6 +458,8 @@ chunkBy([1, 3, 2, 4, 5], x => x % 2)
 
 MathJSON `Closed` · `(number) -> number`
 
+- argument 1 — The endpoint to include in the interval. Sample: `1`.
+
 Closed(x): the endpoint x of an Interval, marked as included. A marker with no value of its own; Interval normalizes it away.
 
 ```epsil
@@ -444,6 +470,8 @@ Closed(x): the endpoint x of an Interval, marked as included. A marker with no v
 ### complement
 
 MathJSON `Complement` · `(set<any>+) -> set`
+
+- arguments 1, … — The sets: the first one, then the sets whose elements are removed from it. Sample: `{1, 2, 3, 4}`.
 
 Return the elements of the first set that are not in any of the subsequent sets.
 
@@ -465,7 +493,10 @@ The set of all finite complex numbers.
 
 ### contains
 
-MathJSON `Contains` · `(collection<any>, element: any) -> boolean`
+MathJSON `Contains` · `(xs: collection<any>, element: any) -> boolean`
+
+- `xs` — The collection to search; the elements of a string are its characters. Sample: `[1, 2, 3]`.
+- `element` — The value to find, compared structurally. Sample: `2`.
 
 Return True if the collection contains the given element (structural identity, like `===`), False otherwise. An absent element is found where the same marker sits: `Contains([1, NaN], NaN)` is True.
 
@@ -478,7 +509,10 @@ contains([1, 2, 3], 2)
 
 ### containsSequence
 
-MathJSON `ContainsSequence` · `(indexed_collection<T>, indexed_collection<T>) -> boolean where T`
+MathJSON `ContainsSequence` · `(xs: indexed_collection<T>, needle: indexed_collection<T>) -> boolean where T`
+
+- `xs` — The list or string to search. Sample: `[1, 2, 3, 4]`.
+- `needle` — The run of consecutive elements to find; an empty needle is always found. Sample: `[2, 3]`.
 
 Return `True` when `needle` occurs as a contiguous subsequence of the indexed collection.
 
@@ -491,7 +525,11 @@ containsSequence([1, 2, 3, 4], [2, 3])
 
 ### count
 
-MathJSON `Count` · `(collection<any>, any?, any?) -> infinity | integer`
+MathJSON `Count` · `(xs: collection<any>, element: any?, levels: any?) -> infinity | integer`
+
+- `xs` — The collection; with no other argument, the result is its number of elements, `+oo` for an unbounded one. Sample: `[1, 2, 1, 3, 1]`.
+- `element` — The value to count, compared structurally, or a predicate that each counted element satisfies. Sample: `1`.
+- `levels` — The levels of a nested list to count in, with a value to count: `n` for the levels 1 to `n`, `[n]` for the level `n` only, `[from, to]` for a range. Sample: `2`.
 
 `Count(xs)`: the number of elements in the collection.
 
@@ -506,7 +544,10 @@ count([1, 2, 1, 3, 1], 1)
 
 ### countIf
 
-MathJSON `CountIf` · `(collection<T>, predicate: (T) any -> boolean) -> integer where T`
+MathJSON `CountIf` · `(xs: collection<T>, predicate: (T) any -> boolean) -> integer where T`
+
+- `xs` — The collection whose elements are counted. Sample: `[1, 4, 9, 16]`.
+- `predicate` — The test that each counted element passes. Sample: `x => x > 5`.
 
 Return the number of elements in the collection satisfying the predicate.
 
@@ -519,6 +560,8 @@ countIf([1, 4, 9, 16], x => x > 5)
 
 MathJSON `Cycle` · `(list<any>) -> list`
 
+- argument 1 — The list to repeat; an empty list gives an empty list. Sample: `[1, 2]`.
+
 Produce an infinite sequence by cycling through the elements of a finite collection.
 
 ```epsil
@@ -529,6 +572,8 @@ take(cycle([1, 2]), 5)
 ### dedup
 
 MathJSON `Dedup` · `(collection<any>) -> collection`
+
+- argument 1 — The collection or string to collapse. Sample: `[1, 1, 2, 2, 1]`.
 
 Return the collection with consecutive duplicate elements collapsed to a single element.
 
@@ -541,7 +586,11 @@ dedup([1, 1, 2, 2, 1])
 
 ### deleteAt
 
-MathJSON `DeleteAt` · `((T, integer) -> T where T: string) & ((indexed_collection<T>, integer) -> list<T> where T: any) & ((dictionary<V>, string) -> dictionary<V> where V: any)`
+MathJSON `DeleteAt` · `((xs: T, index: integer) -> T where T: string) & ((xs: indexed_collection<T>, index: integer) -> list<T> where T: any) & ((xs: dictionary<V>, key: string) -> dictionary<V> where V: any)`
+
+- `xs` — The list, string, dictionary or record to copy without one element. Sample: `[1, 2, 3, 4]`.
+- `index` — The 1-based position of the element to remove; a negative index counts from the end, and 0 or an index out of range leaves the call unevaluated. Sample: `2`.
+- `key` — The key of the entry to remove; a key that is not there gives the value unchanged. Sample: `"b"`.
 
 Return a copy of the indexed collection with the element at the 1-based `index` removed.
 
@@ -578,6 +627,8 @@ A collection of key -&gt; value entries with string keys (`{x -> 1, y -> 2}` in 
 
 MathJSON `DictionaryFrom` · `(collection<any>) -> dictionary`
 
+- argument 1 — The (key, value) pairs; a later pair with the same key replaces an earlier one. Sample: `[("a", 1), ("b", 2)]`.
+
 Create a dictionary from the elements of a collection of (key, value) pairs.
 
 ```epsil
@@ -588,6 +639,8 @@ dictionaryFrom([("a", 1), ("b", 2)])
 ### differences
 
 MathJSON `Differences` · `(indexed_collection<any>) -> indexed_collection`
+
+- argument 1 — The list of numbers; a list of one element gives an empty list. Sample: `[1, 4, 9, 16]`.
 
 Return the successive differences of a collection: a collection whose k-th element is `x(k+1) − xk`, of length one less than the input.
 
@@ -600,9 +653,12 @@ differences([1, 4, 9, 16])
 
 MathJSON `Drop` · `((xs: T, count: number) -> T where T: string) & ((xs: indexed_collection<T>, count: number) -> list<T> where T: any)`
 
-Return the indexed collection without its first `n` elements.
+- `xs` — The list or string. Sample: `[1, 2, 3, 4, 5]`.
+- `count` — The number of elements to drop; a negative count drops the last elements, and a count past the length gives an empty result. Sample: `2`.
 
-A negative `n` counts from the end: `Drop(xs, -n)` is the collection without its last `n` elements.
+Return the indexed collection without its first `count` elements.
+
+A negative `count` counts from the end: `Drop(xs, -n)` is the collection without its last `n` elements.
 
 A count past the length is clamped: the result is empty.
 
@@ -618,7 +674,10 @@ drop([1, 2, 3, 4, 5], -2)
 
 ### dropWhile
 
-MathJSON `DropWhile` · `(indexed_collection<T>, predicate: (T) any -> boolean) -> indexed_collection where T`
+MathJSON `DropWhile` · `(xs: indexed_collection<T>, predicate: (T) any -> boolean) -> indexed_collection where T`
+
+- `xs` — The collection whose leading elements are dropped. Sample: `[1, 2, 3, 10, 4]`.
+- `predicate` — The test of the leading elements; dropping stops at the first element that fails it. Sample: `x => x < 5`.
 
 Return the collection with its leading elements for which the predicate returns True removed; the remaining elements are returned unfiltered.
 
@@ -660,7 +719,10 @@ isEmpty(emptySet)
 
 ### endsWith
 
-MathJSON `EndsWith` · `(indexed_collection<T>, suffix: indexed_collection<T>) -> boolean where T`
+MathJSON `EndsWith` · `(xs: indexed_collection<T>, suffix: indexed_collection<T>) -> boolean where T`
+
+- `xs` — The list or string to test. Sample: `[1, 2, 3]`.
+- `suffix` — The run of elements that must end the collection. Sample: `[2, 3]`.
 
 Return `True` when the indexed collection ends with `suffix` as a contiguous subsequence.
 
@@ -719,7 +781,10 @@ The set of all real numbers, including infinities.
 
 MathJSON `Field` · `(value: any, field: string) -> unknown`
 
-Access a named field of a value: `p.x` in Epsil.
+- `value` — The record, the dictionary, or the value of a nominal type with named fields. Sample: `{x -> 1, y -> 2}`.
+- `field` — The name of the field. Sample: `"y"`.
+
+Return the named field of a value: `p.x` in Epsil.
 
 On a record or dictionary value, `Field(d, "x")` behaves exactly as `d["x"]` (`At` semantics, including the absence marker for a key a dictionary may not have).
 
@@ -736,7 +801,10 @@ Record types are closed: on an operand of a record type, a field name that the t
 
 ### filter
 
-MathJSON `Filter` · `(collection<T>, predicate: (T) any -> boolean) -> collection where T`
+MathJSON `Filter` · `(xs: collection<T>, predicate: (T) any -> boolean) -> collection where T`
+
+- `xs` — The collection to filter. Sample: `[1, 2, 3, 4, 5, 6]`.
+- `predicate` — The test that each kept element passes. Sample: `x => x > 2`.
 
 Return the elements of the collection for which the predicate function returns True.
 
@@ -751,7 +819,10 @@ filter([1, 2, 3, 4, 5, 6], x => x % 2 == 0)
 
 ### find
 
-MathJSON `Find` · `(indexed_collection<T>, predicate: (T) any -> boolean) -> any where T: any`
+MathJSON `Find` · `(xs: indexed_collection<T>, predicate: (T) any -> boolean) -> any where T: any`
+
+- `xs` — The collection to search, from its first element. Sample: `[1, 4, 9, 16]`.
+- `predicate` — The test that the element found passes. Sample: `x => x > 5`.
 
 Return the first element of the collection satisfying the predicate. When no element satisfies it, return the absent value of the domain of the elements: `NaN` for numbers, a point whose coordinates are all `NaN` for points, and `Missing` otherwise.
 
@@ -764,6 +835,9 @@ find([1, 4, 9, 16], x => x > 5)
 
 MathJSON `First` · `(xs: indexed_collection<any>, default: any?) -> any`
 
+- `xs` — The list or string. Sample: `[7, 8, 9]`.
+- `default` — The result for an empty collection; without it, an empty collection gives the absent value of its elements, `NaN` for numbers and `Missing` otherwise. Sample: `0`.
+
 The first element of a collection.
 
 ```epsil
@@ -773,7 +847,10 @@ first([7, 8, 9])
 
 ### flatMap
 
-MathJSON `FlatMap` · `(collection<T>, mapping: (T) any -> U) -> list where T, U`
+MathJSON `FlatMap` · `(xs: collection<T>, mapping: (T) any -> U) -> list where T, U`
+
+- `xs` — The collection to map over. Sample: `[1, 2, 3]`.
+- `mapping` — The function applied to each element; a collection result other than a string is spliced into the result, and a string or any other value is kept as one element. Sample: `x => [x, x]`.
 
 Map a function over a collection and concatenate the results into a single list, splicing collection-valued results and keeping scalar results as single elements.
 
@@ -786,7 +863,11 @@ flatMap([1, 2, 3], x => [x, x])
 
 ### fold
 
-MathJSON `Fold` · `(reducer: (unknown, T) any -> unknown, initial: value, collection<T>) -> value where T`
+MathJSON `Fold` · `(reducer: (unknown, T) any -> unknown, initial: value, xs: collection<T>) -> value where T`
+
+- `reducer` — The function of the accumulator and the next element, which returns the new accumulator. Sample: `(acc, x) => acc + x`.
+- `initial` — The accumulator before the first element, and the result for an empty collection. Sample: `0`.
+- `xs` — The collection, read from its first element to its last. Sample: `[1, 2, 3, 4]`.
 
 Fold a collection to a single value, applying a binary function f(accumulator, element) left to right from an initial value.
 
@@ -799,7 +880,10 @@ fold((a, b) => a + b, 0, [1, 2, 3, 4])
 
 ### groupBy
 
-MathJSON `GroupBy` · `(collection<T>, key: (T) any -> unknown) -> dictionary<list> where T`
+MathJSON `GroupBy` · `(xs: collection<T>, key: (T) any -> unknown) -> dictionary<list> where T`
+
+- `xs` — The collection to group. Sample: `[1, 2, 3, 4, 5]`.
+- `key` — The function whose value names the group of an element; the keys of the dictionary are its values as strings. Sample: `x => x % 2`.
 
 Partition the collection into a dictionary of lists based on the key returned by the function.
 
@@ -821,7 +905,10 @@ The set of all imaginary numbers.
 
 ### indexOf
 
-MathJSON `IndexOf` · `(indexed_collection<any>, any) -> integer`
+MathJSON `IndexOf` · `(xs: indexed_collection<any>, element: any) -> integer`
+
+- `xs` — The list or string to search; the elements of a string are its characters. Sample: `[10, 20, 30]`.
+- `element` — The value to find, compared structurally. Sample: `20`.
 
 Return the 1-based index of the first occurrence of value in collection, or 0 if not found. The comparison is structural, so an absent value is found where the same marker sits: `IndexOf([1, NaN], NaN)` is 2. Stays unevaluated when the collection cannot be searched (a symbol with no value, an unbounded source with no match).
 
@@ -832,7 +919,10 @@ indexOf([10, 20, 30], 20)
 
 ### indexWhere
 
-MathJSON `IndexWhere` · `(indexed_collection<T>, predicate: (T) any -> boolean) -> integer where T`
+MathJSON `IndexWhere` · `(xs: indexed_collection<T>, predicate: (T) any -> boolean) -> integer where T`
+
+- `xs` — The collection to search. Sample: `[1, 4, 9, 16]`.
+- `predicate` — The test applied to each element, in order. Sample: `x => x > 5`.
 
 Return the 1-based index of the first element satisfying the predicate, or 0 if not found. Stays unevaluated when the collection cannot be searched (a symbol with no value, an unbounded source with no match).
 
@@ -843,9 +933,13 @@ indexWhere([1, 4, 9, 16], x => x > 5)
 
 ### insert
 
-MathJSON `Insert` · `(indexed_collection<T>, integer, T) -> list<T> where T: any`
+MathJSON `Insert` · `(xs: indexed_collection<T>, index: integer, element: T) -> list<T> where T: any`
 
-Return a copy of the indexed collection with `value` inserted before the 1-based `index`.
+- `xs` — The collection; a string gives a list of its characters. Sample: `[1, 2, 4]`.
+- `index` — The 1-based position of the inserted element, from 1 to n + 1; a negative index counts from the end, -1 appending. Sample: `3`.
+- `element` — The value to insert. Sample: `3`.
+
+Return a copy of the indexed collection with `element` inserted before the 1-based `index`.
 
 `index` may range from 1 to n+1 (n+1 appends). A negative index counts from the end, with -1 appending at the end (Elixir semantics).
 
@@ -871,6 +965,8 @@ The set of all finite integers.
 
 MathJSON `Intersection` · `(any+) -> set`
 
+- arguments 1, … — A set or another finite collection, whose duplicate elements count once. Sample: `{1, 2, 3}`.
+
 Return the intersection of one or more collections as a set.
 
 ```epsil
@@ -880,7 +976,10 @@ intersection({1, 2, 3}, {2, 3, 4})
 
 ### interval
 
-MathJSON `Interval` · `(number, number) -> set<real>`
+MathJSON `Interval` · `(start: number, end: number) -> set<real>`
+
+- `start` — The lower endpoint, included unless it is wrapped in `Open`; it may be `-oo`. Sample: `0`.
+- `end` — The upper endpoint, included unless it is wrapped in `Open`; it may be `+oo`. Sample: `1`.
 
 A set of real numbers between two endpoints. The endpoints may or may not be included.
 
@@ -893,6 +992,8 @@ A set of real numbers between two endpoints. The endpoints may or may not be inc
 
 MathJSON `IsEmpty` · `(collection<any>) -> boolean`
 
+- argument 1 — The collection or string to test. Sample: `[1, 2, 3]`.
+
 Return True if the collection is empty, False otherwise.
 
 ```epsil
@@ -902,7 +1003,10 @@ isEmpty([])
 
 ### iterate
 
-MathJSON `Iterate` · `(function, initial: any?) -> list`
+MathJSON `Iterate` · `(f: function, initial: any?) -> list`
+
+- `f` — The function that computes each element from its 1-based index and the previous element, or from the previous element alone when it takes one argument. Sample: `x => 2x`.
+- `initial` — The value before the first element, `Nothing` by default. Sample: `1`.
 
 Produce an infinite sequence by repeatedly applying a function to the previous value, starting with an initial value.
 
@@ -918,6 +1022,8 @@ take(iterate(x => 2x, 1), 5)
 ### join
 
 MathJSON `Join` · `((T+) -> T where T: string) & ((collection<any>*) -> collection)`
+
+- arguments 1, … — A collection or string whose elements are spliced into the result (strings alone give their concatenation), or another value, such as a tuple, added as one element. Sample: `"ab"`.
 
 Join the elements of some collections into a flat collection.
 
@@ -952,6 +1058,8 @@ Dictionary(KeyValuePair("a", 1), KeyValuePair("b", 2))
 
 MathJSON `Keys` · `(dictionary<any>) -> list<string>`
 
+- argument 1 — The dictionary whose keys are listed. Sample: `{"a" -> 1, "b" -> 2}`.
+
 Return a list of the keys of a dictionary.
 
 ```epsil
@@ -963,6 +1071,9 @@ keys({"a" -> 1, "b" -> 2})
 
 MathJSON `Last` · `(xs: indexed_collection<any>, default: any?) -> any`
 
+- `xs` — The collection or string. Sample: `[7, 8, 9]`.
+- `default` — The value returned when the collection is empty; without it, an empty collection gives the absent value of its elements, `NaN` for numbers and `Missing` otherwise. Sample: `0`.
+
 The last element of a collection.
 
 ```epsil
@@ -973,6 +1084,8 @@ last([7, 8, 9])
 ### length
 
 MathJSON `Length` · `(any) -> infinity | integer`
+
+- argument 1 — The collection or string to measure. Sample: `[5, 6, 7]`.
 
 Number of elements in a collection. Returns +oo for an infinite collection (an unbounded Range, `Integers`, `Repeat(5)`, an interval), as `Count` does, an `incompatible-type` error for an operand that is decidably not a collection, `Missing` for an absent operand, and stays unevaluated for a collection whose size is not known (a `Filter` over an infinite source).
 
@@ -989,6 +1102,10 @@ length("hello")
 ### linspace
 
 MathJSON `Linspace` · `(start: number, end: number?, count: number?) -> list<number>`
+
+- `start` — The first value; when it is the only argument, it is the last value and the sequence starts at 1. Sample: `0`.
+- `end` — The last value. Sample: `1`.
+- `count` — The number of values, 50 by default; 1 gives the start alone, and 0 or less an empty list. Sample: `5`.
 
 A sequence of evenly spaced numbers between a start and end value, both endpoints included.
 
@@ -1011,6 +1128,8 @@ List(1, 2, 3)
 ### listFrom
 
 MathJSON `ListFrom` · `(value*) -> list`
+
+- arguments 1, … — A collection whose elements are added to the list in order, or another value that is added as one element. Sample: `[1, 2]`.
 
 Create a list from the elements of a collection.
 
@@ -1040,6 +1159,9 @@ ListJoin(Set(3, 1), [0])
 
 MathJSON `Map` · `(mapping: (T) any -> U, collection<T>+) -> indexed_collection where T, U`
 
+- `mapping` — The function applied to each element, with one argument per collection. Sample: `x => x^2`.
+- arguments 2, … — A collection; with several, the result has the length of the shortest. Sample: `[1, 2, 3]`.
+
 Return the collection where each element has been transformed by the mapping function.
 
 With a single collection, equivalent to `[f(x) for x in xs]`. With multiple collections, combines them element-wise (like `zipWith`): 
@@ -1055,7 +1177,10 @@ map(x => x^2, [1, 2, 3])
 
 ### maxBy
 
-MathJSON `MaxBy` · `(collection<T>, key: (T) any -> unknown) -> value where T`
+MathJSON `MaxBy` · `(xs: collection<T>, key: (T) any -> unknown) -> value where T`
+
+- `xs` — The collection to search; the call stays unevaluated when it is empty or infinite. Sample: `["pear", "fig", "apple"]`.
+- `key` — The function of one element whose largest value selects the element; the first such element wins a tie. Sample: `x => length(x)`.
 
 Return the element of the collection that maximizes the given key function.
 
@@ -1074,7 +1199,10 @@ A parse-level node. Canonicalization rewrites it to `Apply(Field(c, "area"), 2)`
 
 ### minBy
 
-MathJSON `MinBy` · `(collection<T>, key: (T) any -> unknown) -> value where T`
+MathJSON `MinBy` · `(xs: collection<T>, key: (T) any -> unknown) -> value where T`
+
+- `xs` — The collection to search; the call stays unevaluated when it is empty or infinite. Sample: `["pear", "fig", "apple"]`.
+- `key` — The function of one element whose smallest value selects the element; the first such element wins a tie. Sample: `x => length(x)`.
 
 Return the element of the collection that minimizes the given key function.
 
@@ -1086,6 +1214,8 @@ minBy(["pear", "fig", "apple"], length)
 ### most
 
 MathJSON `Most` · `((T) -> T where T: string) & ((indexed_collection<T>) -> list<T> where T: any)`
+
+- argument 1 — The collection; an empty collection gives an empty result, and a string gives a string. Sample: `[7, 8, 9]`.
 
 Return the collection without the last element.
 
@@ -1221,6 +1351,8 @@ The set of all numbers.
 
 MathJSON `Open` · `(number) -> number`
 
+- argument 1 — The endpoint to exclude. Sample: `0`.
+
 Open(x): the endpoint x of an Interval, marked as excluded. A marker with no value of its own.
 
 ```epsil
@@ -1230,7 +1362,10 @@ Open(x): the endpoint x of an Interval, marked as excluded. A marker with no val
 
 ### ordering
 
-MathJSON `Ordering` · `(indexed_collection<T>, order: (((T) any -> unknown) | ((any, any) any -> boolean | number))?) -> list<integer> where T: any`
+MathJSON `Ordering` · `(xs: indexed_collection<T>, order: (((T) any -> unknown) | ((any, any) any -> boolean | number))?) -> list<integer> where T: any`
+
+- `xs` — The collection to sort. Sample: `[30, 10, 20]`.
+- `order` — A key function of one element, or a comparison of two elements (true or a negative number when the first comes first); by default the elements in ascending order. Sample: `x => -x`.
 
 Return the indexes that would sort the collection.
 
@@ -1252,11 +1387,15 @@ Pair(1, 2)
 
 ### partition
 
-MathJSON `Partition` · `(indexed_collection<T>, ((T) any -> boolean) | integer, integer?) -> list<list<T>> where T: any`
+MathJSON `Partition` · `(xs: indexed_collection<T>, count: ((T) any -> boolean) | integer, step: integer?) -> list<list<T>> where T: any`
 
-Partition a collection into consecutive chunks each of size `n`; the trailing chunk may be shorter when `n` does not divide the length.
+- `xs` — The collection or string to split. Sample: `[1, 2, 3, 4, 5]`.
+- `count` — The number of elements of each chunk, at least 1; or a predicate that splits the elements into those that pass it and those that do not. Sample: `2`.
+- `step` — The distance between the starts of two windows of `count` elements, at least 1; only complete windows are kept. Sample: `1`.
 
-With a third argument `step`, produce sliding windows of length `n` whose starts are `step` apart, keeping only complete windows.
+Partition a collection into consecutive chunks each of size `count`; the trailing chunk may be shorter when `count` does not divide the length.
+
+With a third argument `step`, produce sliding windows of length `count` whose starts are `step` apart, keeping only complete windows.
 
 With a predicate function instead of an integer, split into two groups: elements for which the predicate is true, and those for which it is false.
 
@@ -1278,6 +1417,8 @@ partition([1, 2, 3, 4, 5], x => x % 2 == 0)
 
 MathJSON `PointList` · `(any+) -> any`
 
+- arguments 1, … — A component of the points: a collection gives one coordinate per point, a single value the same coordinate for every point. Sample: `[1, 2, 3]`.
+
 A list of points: zips collection components into a List of point-tuples (Desmos point-list idiom); a plain point when no component is a collection.
 
 ```epsil
@@ -1288,6 +1429,8 @@ pointList([1, 2, 3], [4, 5, 6])
 ### pointX
 
 MathJSON `PointX` · `(xs: collection<any> | tuple) -> any`
+
+- `xs` — A point, or a collection of points whose x-coordinates are listed. Sample: `(3, 4)`.
 
 The x-coordinate of a point, broadcasting over a list of points.
 
@@ -1305,6 +1448,8 @@ pointX([(1, 2), (3, 4)])
 
 MathJSON `PointY` · `(xs: collection<any> | tuple) -> any`
 
+- `xs` — A point, or a collection of points whose y-coordinates are listed. Sample: `(3, 4)`.
+
 The y-coordinate of a point, broadcasting over a list of points.
 
 ```epsil
@@ -1316,6 +1461,8 @@ pointY((3, 4))
 
 MathJSON `PointZ` · `(xs: collection<any> | tuple) -> any`
 
+- `xs` — A point of at least three coordinates, or a collection of such points whose z-coordinates are listed. Sample: `(3, 4, 5)`.
+
 The z-coordinate of a point, broadcasting over a list of points.
 
 ```epsil
@@ -1325,7 +1472,10 @@ pointZ((3, 4, 5))
 
 ### position
 
-MathJSON `Position` · `(indexed_collection<T>, predicate: (T) any -> boolean) -> list<integer> where T: any`
+MathJSON `Position` · `(xs: indexed_collection<T>, predicate: (T) any -> boolean) -> list<integer> where T: any`
+
+- `xs` — The collection to search. Sample: `[1, 4, 9, 16]`.
+- `predicate` — The test applied to each element; the 1-based index of each element that passes it is in the result. Sample: `x => x > 5`.
 
 Return a list of indexes of elements in the collection satisfying the predicate.
 
@@ -1371,6 +1521,9 @@ filter(1..30, x => x in primes)
 
 MathJSON `QuotientRing` · `(set<any>, any) -> set`
 
+- argument 1 — The ring; only `Integers` gives a finite collection, another ring stays inert. Sample: `integers`.
+- argument 2 — The generator of the ideal, the modulus `n` for `Integers`. Sample: `5`.
+
 The quotient of a ring by the ideal generated by the second argument.
 
 `QuotientRing(Integers, n)` is ℤ/nℤ, the integers modulo `n`.
@@ -1387,6 +1540,8 @@ quotientRing(integers, 5)
 ### randomShuffle
 
 MathJSON `RandomShuffle` · `((T) random -> T where T: string) & ((indexed_collection<T>) random -> list<T> where T: any)`
+
+- argument 1 — The collection or string to shuffle. Sample: `"abcd"`.
 
 Randomize the order of the elements in the collection. Shuffling a string yields a string. Wrap the call in `WithRandomSeed(seed, ...)` to make it deterministic.
 
@@ -1412,7 +1567,11 @@ Range(1, 10, 3)
 
 ### rangeOf
 
-MathJSON `RangeOf` · `(indexed_collection<T>, indexed_collection<T>, from: integer?) -> missing | range where T`
+MathJSON `RangeOf` · `(xs: indexed_collection<T>, needle: indexed_collection<T>, from: integer?) -> missing | range where T`
+
+- `xs` — The collection to search. Sample: `[10, 20, 30, 40]`.
+- `needle` — The run of consecutive elements to find. Sample: `[30, 40]`.
+- `from` — The 1-based index where the search starts, 1 by default. Sample: `2`.
 
 Return the 1-based inclusive index span of the first occurrence of `needle` as a contiguous subsequence of the indexed collection, or `Missing` when it does not occur.
 
@@ -1449,7 +1608,11 @@ i in realNumbers
 
 ### reduce
 
-MathJSON `Reduce` · `(collection<T>, reducer: (unknown, T) any -> unknown, initial: value?) -> value where T`
+MathJSON `Reduce` · `(xs: collection<T>, reducer: (unknown, T) any -> unknown, initial: value?) -> value where T`
+
+- `xs` — The collection to fold; an empty one gives `initial`, or `Nothing` without it. Sample: `[1, 2, 3, 4]`.
+- `reducer` — The function of the accumulated value and the next element that gives the new accumulated value. Sample: `(a, b) => a * b`.
+- `initial` — The accumulated value before the first element; without it, the first element. Sample: `1`.
 
 Reduce (fold) a collection to a single value by repeatedly applying a binary function, with an optional initial value.
 
@@ -1462,6 +1625,9 @@ reduce([1, 2, 3, 4], (a, b) => a * b)
 
 MathJSON `Repeat` · `(value: any, count: integer?) -> list`
 
+- `value` — The value to repeat; a value that is not pure is evaluated again for each element. Sample: `0`.
+- `count` — The number of copies, 0 or less for an empty list; without it the sequence is infinite. Sample: `3`.
+
 Produce a sequence by repeating a single value. With 1 argument, returns an infinite sequence; with 2 arguments (value, count), returns a finite list of `count` copies. A value that is not pure (`Random()`) is evaluated once per element, in order, and each read of an element of a lazy `Repeat` evaluates it again.
 
 ```epsil
@@ -1471,9 +1637,13 @@ repeat(0, 3)
 
 ### replaceAt
 
-MathJSON `ReplaceAt` · `((indexed_collection<T>, integer, T) -> list<T> where T: any) & ((indexed_collection<any>, integer, integer, any+) -> list<any>)`
+MathJSON `ReplaceAt` · `((xs: indexed_collection<T>, index: integer, element: T) -> list<T> where T: any) & ((xs: indexed_collection<any>, index: integer, integer, any+) -> list<any>)`
 
-Return a copy of the indexed collection with the element at the 1-based `index` replaced by `value`.
+- `xs` — The collection; a string gives a list of its characters. Sample: `[1, 2, 3]`.
+- `index` — The 1-based position of the element to replace; a negative index counts from the end. With more positions, the position in the outermost level. Sample: `2`.
+- `element` — The new element. Sample: `20`.
+
+Return a copy of the indexed collection with the element at the 1-based `index` replaced by `element`.
 
 A negative index counts from the end. An out-of-range, zero, or non-integer index leaves the expression unevaluated.
 
@@ -1491,7 +1661,10 @@ replaceAt([[1, 2], [3, 4]], 2, 1, 9)
 
 ### residueClass
 
-MathJSON `ResidueClass` · `(any, any) -> residue`
+MathJSON `ResidueClass` · `(k: any, n: any) -> residue`
+
+- `k` — The representative of the class, an exact integer or a rational whose denominator is a unit mod `n`. Sample: `7`.
+- `n` — The modulus, an exact integer literal ≥ 1. Sample: `5`.
 
 An element of ℤ/nℤ: the class of the integer `k` modulo `n`.
 
@@ -1522,6 +1695,8 @@ residueClass(5, 7) + residueClass(4, 7)
 
 MathJSON `Rest` · `((T) -> T where T: string) & ((indexed_collection<T>) -> list<T> where T: any)`
 
+- argument 1 — The collection or string; an empty one gives an empty result. Sample: `"abc"`.
+
 Return the collection without the first element.
 
 If the collection has only one element, return an empty collection.
@@ -1535,6 +1710,8 @@ rest([7, 8, 9])
 
 MathJSON `Reverse` · `((T) -> T where T: string) & ((T) -> T where T: list) & ((indexed_collection<T>) -> list<T> where T: any)`
 
+- argument 1 — The collection to reverse; a string gives the string of its characters in reverse order. Sample: `[1, 2, 3]`.
+
 Reverse the order of the elements of an indexed collection.
 
 ```epsil
@@ -1544,7 +1721,10 @@ reverse([1, 2, 3])
 
 ### rotateLeft
 
-MathJSON `RotateLeft` · `((T, integer?) -> T where T: string) & ((T, integer?) -> T where T: list) & ((indexed_collection<T>, integer?) -> list<T> where T: any)`
+MathJSON `RotateLeft` · `((xs: T, n: integer?) -> T where T: string) & ((xs: T, n: integer?) -> T where T: list) & ((xs: indexed_collection<T>, n: integer?) -> list<T> where T: any)`
+
+- `xs` — The collection to rotate; a string gives a string. Sample: `[1, 2, 3, 4]`.
+- `n` — The number of positions, 1 by default; a negative `n` rotates to the right, and `n` is taken modulo the length. Sample: `2`.
 
 Rotate the elements of the collection to the left by n positions.
 
@@ -1555,7 +1735,10 @@ rotateLeft([1, 2, 3, 4])
 
 ### rotateRight
 
-MathJSON `RotateRight` · `((T, integer?) -> T where T: string) & ((T, integer?) -> T where T: list) & ((indexed_collection<T>, integer?) -> list<T> where T: any)`
+MathJSON `RotateRight` · `((xs: T, n: integer?) -> T where T: string) & ((xs: T, n: integer?) -> T where T: list) & ((xs: indexed_collection<T>, n: integer?) -> list<T> where T: any)`
+
+- `xs` — The collection to rotate; a string gives a string. Sample: `[1, 2, 3, 4]`.
+- `n` — The number of positions, 1 by default; a negative `n` rotates to the left, and `n` is taken modulo the length. Sample: `2`.
 
 Rotate the elements of the collection to the right by n positions.
 
@@ -1566,7 +1749,11 @@ rotateRight([1, 2, 3, 4])
 
 ### scan
 
-MathJSON `Scan` · `(indexed_collection<T>, reducer: (unknown, T) any -> unknown, initial: value?) -> indexed_collection where T`
+MathJSON `Scan` · `(xs: indexed_collection<T>, reducer: (unknown, T) any -> unknown, initial: value?) -> indexed_collection where T`
+
+- `xs` — The collection to scan, in its order; an empty collection gives an empty result. Sample: `[1, 2, 3, 4]`.
+- `reducer` — A function of the running result and the next element that returns the new running result. Sample: `(acc, x) => acc + x`.
+- `initial` — The value the running result starts from; without it, the first element of the result is the first element of the collection. Sample: `0`.
 
 Return the cumulative fold of a collection: a same-length collection whose k-th element is the running result of applying a binary function left to right (optionally seeded by an initial value).
 
@@ -1578,6 +1765,8 @@ scan([1, 2, 3, 4], (a, b) => a + b)
 ### second
 
 MathJSON `Second` · `(xs: indexed_collection<any>) -> any`
+
+- `xs` — The collection; one with fewer than two elements gives `Missing`, or `NaN` when its elements are numbers. Sample: `[7, 8, 9]`.
 
 The second element of a collection.
 
@@ -1601,6 +1790,8 @@ An unordered collection of distinct elements (a set).
 
 MathJSON `SetFrom` · `(value*) -> set`
 
+- arguments 1, … — A collection whose elements go into the set, or a value that is not a collection, which goes into the set as an element. Sample: `[1, 2, 2, 3]`.
+
 Create a set from the elements of a collection.
 
 ```epsil
@@ -1611,6 +1802,9 @@ setFrom([1, 2, 2, 3])
 ### setMinus
 
 MathJSON `SetMinus` · `(set<any>, value*) -> set`
+
+- argument 1 — The set to remove elements from. Sample: `{1, 2, 3, 4}`.
+- arguments 2, … — A value to remove, or a collection whose elements are removed; a string is removed as one value. Sample: `2`.
 
 Return the set difference between the first set and subsequent values.
 
@@ -1634,6 +1828,11 @@ Single(5)
 
 MathJSON `Slice` · `((value: T, span: range) -> T where T: string) & ((value: T, start: number, end: number) -> T where T: string) & ((value: indexed_collection<T>, span: range) -> list<T> where T: any) & ((value: indexed_collection<T>, start: number, end: number) -> list<T> where T: any)`
 
+- `value` — The collection to slice; a string gives a string. Sample: `[10, 20, 30, 40, 50]`.
+- `span` — An ascending range of 1-based indices; the indices past the end are left out. Sample: `2..4`.
+- `start` — The 1-based index of the first element; a negative index counts from the end (`-1` is the last element). Sample: `2`.
+- `end` — The 1-based index of the last element, included; a negative index counts from the end, an index past the end is the end, and an `end` before `start` gives an empty result. Sample: `4`.
+
 Return a contiguous run of elements from an indexed collection.
 
 Given `start` and `end` (1-based, inclusive), a negative index is counted from the end and out-of-bounds indices are clamped.
@@ -1649,6 +1848,9 @@ slice([10, 20, 30, 40, 50], 2, 4)
 
 MathJSON `Sort` · `((T, order: (((character) any -> unknown) | ((character, character) any -> boolean | number))?) -> T where T: string) & ((indexed_collection<T>, order: (((T) any -> unknown) | ((any, any) any -> boolean | number))?) -> list<T> where T: any)`
 
+- argument 1 — The collection to sort; a string gives the string of its characters in order. Sample: `[3, 1, 2]`.
+- `order` — A key function of one element, whose values are sorted in ascending order, or a comparison of two elements that returns `True` or a negative number when the first goes first; by default, ascending order. Sample: `x => -x`.
+
 Return the elements of the collection sorted according to the given comparison function.
 
 ```epsil
@@ -1663,7 +1865,10 @@ sort(["pear", "fig", "apple"], length)
 
 ### startsWith
 
-MathJSON `StartsWith` · `(indexed_collection<T>, prefix: indexed_collection<T>) -> boolean where T`
+MathJSON `StartsWith` · `(xs: indexed_collection<T>, prefix: indexed_collection<T>) -> boolean where T`
+
+- `xs` — The collection or string whose start is tested. Sample: `[1, 2, 3]`.
+- `prefix` — The elements the collection must begin with, in order; an empty prefix matches every collection. Sample: `[1, 2]`.
 
 Return `True` when the indexed collection begins with `prefix` as a contiguous subsequence.
 
@@ -1678,6 +1883,9 @@ startsWith([1, 2, 3], [1, 2])
 
 MathJSON `Subset` · `(any, any*) -> boolean`
 
+- argument 1 — The collection tested as a strict subset. Sample: `{1, 2}`.
+- arguments 2, … — A collection that strictly contains the collection before it; with more than two arguments, each argument is tested against the next. Sample: `{1, 2, 3}`.
+
 Test whether the first collection is a strict subset of the second.
 
 ```epsil
@@ -1688,6 +1896,9 @@ subset({1, 2}, {1, 2, 3})
 ### subsetEqual
 
 MathJSON `SubsetEqual` · `(any, any*) -> boolean`
+
+- argument 1 — The collection tested as a subset. Sample: `{1, 2}`.
+- arguments 2, … — A collection that contains the collection before it; with more than two arguments, each argument is tested against the next. Sample: `{1, 2, 3}`.
 
 Test whether the first collection is a subset (possibly equal) of the second.
 
@@ -1700,6 +1911,9 @@ subsetEqual({1, 2, 3}, {1, 2, 3})
 
 MathJSON `Superset` · `(any, any*) -> boolean`
 
+- argument 1 — The collection tested as a strict superset. Sample: `{1, 2, 3}`.
+- arguments 2, … — A collection that the collection before it strictly contains; with more than two arguments, each argument is tested against the next. Sample: `{1, 2}`.
+
 Test whether the first collection is a strict superset of the second.
 
 ```epsil
@@ -1710,6 +1924,9 @@ superset({1, 2, 3}, {1, 2})
 ### supersetEqual
 
 MathJSON `SupersetEqual` · `(any, any*) -> boolean`
+
+- argument 1 — The collection tested as a superset. Sample: `{1, 2, 3}`.
+- arguments 2, … — A collection that the collection before it contains; with more than two arguments, each argument is tested against the next. Sample: `{1, 2}`.
 
 Test whether the first collection is a superset (possibly equal) of the second.
 
@@ -1722,6 +1939,9 @@ supersetEqual({1, 2}, {1, 2})
 
 MathJSON `SymmetricDifference` · `(set<any>, set<any>) -> set`
 
+- argument 1 — The first set. Sample: `{1, 2, 3}`.
+- argument 2 — The second set; the order of the two sets does not change the result. Sample: `{2, 3, 4}`.
+
 Return the symmetric difference of two sets (elements in either set but not both).
 
 ```epsil
@@ -1733,7 +1953,12 @@ symmetricDifference({1, 2, 3}, {2, 3, 4})
 
 MathJSON `Table` · `(function, integer+) -> collection`
 
-An alias for `Tabulate` (the preferred name) that additionally accepts Mathematica-style iterator specs, e.g. `Table(i^2, {i, n})` (`i` from 1 to `n`), `Table(i^2, {i, 1, n})` or `Table(i, {i, lo, hi, step})`, and the equivalent tuple spelling `Table(i^2, (i, 1, n))`.
+- argument 1 — The function of the indices, or an expression in the index variables of the iterator specs. Sample: `i => i^2`.
+- arguments 2, … — The size of one dimension, or an iterator spec `(i, n)`, `(i, lo, hi)` or `(i, lo, hi, step)`. Sample: `5`.
+
+Return the list of the values of a function at each index of the given dimensions, as `Tabulate` (the preferred name) does.
+
+It also accepts Mathematica-style iterator specs, e.g. `Table(i^2, {i, n})` (`i` from 1 to `n`), `Table(i^2, {i, 1, n})` or `Table(i, {i, lo, hi, step})`, and the equivalent tuple spelling `Table(i^2, (i, 1, n))`.
 
 ```epsil
 table(i^2, (i, 1, 5))
@@ -1743,6 +1968,9 @@ table(i^2, (i, 1, 5))
 ### tabulate
 
 MathJSON `Tabulate` · `(generator: function, integer+) -> list`
+
+- `generator` — The function, called with one 1-based index for each dimension. Sample: `i => i^2`.
+- arguments 2, … — The size of one dimension, one argument for each dimension; a size less than 1 gives no element in that dimension. Sample: `3`.
 
 Create a collection by applying a function to each index in the specified dimensions.
 
@@ -1773,7 +2001,10 @@ take([1, 2, 3, 4, 5], -2)
 
 ### takeWhile
 
-MathJSON `TakeWhile` · `(indexed_collection<T>, predicate: (T) any -> boolean) -> indexed_collection where T`
+MathJSON `TakeWhile` · `(xs: indexed_collection<T>, predicate: (T) any -> boolean) -> indexed_collection where T`
+
+- `xs` — The collection whose leading elements are taken; a string gives a string. Sample: `[1, 2, 3, 10, 4]`.
+- `predicate` — A function of one element that returns `True` for an element to keep. Sample: `x => x < 5`.
 
 Return the leading elements of the collection for which the predicate returns True, stopping at the first element that does not.
 
@@ -1786,6 +2017,8 @@ takeWhile([1, 2, 3, 10, 4], x => x < 5)
 
 MathJSON `Tally` · `(collection<T>) -> tuple<list<T>, list<integer>> where T`
 
+- argument 1 — The collection whose elements are counted; equal elements are counted together. Sample: `["a", "b", "a"]`.
+
 Return a tuple with the unique elements of the collection and their respective counts.
 
 ```epsil
@@ -1796,6 +2029,8 @@ tally(["a", "b", "a", "c", "a"])
 ### third
 
 MathJSON `Third` · `(xs: indexed_collection<any>) -> any`
+
+- `xs` — The collection; one with fewer than three elements gives `Missing`, or `NaN` when its elements are numbers. Sample: `[7, 8, 9]`.
 
 The third element of a collection.
 
@@ -1830,6 +2065,8 @@ A fixed number of heterogeneous elements. Nothing retains its slot, and a tuple 
 
 MathJSON `TupleFrom` · `(value*) -> tuple`
 
+- arguments 1, … — A collection whose elements go into the tuple in order, or a value that is not a collection, which goes into the tuple as an element. Sample: `[1, 2, 3]`.
+
 Create a tuple from the elements of a collection.
 
 ```epsil
@@ -1841,6 +2078,8 @@ tupleFrom([1, 2, 3])
 
 MathJSON `Union` · `(any+) -> set`
 
+- arguments 1, … — A collection whose elements go into the union; an element in several collections appears once. Sample: `{1, 2}`.
+
 Return the union of two or more collections as a set.
 
 ```epsil
@@ -1850,7 +2089,10 @@ union({1, 2}, {2, 3})
 
 ### unique
 
-MathJSON `Unique` · `((T) -> T where T: string) & ((T, test: (character, character) any -> boolean) -> T where T: string) & ((collection<T>) -> list<T> where T: any) & ((collection<T>, test: (T, T) any -> boolean) -> list<T> where T: any)`
+MathJSON `Unique` · `((xs: T) -> T where T: string) & ((xs: T, test: (character, character) any -> boolean) -> T where T: string) & ((xs: collection<T>) -> list<T> where T: any) & ((xs: collection<T>, test: (T, T) any -> boolean) -> list<T> where T: any)`
+
+- `xs` — The collection; the first occurrence of each element is kept, and a string gives a string. Sample: `[1, 2, 1, 3]`.
+- `test` — A function of two elements that returns `True` when they count as the same; by default, two elements are the same when they are equal. Sample: `(a, b) => abs(a) == abs(b)`.
 
 Return a list of the unique elements of the collection.
 
@@ -1863,6 +2105,8 @@ unique([1, 2, 1, 3, 2])
 
 MathJSON `Values` · `(dictionary<any>) -> list`
 
+- argument 1 — The dictionary whose values are listed, in the order of its entries. Sample: `{"a" -> 1, "b" -> 2}`.
+
 Return a list of the values of a dictionary.
 
 ```epsil
@@ -1873,6 +2117,8 @@ values({"a" -> 1, "b" -> 2})
 ### zip
 
 MathJSON `Zip` · `(indexed_collection<any>+) -> list`
+
+- arguments 1, … — A collection, one for each coordinate of the tuples; the shortest collection sets the length of the result. Sample: `[1, 2, 3]`.
 
 Combine multiple collections element-wise into a list of tuples. The result has the length of the shortest input. Nothing retains its coordinate and source position; a row whose coordinates are all Missing remains a tuple.
 

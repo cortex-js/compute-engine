@@ -235,52 +235,52 @@ The [Collections reference](/epsil/reference/collections/) has the full descript
 | Epsil | MathJSON | Signature | Summary |
 |:------|:---------|:----------|:--------|
 | `adjoin` | `Adjoin` | `(set<any>, any+) -> set` | The ring obtained by adjoining one or more elements to a base ring. |
-| `all` | `All` | `(collection<T>, predicate: ((T) any -> boolean)?) -> boolean where T` | Return True if the predicate holds for every element of the collection (or if every element is True when no predicate is given). |
-| `any` | `Any` | `(collection<T>, predicate: ((T) any -> boolean)?) -> boolean where T` | Return True if the predicate holds for at least one element of the collection (or if any element is True when no predicate is given). |
-| `append` | `Append` | `(collection<any>, any+) -> collection` | Add one or more elements to the end of a collection. |
-| `argMax` | `ArgMax` | `(indexed_collection<T>, key: ((T) any -> unknown)?) -> integer where T` | Return the 1-based index of the element that maximizes the given key function (or the element itself when no key is given). |
-| `argMin` | `ArgMin` | `(indexed_collection<T>, key: ((T) any -> unknown)?) -> integer where T` | Return the 1-based index of the element that minimizes the given key function (or the element itself when no key is given). |
+| `all` | `All` | `(xs: collection<T>, predicate: ((T) any -> boolean)?) -> boolean where T` | Return True if the predicate holds for every element of the collection (or if every element is True when no predicate is given). |
+| `any` | `Any` | `(xs: collection<T>, predicate: ((T) any -> boolean)?) -> boolean where T` | Return True if the predicate holds for at least one element of the collection (or if any element is True when no predicate is given). |
+| `append` | `Append` | `(collection<any>, any+) -> collection` | Return the collection with one or more elements added at its end. |
+| `argMax` | `ArgMax` | `(xs: indexed_collection<T>, key: ((T) any -> unknown)?) -> integer where T` | Return the 1-based index of the element that maximizes the given key function (or of the largest element when no key is given); of several such elements, the first. |
+| `argMin` | `ArgMin` | `(xs: indexed_collection<T>, key: ((T) any -> unknown)?) -> integer where T` | Return the 1-based index of the element that minimizes the given key function (or of the smallest element when no key is given); of several such elements, the first. |
 | — | `At` | `(value: any, index: (boolean \| character \| indexed_collection<any> \| number \| string)+) -> unknown` | Access an element of an indexed collection. |
-| `chunk` | `Chunk` | `((S, integer) -> list<string> where S: string) & ((indexed_collection, integer) -> list<list>)` | Split the collection into `k` nearly equal-sized groups. |
-| `chunkBy` | `ChunkBy` | `((S, key: (character) any -> unknown) -> list<string> where S: string) & ((indexed_collection<T>, key: (T) any -> unknown) -> list<list<T>> where T: any)` | Split the collection into maximal runs of consecutive elements over which the key function yields the same value. |
+| `chunk` | `Chunk` | `((xs: S, count: integer) -> list<string> where S: string) & ((xs: indexed_collection, count: integer) -> list<list>)` | Return the collection split into `count` groups of consecutive elements. |
+| `chunkBy` | `ChunkBy` | `((xs: S, key: (character) any -> unknown) -> list<string> where S: string) & ((xs: indexed_collection<T>, key: (T) any -> unknown) -> list<list<T>> where T: any)` | Split the collection into maximal runs of consecutive elements over which the key function yields the same value. |
 | `closed` | `Closed` | `(number) -> number` | Closed(x): the endpoint x of an Interval, marked as included. |
 | `complement` | `Complement` | `(set<any>+) -> set` | Return the elements of the first set that are not in any of the subsequent sets. |
 | `complexNumbers` | `ComplexNumbers` | constant `set<complex>` | The set of all finite complex numbers. |
-| `contains` | `Contains` | `(collection<any>, element: any) -> boolean` | Return True if the collection contains the given element (structural identity, like `===`), False otherwise. |
-| `containsSequence` | `ContainsSequence` | `(indexed_collection<T>, indexed_collection<T>) -> boolean where T` | Return `True` when `needle` occurs as a contiguous subsequence of the indexed collection. |
-| `count` | `Count` | `(collection<any>, any?, any?) -> infinity \| integer` | `Count(xs)`: the number of elements in the collection. |
-| `countIf` | `CountIf` | `(collection<T>, predicate: (T) any -> boolean) -> integer where T` | Return the number of elements in the collection satisfying the predicate. |
+| `contains` | `Contains` | `(xs: collection<any>, element: any) -> boolean` | Return True if the collection contains the given element (structural identity, like `===`), False otherwise. |
+| `containsSequence` | `ContainsSequence` | `(xs: indexed_collection<T>, needle: indexed_collection<T>) -> boolean where T` | Return `True` when `needle` occurs as a contiguous subsequence of the indexed collection. |
+| `count` | `Count` | `(xs: collection<any>, element: any?, levels: any?) -> infinity \| integer` | `Count(xs)`: the number of elements in the collection. |
+| `countIf` | `CountIf` | `(xs: collection<T>, predicate: (T) any -> boolean) -> integer where T` | Return the number of elements in the collection satisfying the predicate. |
 | `cycle` | `Cycle` | `(list<any>) -> list` | Produce an infinite sequence by cycling through the elements of a finite collection. |
 | `dedup` | `Dedup` | `(collection<any>) -> collection` | Return the collection with consecutive duplicate elements collapsed to a single element. |
-| `deleteAt` | `DeleteAt` | `((T, integer) -> T where T: string) & ((indexed_collection<T>, integer) -> list<T> where T: any) & ((dictionary<V>, string) -> dictionary<V> where V: any)` | Return a copy of the indexed collection with the element at the 1-based `index` removed. |
+| `deleteAt` | `DeleteAt` | `((xs: T, index: integer) -> T where T: string) & ((xs: indexed_collection<T>, index: integer) -> list<T> where T: any) & ((xs: dictionary<V>, key: string) -> dictionary<V> where V: any)` | Return a copy of the indexed collection with the element at the 1-based `index` removed. |
 | — | `Dictionary` | `(tuple<string, unknown>*) -> dictionary` | A collection of key -&gt; value entries with string keys (`{x -> 1, y -> 2}` in Epsil). |
 | `dictionaryFrom` | `DictionaryFrom` | `(collection<any>) -> dictionary` | Create a dictionary from the elements of a collection of (key, value) pairs. |
 | `differences` | `Differences` | `(indexed_collection<any>) -> indexed_collection` | Return the successive differences of a collection: a collection whose k-th element is `x(k+1) − xk`, of length one less than the input. |
-| `drop` | `Drop` | `((xs: T, count: number) -> T where T: string) & ((xs: indexed_collection<T>, count: number) -> list<T> where T: any)` | Return the indexed collection without its first `n` elements. |
-| `dropWhile` | `DropWhile` | `(indexed_collection<T>, predicate: (T) any -> boolean) -> indexed_collection where T` | Return the collection with its leading elements for which the predicate returns True removed; the remaining elements are returned unfiltered. |
+| `drop` | `Drop` | `((xs: T, count: number) -> T where T: string) & ((xs: indexed_collection<T>, count: number) -> list<T> where T: any)` | Return the indexed collection without its first `count` elements. |
+| `dropWhile` | `DropWhile` | `(xs: indexed_collection<T>, predicate: (T) any -> boolean) -> indexed_collection where T` | Return the collection with its leading elements for which the predicate returns True removed; the remaining elements are returned unfiltered. |
 | — | `Element` | `(any, any, boolean?) -> boolean` | Test whether a value is an element of a collection. |
 | `emptySet` | `EmptySet` | constant `set` | The empty set, a set containing no elements. |
-| `endsWith` | `EndsWith` | `(indexed_collection<T>, suffix: indexed_collection<T>) -> boolean where T` | Return `True` when the indexed collection ends with `suffix` as a contiguous subsequence. |
+| `endsWith` | `EndsWith` | `(xs: indexed_collection<T>, suffix: indexed_collection<T>) -> boolean where T` | Return `True` when the indexed collection ends with `suffix` as a contiguous subsequence. |
 | `extendedComplexNumbers` | `ExtendedComplexNumbers` | constant `set<complex \| infinity>` | The set of all complex numbers, including infinities. |
 | `extendedIntegers` | `ExtendedIntegers` | constant `set<integer \| signed_infinity>` | The set of all integers, including infinities. |
 | `extendedRationalNumbers` | `ExtendedRationalNumbers` | constant `set<rational \| signed_infinity>` | The set of all rational numbers, including infinities. |
 | `extendedRealNumbers` | `ExtendedRealNumbers` | constant `set<real \| signed_infinity>` | The set of all real numbers, including infinities. |
-| `field` | `Field` | `(value: any, field: string) -> unknown` | Access a named field of a value: `p.x` in Epsil. |
-| `filter` | `Filter` | `(collection<T>, predicate: (T) any -> boolean) -> collection where T` | Return the elements of the collection for which the predicate function returns True. |
-| `find` | `Find` | `(indexed_collection<T>, predicate: (T) any -> boolean) -> any where T: any` | Return the first element of the collection satisfying the predicate. |
+| `field` | `Field` | `(value: any, field: string) -> unknown` | Return the named field of a value: `p.x` in Epsil. |
+| `filter` | `Filter` | `(xs: collection<T>, predicate: (T) any -> boolean) -> collection where T` | Return the elements of the collection for which the predicate function returns True. |
+| `find` | `Find` | `(xs: indexed_collection<T>, predicate: (T) any -> boolean) -> any where T: any` | Return the first element of the collection satisfying the predicate. |
 | `first` | `First` | `(xs: indexed_collection<any>, default: any?) -> any` | The first element of a collection. |
-| `flatMap` | `FlatMap` | `(collection<T>, mapping: (T) any -> U) -> list where T, U` | Map a function over a collection and concatenate the results into a single list, splicing collection-valued results and keeping scalar results as single elements. |
-| `fold` | `Fold` | `(reducer: (unknown, T) any -> unknown, initial: value, collection<T>) -> value where T` | Fold a collection to a single value, applying a binary function f(accumulator, element) left to right from an initial value. |
-| `groupBy` | `GroupBy` | `(collection<T>, key: (T) any -> unknown) -> dictionary<list> where T` | Partition the collection into a dictionary of lists based on the key returned by the function. |
+| `flatMap` | `FlatMap` | `(xs: collection<T>, mapping: (T) any -> U) -> list where T, U` | Map a function over a collection and concatenate the results into a single list, splicing collection-valued results and keeping scalar results as single elements. |
+| `fold` | `Fold` | `(reducer: (unknown, T) any -> unknown, initial: value, xs: collection<T>) -> value where T` | Fold a collection to a single value, applying a binary function f(accumulator, element) left to right from an initial value. |
+| `groupBy` | `GroupBy` | `(xs: collection<T>, key: (T) any -> unknown) -> dictionary<list> where T` | Partition the collection into a dictionary of lists based on the key returned by the function. |
 | `imaginaryNumbers` | `ImaginaryNumbers` | constant `set<imaginary>` | The set of all imaginary numbers. |
-| `indexOf` | `IndexOf` | `(indexed_collection<any>, any) -> integer` | Return the 1-based index of the first occurrence of value in collection, or 0 if not found. |
-| `indexWhere` | `IndexWhere` | `(indexed_collection<T>, predicate: (T) any -> boolean) -> integer where T` | Return the 1-based index of the first element satisfying the predicate, or 0 if not found. |
-| `insert` | `Insert` | `(indexed_collection<T>, integer, T) -> list<T> where T: any` | Return a copy of the indexed collection with `value` inserted before the 1-based `index`. |
+| `indexOf` | `IndexOf` | `(xs: indexed_collection<any>, element: any) -> integer` | Return the 1-based index of the first occurrence of value in collection, or 0 if not found. |
+| `indexWhere` | `IndexWhere` | `(xs: indexed_collection<T>, predicate: (T) any -> boolean) -> integer where T` | Return the 1-based index of the first element satisfying the predicate, or 0 if not found. |
+| `insert` | `Insert` | `(xs: indexed_collection<T>, index: integer, element: T) -> list<T> where T: any` | Return a copy of the indexed collection with `element` inserted before the 1-based `index`. |
 | `integers` | `Integers` | constant `set<integer>` | The set of all finite integers. |
 | `intersection` | `Intersection` | `(any+) -> set` | Return the intersection of one or more collections as a set. |
-| `interval` | `Interval` | `(number, number) -> set<real>` | A set of real numbers between two endpoints. |
+| `interval` | `Interval` | `(start: number, end: number) -> set<real>` | A set of real numbers between two endpoints. |
 | `isEmpty` | `IsEmpty` | `(collection<any>) -> boolean` | Return True if the collection is empty, False otherwise. |
-| `iterate` | `Iterate` | `(function, initial: any?) -> list` | Produce an infinite sequence by repeatedly applying a function to the previous value, starting with an initial value. |
+| `iterate` | `Iterate` | `(f: function, initial: any?) -> list` | Produce an infinite sequence by repeatedly applying a function to the previous value, starting with an initial value. |
 | `join` | `Join` | `((T+) -> T where T: string) & ((collection<any>*) -> collection)` | Join the elements of some collections into a flat collection. |
 | — | `KeyValuePair` | `(key: string, value: T) -> tuple<string, T> where T` | A key/value pair |
 | `keys` | `Keys` | `(dictionary<any>) -> list<string>` | Return a list of the keys of a dictionary. |
@@ -291,9 +291,9 @@ The [Collections reference](/epsil/reference/collections/) has the full descript
 | `listFrom` | `ListFrom` | `(value*) -> list` | Create a list from the elements of a collection. |
 | — | `ListJoin` | `(collection<any>*) -> list` | Join the elements of some collections into a list. |
 | `map` | `Map` | `(mapping: (T) any -> U, collection<T>+) -> indexed_collection where T, U` | Return the collection where each element has been transformed by the mapping function. |
-| `maxBy` | `MaxBy` | `(collection<T>, key: (T) any -> unknown) -> value where T` | Return the element of the collection that maximizes the given key function. |
+| `maxBy` | `MaxBy` | `(xs: collection<T>, key: (T) any -> unknown) -> value where T` | Return the element of the collection that maximizes the given key function. |
 | — | `MemberCall` | `(receiver: any, member: string, arguments: any*) -> unknown` | Call the member `name` of a value with the value as its first argument: `c.area(2)` in Epsil. |
-| `minBy` | `MinBy` | `(collection<T>, key: (T) any -> unknown) -> value where T` | Return the element of the collection that minimizes the given key function. |
+| `minBy` | `MinBy` | `(xs: collection<T>, key: (T) any -> unknown) -> value where T` | Return the element of the collection that minimizes the given key function. |
 | `most` | `Most` | `((T) -> T where T: string) & ((indexed_collection<T>) -> list<T> where T: any)` | Return the collection without the last element. |
 | `negativeIntegers` | `NegativeIntegers` | constant `set<integer>` | The set of all negative integers. |
 | `negativeNumbers` | `NegativeNumbers` | constant `set<real>` | The set of all negative real numbers. |
@@ -307,32 +307,32 @@ The [Collections reference](/epsil/reference/collections/) has the full descript
 | — | `NotSupersetEqual` | `(lhs: any, rhs: any) -> boolean` | Test whether the first collection is not a superset (possibly equal) of the second. |
 | `numbers` | `Numbers` | constant `set<number>` | The set of all numbers. |
 | `open` | `Open` | `(number) -> number` | Open(x): the endpoint x of an Interval, marked as excluded. |
-| `ordering` | `Ordering` | `(indexed_collection<T>, order: (((T) any -> unknown) \| ((any, any) any -> boolean \| number))?) -> list<integer> where T: any` | Return the indexes that would sort the collection. |
+| `ordering` | `Ordering` | `(xs: indexed_collection<T>, order: (((T) any -> unknown) \| ((any, any) any -> boolean \| number))?) -> list<integer> where T: any` | Return the indexes that would sort the collection. |
 | — | `Pair` | `(first: T, second: U) -> tuple<T, U> where T, U` | A tuple of two elements |
-| `partition` | `Partition` | `(indexed_collection<T>, ((T) any -> boolean) \| integer, integer?) -> list<list<T>> where T: any` | Partition a collection into consecutive chunks each of size `n`; the trailing chunk may be shorter when `n` does not divide the length. |
+| `partition` | `Partition` | `(xs: indexed_collection<T>, count: ((T) any -> boolean) \| integer, step: integer?) -> list<list<T>> where T: any` | Partition a collection into consecutive chunks each of size `count`; the trailing chunk may be shorter when `count` does not divide the length. |
 | `pointList` | `PointList` | `(any+) -> any` | A list of points: zips collection components into a List of point-tuples (Desmos point-list idiom); a plain point when no component is a collection. |
 | `pointX` | `PointX` | `(xs: collection<any> \| tuple) -> any` | The x-coordinate of a point, broadcasting over a list of points. |
 | `pointY` | `PointY` | `(xs: collection<any> \| tuple) -> any` | The y-coordinate of a point, broadcasting over a list of points. |
 | `pointZ` | `PointZ` | `(xs: collection<any> \| tuple) -> any` | The z-coordinate of a point, broadcasting over a list of points. |
-| `position` | `Position` | `(indexed_collection<T>, predicate: (T) any -> boolean) -> list<integer> where T: any` | Return a list of indexes of elements in the collection satisfying the predicate. |
+| `position` | `Position` | `(xs: indexed_collection<T>, predicate: (T) any -> boolean) -> list<integer> where T: any` | Return a list of indexes of elements in the collection satisfying the predicate. |
 | `positiveIntegers` | `PositiveIntegers` | constant `set<integer>` | The set of all positive integers. |
 | `positiveNumbers` | `PositiveNumbers` | constant `set<real>` | The set of all positive real numbers. |
 | `primes` | `Primes` | constant `set<integer>` | The set of all prime numbers. |
 | `quotientRing` | `QuotientRing` | `(set<any>, any) -> set` | The quotient of a ring by the ideal generated by the second argument. |
 | `randomShuffle` | `RandomShuffle` | `((T) random -> T where T: string) & ((indexed_collection<T>) random -> list<T> where T: any)` | Randomize the order of the elements in the collection. |
 | — | `Range` | `(number, number?, step: number?) -> list<number>` | A sequence of numbers from a start to an end value with an optional step. |
-| `rangeOf` | `RangeOf` | `(indexed_collection<T>, indexed_collection<T>, from: integer?) -> missing \| range where T` | Return the 1-based inclusive index span of the first occurrence of `needle` as a contiguous subsequence of the indexed collection, or `Missing` when it does not occur. |
+| `rangeOf` | `RangeOf` | `(xs: indexed_collection<T>, needle: indexed_collection<T>, from: integer?) -> missing \| range where T` | Return the 1-based inclusive index span of the first occurrence of `needle` as a contiguous subsequence of the indexed collection, or `Missing` when it does not occur. |
 | `rationalNumbers` | `RationalNumbers` | constant `set<rational>` | The set of all finite rational numbers. |
 | `realNumbers` | `RealNumbers` | constant `set<real>` | The set of all finite real numbers. |
-| `reduce` | `Reduce` | `(collection<T>, reducer: (unknown, T) any -> unknown, initial: value?) -> value where T` | Reduce (fold) a collection to a single value by repeatedly applying a binary function, with an optional initial value. |
+| `reduce` | `Reduce` | `(xs: collection<T>, reducer: (unknown, T) any -> unknown, initial: value?) -> value where T` | Reduce (fold) a collection to a single value by repeatedly applying a binary function, with an optional initial value. |
 | `repeat` | `Repeat` | `(value: any, count: integer?) -> list` | Produce a sequence by repeating a single value. |
-| `replaceAt` | `ReplaceAt` | `((indexed_collection<T>, integer, T) -> list<T> where T: any) & ((indexed_collection<any>, integer, integer, any+) -> list<any>)` | Return a copy of the indexed collection with the element at the 1-based `index` replaced by `value`. |
-| `residueClass` | `ResidueClass` | `(any, any) -> residue` | An element of ℤ/nℤ: the class of the integer `k` modulo `n`. |
+| `replaceAt` | `ReplaceAt` | `((xs: indexed_collection<T>, index: integer, element: T) -> list<T> where T: any) & ((xs: indexed_collection<any>, index: integer, integer, any+) -> list<any>)` | Return a copy of the indexed collection with the element at the 1-based `index` replaced by `element`. |
+| `residueClass` | `ResidueClass` | `(k: any, n: any) -> residue` | An element of ℤ/nℤ: the class of the integer `k` modulo `n`. |
 | `rest` | `Rest` | `((T) -> T where T: string) & ((indexed_collection<T>) -> list<T> where T: any)` | Return the collection without the first element. |
 | `reverse` | `Reverse` | `((T) -> T where T: string) & ((T) -> T where T: list) & ((indexed_collection<T>) -> list<T> where T: any)` | Reverse the order of the elements of an indexed collection. |
-| `rotateLeft` | `RotateLeft` | `((T, integer?) -> T where T: string) & ((T, integer?) -> T where T: list) & ((indexed_collection<T>, integer?) -> list<T> where T: any)` | Rotate the elements of the collection to the left by n positions. |
-| `rotateRight` | `RotateRight` | `((T, integer?) -> T where T: string) & ((T, integer?) -> T where T: list) & ((indexed_collection<T>, integer?) -> list<T> where T: any)` | Rotate the elements of the collection to the right by n positions. |
-| `scan` | `Scan` | `(indexed_collection<T>, reducer: (unknown, T) any -> unknown, initial: value?) -> indexed_collection where T` | Return the cumulative fold of a collection: a same-length collection whose k-th element is the running result of applying a binary function left to right (optionally seeded by an initial value). |
+| `rotateLeft` | `RotateLeft` | `((xs: T, n: integer?) -> T where T: string) & ((xs: T, n: integer?) -> T where T: list) & ((xs: indexed_collection<T>, n: integer?) -> list<T> where T: any)` | Rotate the elements of the collection to the left by n positions. |
+| `rotateRight` | `RotateRight` | `((xs: T, n: integer?) -> T where T: string) & ((xs: T, n: integer?) -> T where T: list) & ((xs: indexed_collection<T>, n: integer?) -> list<T> where T: any)` | Rotate the elements of the collection to the right by n positions. |
+| `scan` | `Scan` | `(xs: indexed_collection<T>, reducer: (unknown, T) any -> unknown, initial: value?) -> indexed_collection where T` | Return the cumulative fold of a collection: a same-length collection whose k-th element is the running result of applying a binary function left to right (optionally seeded by an initial value). |
 | `second` | `Second` | `(xs: indexed_collection<any>) -> any` | The second element of a collection. |
 | — | `Set` | `(any*) -> set` | An unordered collection of distinct elements (a set). |
 | `setFrom` | `SetFrom` | `(value*) -> set` | Create a set from the elements of a collection. |
@@ -340,23 +340,23 @@ The [Collections reference](/epsil/reference/collections/) has the full descript
 | — | `Single` | `(value: T) -> tuple<T> where T` | A tuple with a single element |
 | `slice` | `Slice` | `((value: T, span: range) -> T where T: string) & ((value: T, start: number, end: number) -> T where T: string) & ((value: indexed_collection<T>, span: range) -> list<T> where T: any) & ((value: indexed_collection<T>, start: number, end: number) -> list<T> where T: any)` | Return a contiguous run of elements from an indexed collection. |
 | `sort` | `Sort` | `((T, order: (((character) any -> unknown) \| ((character, character) any -> boolean \| number))?) -> T where T: string) & ((indexed_collection<T>, order: (((T) any -> unknown) \| ((any, any) any -> boolean \| number))?) -> list<T> where T: any)` | Return the elements of the collection sorted according to the given comparison function. |
-| `startsWith` | `StartsWith` | `(indexed_collection<T>, prefix: indexed_collection<T>) -> boolean where T` | Return `True` when the indexed collection begins with `prefix` as a contiguous subsequence. |
+| `startsWith` | `StartsWith` | `(xs: indexed_collection<T>, prefix: indexed_collection<T>) -> boolean where T` | Return `True` when the indexed collection begins with `prefix` as a contiguous subsequence. |
 | `subset` | `Subset` | `(any, any*) -> boolean` | Test whether the first collection is a strict subset of the second. |
 | `subsetEqual` | `SubsetEqual` | `(any, any*) -> boolean` | Test whether the first collection is a subset (possibly equal) of the second. |
 | `superset` | `Superset` | `(any, any*) -> boolean` | Test whether the first collection is a strict superset of the second. |
 | `supersetEqual` | `SupersetEqual` | `(any, any*) -> boolean` | Test whether the first collection is a superset (possibly equal) of the second. |
 | `symmetricDifference` | `SymmetricDifference` | `(set<any>, set<any>) -> set` | Return the symmetric difference of two sets (elements in either set but not both). |
-| `table` | `Table` | `(function, integer+) -> collection` | An alias for `Tabulate` (the preferred name) that additionally accepts |
+| `table` | `Table` | `(function, integer+) -> collection` | Return the list of the values of a function at each index of the given dimensions, as `Tabulate` (the preferred name) does. |
 | `tabulate` | `Tabulate` | `(generator: function, integer+) -> list` | Create a collection by applying a function to each index in the specified dimensions. |
 | `take` | `Take` | `((xs: T, count: number) -> T where T: string) & ((xs: indexed_collection<T>, count: number) -> list<T> where T: any)` | Return the first `n` elements of an indexed collection. |
-| `takeWhile` | `TakeWhile` | `(indexed_collection<T>, predicate: (T) any -> boolean) -> indexed_collection where T` | Return the leading elements of the collection for which the predicate returns True, stopping at the first element that does not. |
+| `takeWhile` | `TakeWhile` | `(xs: indexed_collection<T>, predicate: (T) any -> boolean) -> indexed_collection where T` | Return the leading elements of the collection for which the predicate returns True, stopping at the first element that does not. |
 | `tally` | `Tally` | `(collection<T>) -> tuple<list<T>, list<integer>> where T` | Return a tuple with the unique elements of the collection and their respective counts. |
 | `third` | `Third` | `(xs: indexed_collection<any>) -> any` | The third element of a collection. |
 | — | `Triple` | `(first: T, second: U, third: V) -> tuple<T, U, V> where T, U, V` | A tuple of three elements |
 | — | `Tuple` | `(any*) -> tuple` | A fixed number of heterogeneous elements. |
 | `tupleFrom` | `TupleFrom` | `(value*) -> tuple` | Create a tuple from the elements of a collection. |
 | `union` | `Union` | `(any+) -> set` | Return the union of two or more collections as a set. |
-| `unique` | `Unique` | `((T) -> T where T: string) & ((T, test: (character, character) any -> boolean) -> T where T: string) & ((collection<T>) -> list<T> where T: any) & ((collection<T>, test: (T, T) any -> boolean) -> list<T> where T: any)` | Return a list of the unique elements of the collection. |
+| `unique` | `Unique` | `((xs: T) -> T where T: string) & ((xs: T, test: (character, character) any -> boolean) -> T where T: string) & ((xs: collection<T>) -> list<T> where T: any) & ((xs: collection<T>, test: (T, T) any -> boolean) -> list<T> where T: any)` | Return a list of the unique elements of the collection. |
 | `values` | `Values` | `(dictionary<any>) -> list` | Return a list of the values of a dictionary. |
 | `zip` | `Zip` | `(indexed_collection<any>+) -> list` | Combine multiple collections element-wise into a list of tuples. |
 

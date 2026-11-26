@@ -64,10 +64,12 @@ those have a single parameter. No definition has a `parameters` field.
   for the same role across the library. Where a parameter of an overload set
   takes another role in another arm, give it another name.
 - **A sample** is one line of Epsil source in the Epsil spelling (`[1, 2,
-  3]`, `x => x^2`, `"crimson"`), of the type of its parameter in every arm
-  that has it, and short: it is shown in the editor as faint text, and
-  inserted when the user accepts it. Prefer a value that makes a call
-  meaningful (`2` for `count`, not `0`).
+  3]`, `x => x^2`, `"crimson"`), of the type of its parameter in at least
+  one arm that has it (a string arm `(T) -> T where T: string` and a list
+  arm admit no common sample; prefer the list), and short: it is shown in
+  the editor as faint text, and inserted when the user accepts it. Prefer a
+  value that makes a call meaningful (`2` for `count`, not `0`). The test
+  reads the type variables of an arm as their bounds.
 - **A parameter description** is one sentence: what the argument is, its
   unit or its range when it has one, what happens at a boundary when it is
   not obvious. It does not repeat the type.
@@ -141,6 +143,9 @@ those have a single parameter. No definition has a `parameters` field.
   where the arms disagree on what a position means, use names.
 - An empty string, a hole or `null` in a `parameters` list leaves that
   position undocumented.
+- A call cannot pass a rest parameter by name (`argument-name-unknown`),
+  and the signature help shows no name for it: document a rest parameter by
+  position.
 
 ## 7. Continuation prompt
 

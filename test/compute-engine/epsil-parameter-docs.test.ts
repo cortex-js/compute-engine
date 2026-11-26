@@ -1,6 +1,10 @@
 import { ComputeEngine } from '../../src/compute-engine';
 import { parseType } from '../../src/common/type/parse';
 import type { Type } from '../../src/common/type/types';
+import {
+  groundSkeleton,
+  readTypeVariablesAsBounds,
+} from '../../src/common/type/instantiate';
 import { epsilCompletions } from '../../src/epsil/completion';
 import { describeName } from '../../src/epsil/describe-name';
 import { splitDocComment } from '../../src/epsil/doc-tags';
@@ -237,45 +241,76 @@ describe('THE LIBRARY DOCUMENTATION', () => {
   });
 
   /** The samples of the library that do not parse or are not of the type
-   * of their parameter or key. */
+   * of their parameter or key. A sample of a parameter fits at least one arm
+   * of the signature that has that parameter, with the type variables of the
+   * arm read as their bounds: an overload set whose string arm keeps a string
+   * (`(T) -> T where T: string`) and whose list arm takes a list has no
+   * sample that fits both. A sample of a parameter of a function type, or
+   * of a union with one, may instead fit the variance-aware skeleton of that type (`groundSkeleton()`):
+   * read as its bound `any`, a variable under a callback parameter would
+   * admit only a callback that takes any value, and `x => x > 5` takes a
+   * real. */
   function brokenSamples(
     engine: ComputeEngine,
     ids: readonly string[]
   ): string[] {
     const broken: string[] = [];
-    const check = (where: string, sample: string, type: Type | undefined) => {
+    const check = (
+      where: string,
+      sample: string,
+      types: readonly Type[] | Type | undefined
+    ) => {
       const [ast, diagnostics] = parseEpsil(sample);
       if (diagnostics.some((d) => d.severity === 'error')) {
         broken.push(`${where}: ${sample} does not parse`);
         return;
       }
-      if (type === undefined) return;
+      const candidates =
+        types === undefined ? [] : Array.isArray(types) ? types : [types];
+      if (candidates.length === 0) return;
       const value = engine.box(resolveLibraryNames(ast, sample, engine));
-      if (!value.type.matches(type))
+      if (!candidates.some((type) => value.type.matches(type)))
         broken.push(`${where}: ${sample} is not of the type of its parameter`);
     };
     for (const id of ids) {
       const entry = describeName(engine, id);
       const signature = engine.operatorInfo(id)?.signature?.type;
-      const arms =
+      const rawArms =
         typeof signature !== 'object'
           ? []
           : signature.kind === 'intersection'
             ? signature.types
             : [signature];
-      const typeOf = (name: string): Type | undefined => {
-        for (const arm of arms) {
-          if (typeof arm !== 'object' || arm.kind !== 'signature') continue;
-          const element = [...(arm.args ?? []), ...(arm.optArgs ?? [])].find(
-            (e) => e.name === name
-          );
-          if (element !== undefined) return element.type;
-        }
-        return undefined;
+      const arms = rawArms.map(readTypeVariablesAsBounds);
+      const elementsOf = (arm: Type | undefined) =>
+        typeof arm !== 'object' || arm.kind !== 'signature'
+          ? undefined
+          : [
+              ...(arm.args ?? []),
+              ...(arm.optArgs ?? []),
+              ...(arm.variadicArg === undefined ? [] : [arm.variadicArg]),
+            ];
+      /** The readings of the parameter `i` of the arm `a`. */
+      const readings = (a: number, i: number): Type[] => {
+        const bound = elementsOf(arms[a])?.[i]?.type;
+        const raw = elementsOf(rawArms[a])?.[i]?.type;
+        const result = bound === undefined ? [] : [bound];
+        const isFunction = (t: Type): boolean =>
+          typeof t === 'object' &&
+          (t.kind === 'signature' ||
+            (t.kind === 'union' && t.types.some(isFunction)));
+        if (raw !== undefined && isFunction(raw))
+          result.push(groundSkeleton(raw));
+        return result;
       };
+      const typesOf = (name: string): Type[] =>
+        arms.flatMap((arm, a) => {
+          const i = elementsOf(arm)?.findIndex((e) => e.name === name) ?? -1;
+          return i < 0 ? [] : readings(a, i);
+        });
       for (const [name, doc] of Object.entries(entry?.parameters ?? {})) {
         if (doc.sample !== undefined)
-          check(`${id}(${name})`, doc.sample, typeOf(name));
+          check(`${id}(${name})`, doc.sample, typesOf(name));
         for (const key of doc.keys ?? [])
           for (const text of [key.sample, key.default])
             if (text !== undefined)
@@ -285,22 +320,19 @@ describe('THE LIBRARY DOCUMENTATION', () => {
                 key.type === undefined ? undefined : parseType(key.type)
               );
       }
-      // A sample by position is of the type of that parameter in every arm
-      // that has it.
+      // A sample by position is of the type of that parameter in at least
+      // one arm that has it.
       (entry?.positionalParameters ?? []).forEach((doc, i) => {
         if (doc?.sample === undefined) return;
-        for (const arm of arms) {
-          if (typeof arm !== 'object' || arm.kind !== 'signature') continue;
-          const elements = [
-            ...(arm.args ?? []),
-            ...(arm.optArgs ?? []),
-            ...(arm.variadicArg === undefined ? [] : [arm.variadicArg]),
-          ];
-          const element =
-            elements[Math.min(i, elements.length - 1)] ?? undefined;
-          if (i >= elements.length && arm.variadicArg === undefined) continue;
-          check(`${id}(#${i})`, doc.sample, element?.type);
-        }
+        const types: Type[] = [];
+        arms.forEach((arm, a) => {
+          if (typeof arm !== 'object' || arm.kind !== 'signature') return;
+          const elements = elementsOf(arm) ?? [];
+          if (elements.length === 0) return;
+          if (i >= elements.length && arm.variadicArg === undefined) return;
+          types.push(...readings(a, Math.min(i, elements.length - 1)));
+        });
+        check(`${id}(#${i})`, doc.sample, types);
       });
     }
     return broken;
@@ -334,6 +366,24 @@ describe('THE LIBRARY DOCUMENTATION', () => {
     });
     expect(brokenSamples(engine, ['Pad'])).toEqual([
       'Pad(count): "two" is not of the type of its parameter',
+    ]);
+  });
+
+  test('a type variable reads as its bound, and one arm is enough', () => {
+    const engine = new ComputeEngine();
+    engine.declare('Shout', {
+      signature: '(xs: T) -> T where T: string',
+      evaluate: ([xs]) => xs,
+      parameters: { xs: { sample: '[1, 2]' } },
+    });
+    engine.declare('Twin', {
+      signature:
+        '((xs: T) -> T where T: string) & ((xs: indexed_collection<T>) -> list<T> where T: any)',
+      evaluate: ([xs]) => xs,
+      parameters: { xs: { sample: '[1, 2]' } },
+    });
+    expect(brokenSamples(engine, ['Shout', 'Twin'])).toEqual([
+      'Shout(xs): [1, 2] is not of the type of its parameter',
     ]);
   });
 });
