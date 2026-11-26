@@ -946,12 +946,11 @@ the bigint and the interval modes and GLSL decline the input. The entry checks
 it as a list (a string or a typed array is refused), and a batch shares it
 between its cells.
 
-An input of a matrix type of no stated dimensions (`matrix`, `matrix<real>`,
+A value of a matrix type of no stated dimensions (`matrix`, `matrix<real>`,
 `matrix<integer>`; `isFreeMatrix()` of `lower-functions.ts`) is such an input
-too, in each place above (a positional parameter of a root function literal,
-a typed parameter of `Apply`, a parameter of a user function, an input that a
-user function reads, a variable of the engine that a root literal assigns),
-with one more fact: its rows have one length, the length of its first row,
+too at a typed parameter of `Apply`, a parameter of a user function, an input
+that a user function reads and a variable of the engine that a root literal
+assigns, with one more fact: its rows have one length, the length of its first row,
 the operation `rows.width` (`$0.length === 0 ? 0 : $0[0].length`), which the
 compiled code does not test (R5: a value with rows of different lengths is
 outside the type, and the engine refuses one as its value). It is made where
@@ -961,7 +960,21 @@ operation so that a later `b.op()` of the same operand is that value, as
 and is the value's `rowWidths`; its `rowCounts` is `rows.count`. So every
 reader of the lane reads it, a row read by `chunks()` has that length (a `Map`
 of each element keeps the fact), and the matrix operators read it
-("Matrices"). An argument at a parameter of a matrix type, of a user function
+("Matrices"). An input of the entry (a name read at the entry, a positional
+parameter of a root function literal: `input()` of `lower.ts`) is not a
+parameter of the lane: it is a list of rank 2 of reals or integers of the
+shape `[{v: r}, {v: c}]`, with two length parameters before it, its number of
+rows and the length of its first row ("Matrices", a matrix of run-time size).
+The readers of the lane read it as its rows, the operation `rows.of` (`$0`:
+the same array of arrays), whose `rowCounts` and `rowWidths` are `r` and `c`;
+that value is the binding of the name. Its two lengths are parameters, where
+the count of the other values of the lane is an operation made where it is
+read (`rows.count`), so two forms compile for it that decline for them: an
+`If` with no else whose list arm reads it (`If(n > 0, Map(r ↦ Sum(r), M))`,
+a list of NaN where the condition is false, as for an input of type
+`list<real>`), and a `Sum` whose term is a list made from it
+(`Sum(k · Map(r ↦ Sum(r), M), k, 1, 200)`). An argument at a parameter of a
+matrix type, of a user function
 or of `Apply`, must have rows of one length (`matrixRows()` of
 `lower-lists.ts`): a value of the lane with the fact is taken as it is, and a
 list of rank 2 of reals or integers (a matrix of stated size, a literal, a
@@ -2601,6 +2614,26 @@ list is the product; `Rank` of it is 2 and `Shape` the tuple of `rows.count`
 (or its `rowCounts`) and its `rowWidths`; `Diagonal` of it is the build of
 its `Min(rows, columns)` diagonal elements; `Determinant`, `Inverse` and
 `MatrixPower` of it are the kernels of its order (`rowsKernel()`, below).
+
+An input of the entry of a matrix type of no stated dimensions (a name read
+at the entry, a positional parameter of a root function literal: `input()` of
+`lower.ts`) is a list of rank 2 of the lane `real` or `integer` whose two
+lengths are values, the shape `[{v: r}, {v: c}]`. Two length parameters come
+before it, both `lengthOf`: `r`, the length of the input, and `c`, which is
+`widthOf` too, the length of its first row and 0 of no row (`Syntax.width`,
+`($0.length === 0 ? 0 : $0[0].length)` on JavaScript, a statement at the
+start of the entry when the body reads it, so that it is read once). Both are
+known `>= 0` (`inputLengths`). Its run-time form is the host's array of
+arrays, so the operation `rows.of` (`$0`) reads it as a value of the lane
+`rows` at no cost, with `r` and `c` as its `rowCounts` and `rowWidths`. That
+value is the binding of the name: every reader below, and every reader of
+"The rows lane", reads it, and a read of the name that no reader of the lane
+admits declines. The other values of a matrix type (a parameter of a user
+function or of `Apply`, an input that a user function reads, a variable of
+the engine that a root literal assigns, a build) are of the lane `rows`.
+`docs/plans/2026-11-25-matrix-of-run-time-size.md` describes the change that
+gives each of them this shape.
+
 Two lengths that must be equal (the inner lengths of
 `MatrixMultiply`, the numbers of rows and of columns of `Trace`) and that
 `same()` does not prove equal (one value, or equal constants) are compared

@@ -66,6 +66,10 @@ export type Syntax = {
   positional(name: string, index: number): string;
   /** The length of the input whose read is `list`. */
   length(list: string): string;
+  /** The length of the first row of the input whose read is `list`, a
+   *  matrix of run-time size, 0 for no row (`IRFunction.widthOf`). Absent:
+   *  the target has no such input. */
+  width?(list: string): string;
   /** The part `index` of the tuple `tuple`, an input read part by part
    *  (`IRFunction.partOf`). */
   part?(tuple: string, index: number): string;
@@ -298,6 +302,11 @@ export function printProgram(
   let decided = false;
   const entry = entryOf(p);
   const positional = entry.positional ?? 0;
+  // The length of the first row of a matrix input (`IRFunction.widthOf`),
+  // with its text: a statement at the start of the entry when the body
+  // reads it (`widthsRead`), so that it is read once.
+  const widths = new Map<V, string>();
+  const widthsRead = new Set<V>();
   entry.body.params.forEach((v, k) => {
     const name = entry.paramNames[k];
     const part = entry.partOf?.[k];
@@ -306,6 +315,10 @@ export function printProgram(
         ? syntax.positional(name, argumentIndex(entry, k))
         : syntax.input(name, k);
     const input = part === undefined ? whole : syntax.part!(whole, part);
+    if (entry.lengthOf[k] && entry.widthOf?.[k] === true) {
+      widths.set(v, syntax.width!(input));
+      return;
+    }
     names.set(
       v,
       entry.lengthOf[k]
@@ -314,7 +327,10 @@ export function printProgram(
     );
   });
   const type = (v: V): IRType => p.types[v];
-  const name = (v: V): string => names.get(v) ?? `v${v}`;
+  const name = (v: V): string => {
+    if (widths.has(v)) widthsRead.add(v);
+    return names.get(v) ?? `v${v}`;
+  };
   /** The text of the value of `v` at a use. */
   const use = (v: V): string =>
     inlined.has(v) ? text(index.def.get(v)!) : name(v);
@@ -681,7 +697,13 @@ export function printProgram(
     return [...lines, ...named, `  return ${value};`];
   };
   // The entry first: `order` follows `p.functions`, whose first is the entry.
-  const main = returned(entry);
+  const statements = returned(entry);
+  const main = [
+    ...[...widths]
+      .filter(([v]) => widthsRead.has(v))
+      .map(([v, text]) => '  ' + syntax.declare(type(v), `v${v}`, text)),
+    ...statements,
+  ];
   const functions = p.functions
     .filter(
       (f) =>

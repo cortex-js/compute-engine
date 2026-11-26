@@ -1,7 +1,8 @@
 # A matrix of run-time size as a shape of the IR
 
 Status: approved by the user 2026-11-25, with Q1 (a), Q2 (yes) and Q3
-(yes) of section 6; not started. Scope: the `javascript` target of the IR
+(yes) of section 6; step 1 is done (section 8), steps 2 to 6 are not
+started. Scope: the `javascript` target of the IR
 compiler (`src/compute-engine/compilation/ir/`), outside the interval and
 `bigint` modes. GLSL keeps stated sizes. Issues it resolves: CE-1834.
 Related: CE-1837 (an untyped parameter inferred `unknown`).
@@ -165,3 +166,51 @@ the lane `rows`: a value that can be a matrix or a list of rows of different
 lengths at one place (`If` of the two) must decline, as two shapes do (R3).
 Measure the tests under `test/compute-engine/` that compile a matrix before
 step 1, and report the counts at each step.
+
+## 8. Results
+
+Test files under `test/compute-engine/` that compile a matrix (a file that
+names a matrix type or operator and calls `compile`): 105, with 8,210 tests
+and 549 snapshots. Nine of them compile a matrix type of no stated
+dimensions.
+
+**Step 1.** An input of the entry of a matrix type of no stated dimensions
+(a name read at the entry, a positional parameter of a root function
+literal) is a parameter of the shape `[{v: r}, {v: c}]`, with two length
+parameters before it (`IRFunction.lengthOf`; the second is `widthOf` too).
+The readers of the lane `rows` read it through the operation `rows.of`,
+which gives the same array of arrays as a value of the lane with `r` and `c`
+as its `rowCounts` and `rowWidths`; that value is the binding of the name.
+So every reader keeps its code path, and a read that no reader of the lane
+admits still declines: step 2 gives such a read the parameter itself. The
+other values of a matrix type (a parameter of a user function or of
+`Apply`, an input that a user function reads, a variable of the engine that
+a root literal assigns) stay on the lane `rows` until steps 3 and 4.
+
+- Tests: the 105 files pass and no snapshot changes. Changed tests: 7
+  added to `ir-matrix-input.test.ts`, and `rows.of` added to the list of
+  the JavaScript-only operations of `ir-slice-glsl.test.ts`.
+- Emitted code of 40 witnesses, the matrix forms of
+  `test/compute-engine/ir-matrix-input.test.ts` and the forms of CE-1834:
+  the same value for each; the 8 forms that decline still decline, with
+  the same message. Of the 32 others, 8 have the same code, 3 the same
+  code with other numbers for its values, and 21 differ in these ways
+  only: the length of the first row is one statement at the start of the
+  entry (before, it was written in place where it was read once); the
+  input read more than once is one name (`const v3 = _.M;`); and
+  `Map(r ↦ Sum(r), M)` and `Map(r ↦ Reduce(r, Add, 0), Q)` lose a check of
+  the row length (`_listlen`), which is the length of an array of the host.
+- Two forms that declined compile, because the two lengths are parameters
+  and no longer operations made where they are read: an `If` with no else
+  whose list arm reads the input (`If(n > 0, Map(r ↦ Sum(r), M))`: a list
+  of NaN where the condition is false and the interpreter gives `Missing`,
+  as for an input of type `list<real>`), and a `Sum` whose term is a list
+  made from the input (`Sum(k · Map(r ↦ Sum(r), M), k, 1, 200)`, the
+  interpreter's value). Both still decline for a parameter of a user
+  function of a matrix type, until steps 3 and 4.
+- The report of the input (`freeSymbolTypes`, `lowered`) is `array`; it was
+  `rows`, a value that the reference does not list (CE-1860 for an input of
+  type `list<list<real>>`). The matrix input is not in a release.
+- `rows.*` operations of `operators.ts`: 25 before, 26 after (`rows.of`).
+  The operation `rows.width` is no longer made for an input of the entry.
+  The reads of `rowWidths` and `rowCounts` do not change.

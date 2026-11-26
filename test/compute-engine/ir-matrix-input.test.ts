@@ -12,6 +12,10 @@ import type { Expression } from '../../src/compute-engine/global-types';
 // prove equal are compared once at run time (`MatrixMultiply`, `Trace`), a
 // `RangeError` where the interpreter gives an error. Each value must equal
 // the interpreter's.
+//
+// An input of the entry is a list of rank 2 whose two lengths are parameters
+// before it, its number of rows and the length of its first row (`README.md`,
+// "Matrices"); the readers of the lane read it as its rows (`rows.of`).
 
 type Json = unknown;
 type Grid = number[][];
@@ -231,6 +235,92 @@ describe('a matrix input: the matrix operators', () => {
     const { r, errors } = check(json);
     expect(errors).toBeGreaterThan(0);
     expect(r.code).toMatch(/_agree|_square/);
+  });
+});
+
+describe('a matrix input: its two lengths', () => {
+  const code = (json: Json) => compile(box(json), { fallback: false }).code;
+
+  test('the length of the first row is one statement at the start', () => {
+    const lines = code(['MatrixMultiply', 'M', ['Transpose', 'M']]).split('\n');
+    expect(lines[1]).toBe(
+      '  const v1 = (_.M.length === 0 ? 0 : _.M[0].length);'
+    );
+    expect(lines.filter((l) => l.includes('_.M[0].length'))).toHaveLength(1);
+  });
+
+  test('code that reads no row length has no such statement', () => {
+    expect(code(['Length', 'M'])).toBe(
+      ['(() => {', '  return _.M.length;', '})()'].join('\n')
+    );
+    expect(code(['At', ['At', 'M', 1], 2])).not.toMatch(/M\[0\]\.length/);
+  });
+
+  test('a positional parameter: its lengths read the same argument', () => {
+    const r = compile(
+      box(
+        F(
+          ['Add', ['Trace', ['MatrixMultiply', 'm', 'n']], 'k', ['Length', 'u']],
+          typed('k', 'real'),
+          typed('m', 'matrix<real>'),
+          typed('u', 'list<real>'),
+          typed('n', 'matrix<integer>')
+        )
+      ),
+      { fallback: false }
+    );
+    expect(r.success).toBe(true);
+    const run = r.run as (...args: unknown[]) => number;
+    // Trace([[1, 2], [3, 4]] · [[2, 0], [1, 1]]) is 8, and the list has 3
+    // elements.
+    expect(run(10, [[1, 2], [3, 4]], [5, 6, 7], [[2, 0], [1, 1]])).toBe(21);
+    expect(() => run(10, [[1, 2, 3]], [5], [[2, 0], [1, 1]])).toThrow(
+      RangeError
+    );
+    expect(r.code).toMatch(/a1\.length === 0 \? 0 : a1\[0\]\.length/);
+    expect(r.code).toMatch(/a3\.length === 0 \? 0 : a3\[0\]\.length/);
+  });
+
+  test('the report of the input: an array', () => {
+    const r = compile(box(['Transpose', 'M']), { fallback: false });
+    expect(r.freeSymbolTypes?.M).toEqual({
+      type: 'matrix<real>',
+      lowered: 'array',
+      provenance: 'declared',
+    });
+  });
+
+  // The two lengths are parameters, as the length of a `list<real>` input
+  // is, so a list made from the input has a length that is known outside
+  // an arm and outside a term.
+  test('an If with no else whose list arm reads the input', () => {
+    const json = ['If', ['Greater', 'n', 2], ['Map', F(['Sum', 'r'], 'r'), 'M']];
+    const r = compile(box(json), { fallback: false });
+    expect(r.success).toBe(true);
+    const M = [[1, 2, 3], [4, 5, 6]];
+    expect(r.run!({ M, n: 3 } as never)).toEqual([6, 15]);
+    // The interpreter gives `Missing`: a list of NaN, as for a list input.
+    expect(r.run!({ M, n: 1 } as never)).toEqual([NaN, NaN]);
+    ce.withValues({ M: list(M), n: ce.number(1) } as never, () =>
+      expect(box(json).evaluate().json).toBe('Missing')
+    );
+  });
+
+  test('a Sum whose term is a list made from the input', () => {
+    const { errors } = check([
+      'Sum',
+      ['Multiply', 'k', ['Map', F(['Sum', 'r'], 'r'), 'M']],
+      ['Limits', 'k', 1, 200],
+    ]);
+    expect(errors).toBe(0);
+  });
+
+  // A read that no reader of the rows admits declines (element-wise
+  // arithmetic: CE-1834).
+  test('arithmetic of the input declines', () => {
+    expect(declines(['Add', 'M', 1])).toMatch(
+      /M of type matrix<real> other than in an element read M\[i\]\[j\]/
+    );
   });
 });
 

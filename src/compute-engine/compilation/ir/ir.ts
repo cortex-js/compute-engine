@@ -182,6 +182,11 @@ export type IRFunction = {
    *  `lengthOf` parameter is the length of the input of that name. */
   readonly paramNames: string[];
   readonly lengthOf: boolean[];
+  /** The entry: a `lengthOf` parameter that is `widthOf` too is the length
+   *  of the first row of the input of that name, a matrix of run-time size
+   *  (0 for a matrix of no row), whose number of rows is the `lengthOf`
+   *  parameter before it. */
+  readonly widthOf?: boolean[];
   /** The entry: a parameter with a `partOf` index is the part of that index
    *  of the input of its name, a tuple whose parts have different lanes
    *  (`tupleParts()`, JavaScript only). */
@@ -582,6 +587,7 @@ export class Builder {
   private open: Region[] = [];
   private readonly paramNames: string[] = [];
   private readonly lengthOf: boolean[] = [];
+  private readonly widthOf: boolean[] = [];
   private readonly partOf: (number | undefined)[] = [];
   private readonly made = new Map<string, { v: V; region: Region }>();
   /** The number of effectful instructions emitted so far. */
@@ -662,6 +668,7 @@ export class Builder {
       name: 'main',
       paramNames: this.paramNames,
       lengthOf: this.lengthOf,
+      ...(this.widthOf.some((w) => w) ? { widthOf: this.widthOf } : {}),
       ...(this.partOf.some((j) => j !== undefined)
         ? { partOf: this.partOf }
         : {}),
@@ -719,13 +726,20 @@ export class Builder {
     this.current().body.push(i);
   }
 
-  /** A parameter of the entry: the input `name`, its length, or its part
-   *  of the index `part`. */
-  param(name: string, type: IRType, lengthOf = false, part?: number): V {
+  /** A parameter of the entry: the input `name`, its length (with `width`,
+   *  the length of its first row), or its part of the index `part`. */
+  param(
+    name: string,
+    type: IRType,
+    lengthOf = false,
+    part?: number,
+    width = false
+  ): V {
     const v = this.newValue(type);
     this.open[0].params.push(v);
     this.paramNames.push(name);
     this.lengthOf.push(lengthOf);
+    this.widthOf.push(width);
     this.partOf.push(part);
     return v;
   }

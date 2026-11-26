@@ -4625,9 +4625,11 @@ function lowerOnce(
     tupleOrInputType(isUntyped(t) ? 'unknown' : t, cx.wide);
 
   /** A list of lists of two lengths not stated, on JavaScript: the host's
-   *  array of arrays, held whole on the lane `rows` (`rowsElementLane()`).
-   *  The bigint and the interval modes decline it. Only an input has it: a
-   *  name with a value has the type of its value. */
+   *  array of arrays, read on the lane `rows` (`rowsElementLane()`). The
+   *  bigint and the interval modes decline it. Only an input has it: a name
+   *  with a value has the type of its value. An input of the entry of a
+   *  matrix type is a list of rank 2 that the readers of the lane read as
+   *  its rows (`input()`). */
   const rowsInput = (
     t: Type
   ): { lane: Lane; shape: (number | 'run-time')[] } | undefined =>
@@ -4670,7 +4672,9 @@ function lowerOnce(
 
   /** The input `name` of the engine type `t`: a parameter of the entry (a
    *  positional one: of a root function literal). A list of run-time length
-   *  has its length as a parameter before it. A positional one of no
+   *  has its length as a parameter before it; a matrix of no stated
+   *  dimensions has two, its number of rows and the length of its first
+   *  row. A positional one of no
    *  declared type is a real (the root function literal declines one whose
    *  uses give it a type that admits a list); one declared `any` declines
    *  (it is not an input that `program()` refuses). */
@@ -4741,25 +4745,45 @@ function lowerOnce(
         undefined,
         hasUnsettledShape(t) ? UNSETTLED_SHAPE : undefined
       );
-    const shape = ir.shape.map((n) => {
-      if (n !== 'run-time') return n;
-      const length = b.param(name, scalarType('integer'), true);
+    /** A parameter of a length of the input: its length, or with `width`
+     *  the length of its first row (`IRFunction.widthOf`). */
+    const lengthParam = (width = false): V => {
+      const length = b.param(
+        name,
+        scalarType('integer'),
+        true,
+        undefined,
+        width
+      );
       inputLengths.add(length);
       if (positional) b.positional += 1;
-      return { v: length };
-    });
-    const param = b.param(name, { lane: ir.lane, shape });
+      return length;
+    };
+    const shape = ir.shape.map((n) =>
+      n === 'run-time' ? { v: lengthParam() } : n
+    );
+    let param: V;
+    if (ir.lane === 'rows' && isFreeMatrix(t)) {
+      // A matrix type states that the rows have one length, which the
+      // compiled code does not test (a value with rows of different lengths
+      // is outside the type). The input is a list of rank 2 whose two
+      // lengths are parameters before it, its number of rows and the length
+      // of its first row (README, "Matrices"). The readers of the lane
+      // `rows` read it as its rows (`rows.of`, the same array of arrays),
+      // whose count and whose length are those two values (`rowCounts`,
+      // `rowWidths`).
+      const [rows, columns] = [lengthParam(), lengthParam(true)];
+      const matrix = b.param(name, {
+        lane: rowsElementLane(t, cx.wide)!,
+        shape: [{ v: rows }, { v: columns }],
+      });
+      param = b.entryOp('rows.of', [matrix], scalarType('rows'));
+      rowCounts.set(param, rows);
+      rowWidths.set(param, columns);
+    } else param = b.param(name, { lane: ir.lane, shape });
     if (ir.lane === 'rows') {
       rowsParams.add(param);
       rowsElements.set(param, rowsElementLane(t, cx.wide)!);
-      // A matrix type states that the rows have one length (R5: no test),
-      // the length of the first row, made in the entry body so that every
-      // region reads one value (`rowWidths`).
-      if (isFreeMatrix(t))
-        rowWidths.set(
-          param,
-          b.entryOp('rows.width', [param], scalarType('integer'))
-        );
     }
     // A string is read once, as the engine boxes it (`text.in`); a list of
     // strings is read by `StringJoin` only, which conditions its elements.

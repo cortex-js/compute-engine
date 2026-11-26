@@ -332,6 +332,8 @@ export const JS: Syntax = deepFreeze({
     // The length of the rows of a matrix, and the checks of two lengths of
     // the matrix operators.
     'rows.width': '($0.length === 0 ? 0 : $0[0].length)',
+    // The host's array of arrays, as it is.
+    'rows.of': '$0',
     'rows.agree': { text: '_agree($0, $1)', helpers: ['_agree'] },
     'rows.square': { text: '_square($0, $1)', helpers: ['_square'] },
     'rows.order': { text: '_order($0, $1)', helpers: ['_order'] },
@@ -533,6 +535,7 @@ export const JS: Syntax = deepFreeze({
     IDENTIFIER.test(name) ? `_.${name}` : `_[${JSON.stringify(name)}]`,
   positional: (_name, k) => `a${k}`,
   length: (list) => `${list}.length`,
+  width: (list) => `(${list}.length === 0 ? 0 : ${list}[0].length)`,
   part: (tuple, index) => `${tuple}[${index}]`,
   list: (elements) => `[${elements.join(', ')}]`,
   // An array of the length, filled in index order by a `for` loop: an

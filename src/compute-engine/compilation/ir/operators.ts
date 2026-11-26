@@ -504,6 +504,11 @@ export const OPERATORS: readonly OperatorRow[] = Object.freeze([
   // The length of the rows of a value of a matrix type (`matrix<real>`),
   // whose rows have one length: that of its first row, 0 of no row.
   row(undefined,      1,          [[['rows'], I, 'rows.width']], list),
+  // A matrix of run-time size, a list of rank 2 of reals or integers whose
+  // two lengths are values (an input of a matrix type, `input()` of
+  // `lower.ts`), read as its rows: the same array of arrays, so that the
+  // readers of the lane `rows` read it (README, "Matrices").
+  row(undefined,      1,          [[['list'], 'rows', 'rows.of']], list),
   // Two lengths that the matrix operators read, which the lowering does not
   // prove equal (`lower-matrices.ts`, `agree()`): 0 where they are equal, a
   // `RangeError` where they differ, the interpreter's

@@ -135,9 +135,10 @@ export function rowsElementLane(
 /** `t` is a matrix type whose two dimensions are not stated (`matrix`,
  *  `matrix<real>`): a list of lists whose rows have one length, which the
  *  compiled code does not test (R5 of `docs/COMPILATION-MODEL.md`). On
- *  JavaScript it is of the lane `rows` (`rowsElementLane()`), with the
- *  length of its first row as the length of every row (`rows.width`,
- *  `rowWidths`). */
+ *  JavaScript it is read on the lane `rows` (`rowsElementLane()`), with the
+ *  length of its first row as the length of every row (`rowWidths`): the
+ *  operation `rows.width`, or for an input of the entry a parameter before
+ *  it (`input()` of `lower.ts`). */
 export function isFreeMatrix(t: Type): boolean {
   t = present(t);
   return (
