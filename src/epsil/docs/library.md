@@ -795,7 +795,7 @@ The [Linear algebra reference](/epsil/reference/linear-algebra/) has the full de
 | Epsil | MathJSON | Signature | Summary |
 |:------|:---------|:----------|:--------|
 | `adjugateMatrix` | `AdjugateMatrix` | `(matrix) -> matrix` | Adjugate (classical adjoint) of a square matrix. |
-| `characteristicPolynomial` | `CharacteristicPolynomial` | `(matrix, any?) -> expression` | Characteristic polynomial det(x·I − A) of a square matrix (monic). |
+| `characteristicPolynomial` | `CharacteristicPolynomial` | `(matrix, variable: any?) -> expression` | Characteristic polynomial det(x·I − A) of a square matrix (monic). |
 | `choleskyDecomposition` | `CholeskyDecomposition` | `(matrix) -> matrix` | Cholesky decomposition of a positive-definite matrix. |
 | `conjugateTranspose` | `ConjugateTranspose` | `(value, axis1: integer?, axis2: integer?) -> value` | Conjugate transpose (Hermitian adjoint) of a matrix or tensor. |
 | `cross` | `Cross` | `(tuple \| vector, tuple \| vector) -> tuple \| vector` | Cross product of two 3-vectors. |
@@ -803,13 +803,13 @@ The [Linear algebra reference](/epsil/reference/linear-algebra/) has the full de
 | `det` | `Det` | `(matrix) -> number` | `det` is an alias for `determinant`, which is the preferred name. |
 | `determinant` | `Determinant` | `(matrix) -> number` | Determinant of a square matrix. |
 | `diagonal` | `Diagonal` | `(value) -> value` | Extract a matrix diagonal or build a diagonal matrix. |
-| `dimension` | `Dimension` | `(value) -> integer` | Dimension of an object |
+| `dimension` | `Dimension` | `(value) -> integer` | Return the dimension of a vector space: the number of elements of a vector, matrix or tensor, or the product of the dimensions of the two objects of a `hom`. |
 | `dot` | `Dot` | `(list<tuple> \| matrix \| tuple \| vector, list<tuple> \| matrix \| tuple \| vector) -> value` | Dot product (vector inner product) or matrix product. |
 | `eigen` | `Eigen` | `(matrix) -> tuple` | Eigenvalue-eigenvector decomposition of a square matrix. |
 | `eigenvalues` | `Eigenvalues` | `(matrix) -> list` | Eigenvalues of a square matrix. |
 | `eigenvectors` | `Eigenvectors` | `(matrix) -> list` | Eigenvectors of a square matrix. |
 | `fill` | `Fill` | `(value: any, integer+) -> list` | List or tensor with each element equal to a value. |
-| `flatten` | `Flatten` | `(value, (+oo \| integer)?) -> list` | Flatten a tensor or collection into a list. |
+| `flatten` | `Flatten` | `(value, depth: (+oo \| integer)?) -> list` | Flatten a tensor or collection into a list. |
 | `hadamardProduct` | `HadamardProduct` | `(matrix \| vector, matrix \| vector) -> matrix \| vector` | Hadamard (element-wise) product of two vectors or matrices of the same shape. |
 | `hom` | `Hom` | `(value*) -> value` | Hom-set of morphisms between objects |
 | `identityMatrix` | `IdentityMatrix` | `(integer) -> matrix` | n-by-n identity matrix. |
@@ -817,29 +817,29 @@ The [Linear algebra reference](/epsil/reference/linear-algebra/) has the full de
 | `isDiagonal` | `IsDiagonal` | `(value) -> boolean` | Whether the matrix is diagonal (all off-diagonal entries are zero). |
 | `isSquareMatrix` | `IsSquareMatrix` | `(value) -> boolean` | Whether the value is a square matrix. |
 | `isSymmetric` | `IsSymmetric` | `(value) -> boolean` | Whether the matrix is symmetric (A equals its transpose). |
-| `kernel` | `Kernel` | `(value) -> list` | Kernel (null space) of a linear map |
-| `luDecomposition` | `LUDecomposition` | `(matrix) -> tuple` | LU decomposition of a square matrix. |
-| `linearSolve` | `LinearSolve` | `(matrix, matrix \| vector) -> value` | Solve the linear system A·x = b for x. |
-| `matrix` | `Matrix` | `(matrix, string?, string?) -> matrix` | Matrix constructor and canonicalizer. |
-| `matrixMultiply` | `MatrixMultiply` | `(matrix \| vector, matrix \| vector) -> matrix \| number \| vector` | Matrix and vector multiplication. |
+| `kernel` | `Kernel` | `(value) -> list` | Return a basis of the kernel (null space) of a matrix, as a list of vectors; the list is empty when the columns are independent. |
+| `luDecomposition` | `LUDecomposition` | `(matrix) -> tuple` | Return the LU decomposition of a square matrix A: the tuple (P, L, U) with P·A = L·U, where P is a permutation matrix, L is lower triangular with ones on its diagonal and U is upper triangular. |
+| `linearSolve` | `LinearSolve` | `(matrix, matrix \| vector) -> value` | Return the solution x of the linear system A·x = b, of the shape of b. |
+| `matrix` | `Matrix` | `(matrix, delimiters: string?, format: string?) -> matrix` | Return the matrix whose rows are the elements of a list of lists. |
+| `matrixMultiply` | `MatrixMultiply` | `(matrix \| vector, matrix \| vector) -> matrix \| number \| vector` | Return the matrix product of two matrices, of a matrix and a vector, or of two vectors (their inner product). |
 | `matrixPower` | `MatrixPower` | `(matrix, real) -> matrix` | Square matrix raised to a power. |
 | `matrixRank` | `MatrixRank` | `(value) -> integer` | Rank of a matrix (number of linearly independent rows/columns). |
-| `norm` | `Norm` | `(list<tuple> \| number \| tensor \| tuple, (+oo \| real \| string)?) -> +oo \| nan \| real` | Vector or matrix norm. |
-| `ones` | `Ones` | `(integer+) -> list` | List or tensor filled with ones. |
-| `onesMatrix` | `OnesMatrix` | `(integer, integer?) -> matrix` | Matrix filled with ones. |
-| `pseudoInverse` | `PseudoInverse` | `(matrix) -> matrix` | Moore-Penrose pseudoinverse of a matrix. |
-| `qrDecomposition` | `QRDecomposition` | `(matrix) -> tuple` | QR decomposition of a matrix. |
+| `norm` | `Norm` | `(list<tuple> \| number \| tensor \| tuple, (+oo \| real \| string)?) -> +oo \| nan \| real` | Return the norm of a vector, a matrix or a point, or the absolute value of a number. |
+| `ones` | `Ones` | `(integer+) -> list` | Return a list, or a tensor of any rank, whose every element is 1. |
+| `onesMatrix` | `OnesMatrix` | `(rows: integer, columns: integer?) -> matrix` | Return a matrix of the given size whose every element is 1. |
+| `pseudoInverse` | `PseudoInverse` | `(matrix) -> matrix` | Return the Moore-Penrose pseudoinverse of a matrix: an n×m matrix for an m×n matrix. |
+| `qrDecomposition` | `QRDecomposition` | `(matrix) -> tuple` | Return the QR decomposition of an m×n matrix A: the tuple (Q, R) with A = Q·R, where Q is an m×m orthogonal matrix and R is an m×n upper triangular matrix. |
 | `rank` | `Rank` | `(value) -> integer` | The length of the shape of the expression. |
-| `reshape` | `Reshape` | `(value, tuple) -> value` | Reshape a tensor or collection to a target shape. |
-| `rowReduce` | `RowReduce` | `(matrix) -> matrix` | Reduced row echelon form (RREF) of a matrix. |
-| `svd` | `SVD` | `(matrix) -> tuple` | Singular value decomposition of a matrix. |
+| `reshape` | `Reshape` | `(value, tuple) -> value` | Return the elements of a tensor or collection, in row-major order, arranged in a target shape. |
+| `rowReduce` | `RowReduce` | `(matrix) -> matrix` | Return the reduced row echelon form (RREF) of a matrix. |
+| `svd` | `SVD` | `(matrix) -> tuple` | Return the singular value decomposition of an m×n matrix A, computed in machine precision: the tuple (U, S, V) with A = U·S·Vᵀ, where U and V are orthogonal and S is diagonal. |
 | `shape` | `Shape` | `(value) -> tuple` | Return the shape tuple of an expression. |
 | `singularValues` | `SingularValues` | `(matrix) -> list` | The singular values of a matrix, sorted in descending order (including any zero values). |
-| `trace` | `Trace` | `(number \| tensor, axis1: integer?, axis2: integer?) -> number \| tensor` | Trace of a matrix or pair of tensor axes. |
+| `trace` | `Trace` | `(number \| tensor, axis1: integer?, axis2: integer?) -> number \| tensor` | Return the sum of the diagonal elements of a square matrix, or the tensor of the traces over two axes of a tensor. |
 | `transpose` | `Transpose` | `(value, axis1: integer?, axis2: integer?) -> value` | Transpose a matrix or swap two tensor axes. |
-| `vector` | `Vector` | `(any+) -> vector` | Construct a column vector. |
-| `zeroMatrix` | `ZeroMatrix` | `(integer, integer?) -> matrix` | Matrix filled with zeros. |
-| `zeros` | `Zeros` | `(integer+) -> list` | List or tensor filled with zeros. |
+| `vector` | `Vector` | `(any+) -> vector` | Return the column vector of the arguments: an n×1 matrix with one argument in each row. |
+| `zeroMatrix` | `ZeroMatrix` | `(rows: integer, columns: integer?) -> matrix` | Return a matrix of the given size whose every element is 0. |
+| `zeros` | `Zeros` | `(integer+) -> list` | Return a list, or a tensor of any rank, whose every element is 0. |
 
 ## Statistics
 

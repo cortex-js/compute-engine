@@ -2961,10 +2961,26 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
   {
     Matrix: {
       examples: ['Matrix([[1, 2], [3, 4]])'],
-      description: 'Matrix constructor and canonicalizer.',
+      description: [
+        'Return the matrix whose rows are the elements of a list of lists.',
+        'The delimiters and the column format change only how the matrix is displayed in LaTeX.',
+      ],
       complexity: 9000,
       lazy: true,
-      signature: '(matrix, string?, string?) -> matrix',
+      signature: '(matrix, delimiters: string?, format: string?) -> matrix',
+      parameters: [
+        { description: 'The rows of the matrix.', sample: '[[1, 2], [3, 4]]' },
+        {
+          description:
+            'The opening and closing delimiters, `"()"` by default; `"[]"` and `"{}"` are the other common choices.',
+          sample: '"[]"',
+        },
+        {
+          description:
+            'The alignment of each column: `<` left, `=` center, `>` right, with `|` or `:` for a vertical rule between columns.',
+          sample: '"=="',
+        },
+      ],
       // The constructor is transparent: the matrix it wraps keeps its own
       // type. The arity guard is what the declared signature cannot supply
       // on the raw box route, where a `Matrix` with no operand at all
@@ -2981,7 +2997,8 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
     // ["Vector", a, b, c] is a shorthand for ["List", ["List", a], ["List", b], ["List", c]]
     Vector: {
       examples: ['Vector(1, 2, 3)'],
-      description: 'Construct a column vector.',
+      description:
+        'Return the column vector of the arguments: an n×1 matrix with one argument in each row.',
       complexity: 9000,
       lazy: true,
       // Element parameters are `any`, not `number`: the constructor rewrites
@@ -2990,6 +3007,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
       // `number` contract here was enforced on no route (ruled 2026-08-24:
       // align the declaration with the family rather than validate).
       signature: '(any+) -> vector',
+      parameters: [{ description: 'An element of the vector.', sample: '1' }],
       // The declared `(any+)` admits non-numeric entries, and claiming a
       // numeric `vector<N>` for those would be an unsound type on the
       // structural tier, where the `Matrix` rewrite has not happened yet —
@@ -3020,6 +3038,13 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
         'Return the shape tuple of an expression. A ragged list has the axes that its items have in common: `Shape([[1, 2], [3]])` is `(2)`.',
       complexity: 8200,
       signature: '(value) -> tuple',
+      parameters: [
+        {
+          description:
+            'The tensor, list or string to measure; a scalar has the empty shape `()`.',
+          sample: '[[1, 2, 3], [4, 5, 6]]',
+        },
+      ],
       // An operand whose type has a known rank `r` (a vector, a matrix, a
       // `list<U^dims>`, or a plain list whose elements cannot be lists) has
       // a shape of `r` integers. The extents are typed `integer`, not their
@@ -3093,6 +3118,13 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
       // OPERAND's type through instead (`Rank(i)` claimed `imaginary` while
       // evaluating to 0).
       signature: '(value) -> integer',
+      parameters: [
+        {
+          description:
+            'The tensor, list or string whose number of axes is counted; a scalar has rank 0.',
+          sample: '[[1, 2, 3], [4, 5, 6]]',
+        },
+      ],
       // The rank (number of dimensions) of a scalar is 0.
       sgn: (): Sign => 'non-negative',
       // The rank is the length of the shape. When `shapeOfOperand()` gives
@@ -3108,9 +3140,23 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
     // and dyadic Shape `⍴` in APL
     Reshape: {
       examples: ['Reshape([1, 2, 3, 4, 5, 6], (2, 3))'],
-      description: 'Reshape a tensor or collection to a target shape.',
+      description: [
+        'Return the elements of a tensor or collection, in row-major order, arranged in a target shape.',
+        'Too few elements are repeated from the start, extra elements are dropped, and a scalar fills the whole shape.',
+      ],
       complexity: 8200,
       signature: '(value, tuple) -> value',
+      parameters: [
+        {
+          description:
+            'The tensor, collection or scalar whose elements are arranged; a string stays unevaluated.',
+          sample: '[1, 2, 3, 4, 5, 6]',
+        },
+        {
+          description: 'The extent of each axis of the result.',
+          sample: '(2, 3)',
+        },
+      ],
       type: ([value, shape], context) => {
         const dims = targetShapeDimensions(shape);
         if (isSubtype(value.type, 'number')) {
@@ -3228,7 +3274,19 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
       complexity: 8200,
       // The depth is a non-negative integer or `+oo` (Wolfram's
       // `Flatten[list, Infinity]`), which flattens completely.
-      signature: '(value, integer | +oo?) -> list',
+      signature: '(value, depth: integer | +oo?) -> list',
+      parameters: [
+        {
+          description:
+            'The tensor or collection to flatten; a scalar gives a list of one element.',
+          sample: '[[1, 2], [3, 4]]',
+        },
+        {
+          description:
+            'The number of levels to flatten, a non-negative integer or `oo`; by default, all levels.',
+          sample: '1',
+        },
+      ],
       // When the type of the operand settles which elements are lists, the
       // result is a list of the leaf type: `Flatten(xs)` with `xs` a
       // `list<list<integer>>` is a `list<integer>`, and `Flatten(xs, 1)` with
@@ -3347,6 +3405,22 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
       description: 'Transpose a matrix or swap two tensor axes.',
       complexity: 8200,
       signature: '(value, axis1: integer?, axis2: integer?) -> value',
+      parameters: [
+        {
+          description:
+            'The matrix or tensor to transpose; a scalar, a vector or a string is returned as it is.',
+          sample: '[[1, 2, 3], [4, 5, 6]]',
+        },
+        {
+          description:
+            'The first of the two axes to swap, counted from 1; the axes apply only when both are given, and by default they are the last two.',
+          sample: '1',
+        },
+        {
+          description: 'The second of the two axes to swap, counted from 1.',
+          sample: '2',
+        },
+      ],
       type: transposedType,
       evaluate: (ops, { engine: ce }) => {
         let op1 = ops[0];
@@ -3411,6 +3485,22 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
         'Conjugate transpose (Hermitian adjoint) of a matrix or tensor.',
       complexity: 8200,
       signature: '(value, axis1: integer?, axis2: integer?) -> value',
+      parameters: [
+        {
+          description:
+            'The matrix or tensor; a vector gives the conjugate of each element, and a number its conjugate.',
+          sample: '[[1, 2 + i], [3 - i, 4]]',
+        },
+        {
+          description:
+            'The first of the two axes to swap, counted from 1; the axes apply only when both are given, and by default they are the last two.',
+          sample: '1',
+        },
+        {
+          description: 'The second of the two axes to swap, counted from 1.',
+          sample: '2',
+        },
+      ],
       type: transposedType,
       evaluate: (ops, { engine: ce }) => {
         let op1 = ops[0];
@@ -3473,6 +3563,13 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
       description: 'Determinant of a square matrix.',
       complexity: 8200,
       signature: '(matrix) -> number',
+      parameters: [
+        {
+          description:
+            'The square matrix; a matrix that is not square gives an error.',
+          sample: '[[1, 2], [3, 4]]',
+        },
+      ],
       // The carrier already excludes `nan` (a scalar is not a matrix), so
       // this only spells out the derived default. Infinite and NaN CELLS are
       // ordinary matrix entries and are computed by IEEE inside the handler:
@@ -3584,6 +3681,13 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
       description:
         '`Det` is an alias for `Determinant`, which is the preferred name. Determinant of a square matrix.',
       signature: '(matrix) -> number',
+      parameters: [
+        {
+          description:
+            'The square matrix; a matrix that is not square gives an error.',
+          sample: '[[1, 2], [3, 4]]',
+        },
+      ],
       canonical: (ops, { engine: ce }) => ce.function('Determinant', ops),
     },
 
@@ -3597,6 +3701,13 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
       // type is not a valid result type. The type handler narrows this
       // result.
       signature: '(matrix) -> matrix',
+      parameters: [
+        {
+          description:
+            'The square matrix; a matrix that is not square gives an error, and a singular matrix leaves the call unevaluated.',
+          sample: '[[1, 2], [3, 4]]',
+        },
+      ],
       // The inverse is the power with exponent -1, so it is typed as
       // `MatrixPower` with a negative integer exponent
       // (`squareMatrixPowerType`): a square integer or rational matrix gives
@@ -3674,9 +3785,17 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
 
     PseudoInverse: withRangeRowsListed({
       examples: ['PseudoInverse([[1, 2], [3, 4], [5, 6]])'],
-      description: 'Moore-Penrose pseudoinverse of a matrix.',
+      description:
+        'Return the Moore-Penrose pseudoinverse of a matrix: an n×m matrix for an m×n matrix.',
       complexity: 8200,
       signature: '(matrix) -> matrix',
+      parameters: [
+        {
+          description:
+            'The matrix to invert, of any shape; a rank-deficient matrix stays unevaluated.',
+          sample: '[[1, 2], [3, 4], [5, 6]]',
+        },
+      ],
       // The pseudoinverse of an m×n matrix is n×m. Its cells are quotients
       // of the cells of the operand (`matrixResultCellType()`, `'field'`).
       // A rank-deficient matrix stays unevaluated.
@@ -3704,10 +3823,23 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
     // Solve the linear system A·x = b for the unknown vector (or matrix) x.
     LinearSolve: withRangeRowsListed({
       examples: ['LinearSolve([[2, 1], [1, 3]], [3, 5])'],
-      description: 'Solve the linear system A·x = b for x.',
+      description:
+        'Return the solution x of the linear system A·x = b, of the shape of b.',
       keywords: ['linear system', 'solve'],
       complexity: 8300,
       signature: '(matrix, matrix|vector) -> value',
+      parameters: [
+        {
+          description:
+            'The square matrix A of the coefficients; a singular matrix leaves the call unevaluated.',
+          sample: '[[2, 1], [1, 3]]',
+        },
+        {
+          description:
+            'The right-hand side b: a vector with one element for each row of A, or a matrix with one row for each row of A.',
+          sample: '[3, 5]',
+        },
+      ],
       // The solution of `A·x = b` for a square n×n matrix `A` has the shape
       // of `b`: a vector of n cells, or an n×p matrix. Its cells are
       // computed from the inverse of `A`, so they are quotients of the cells
@@ -3774,6 +3906,13 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
       description: 'Adjugate (classical adjoint) of a square matrix.',
       complexity: 8200,
       signature: '(matrix) -> matrix',
+      parameters: [
+        {
+          description:
+            'The square matrix; a matrix that is not square leaves the call unevaluated.',
+          sample: '[[1, 2], [3, 4]]',
+        },
+      ],
       // The adjugate of an n×n matrix is n×n, and each cell is a minor: a
       // sum of products of cells (`matrixResultCellType()`, `'ring'`). A
       // matrix that is not square stays unevaluated, and the handler
@@ -3820,7 +3959,8 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
     // Optional axis1, axis2 to specify which axes to trace over (default: last two)
     Trace: withRangeRowsListed({
       examples: ['Trace([[1, 2], [3, 4]])'],
-      description: 'Trace of a matrix or pair of tensor axes.',
+      description:
+        'Return the sum of the diagonal elements of a square matrix, or the tensor of the traces over two axes of a tensor.',
       complexity: 8200,
       // The operand is a scalar (the 1×1 matrix) or a numeric tensor; a
       // string or a boolean has no trace, so it is an `incompatible-type`
@@ -3832,6 +3972,23 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
       // `docs/plans/2026-08-30-error-model-implementation.md`.
       signature:
         '(number | tensor, axis1: integer?, axis2: integer?) -> number | tensor',
+      parameters: [
+        {
+          description:
+            'The square matrix, or the tensor whose traces over two axes of equal extent are taken; a scalar is its own trace.',
+          sample: '[[1, 2], [3, 4]]',
+        },
+        {
+          description:
+            'The first of the two axes of the trace, counted from 1; the axes apply only when both are given, and by default they are the last two.',
+          sample: '1',
+        },
+        {
+          description:
+            'The second of the two axes of the trace, counted from 1 and different from the first.',
+          sample: '2',
+        },
+      ],
       // Explicit on the operand, because the derived policy for a carrier
       // that ADMITS `nan` is `inert`: `NaN` is the trace of the 1×1 matrix
       // `[NaN]`, and NaN cells inside a matrix sum by IEEE in the handler —
@@ -3950,9 +4107,17 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
 
     Kernel: {
       examples: ['Kernel([[1, 2], [2, 4]])'],
-      description: 'Kernel (null space) of a linear map',
+      description:
+        'Return a basis of the kernel (null space) of a matrix, as a list of vectors; the list is empty when the columns are independent.',
       complexity: 8200,
       signature: '(value) -> list',
+      parameters: [
+        {
+          description:
+            'The matrix of the linear map; a vector is read as a matrix of one row.',
+          sample: '[[1, 2], [2, 4]]',
+        },
+      ],
       // The kernel is a list of basis vectors, possibly empty (the kernel of
       // a matrix of full column rank is `[]`). Each basis vector has one cell
       // for each column of the operand: n cells for an m×n matrix or a
@@ -4046,9 +4211,17 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
 
     Dimension: {
       examples: ['Dimension([[1, 2, 3], [4, 5, 6]])'],
-      description: 'Dimension of an object',
+      description:
+        'Return the dimension of a vector space: the number of elements of a vector, matrix or tensor, or the product of the dimensions of the two objects of a `Hom`.',
       complexity: 8200,
       signature: '(value) -> integer',
+      parameters: [
+        {
+          description:
+            'The vector, matrix or tensor whose number of elements is returned, or a `Hom(V, W)`, whose dimension is the product of the dimensions of V and W; a scalar gives 1.',
+          sample: '[[1, 2, 3], [4, 5, 6]]',
+        },
+      ],
       sgn: (): Sign => 'non-negative',
       evaluate: ([object], { engine: ce }) => {
         // A `Range` row is a row of its integers (`listedLazyRows`).
@@ -4087,6 +4260,13 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
       description: 'Degree of an object',
       complexity: 8200,
       signature: '(value) -> integer',
+      parameters: [
+        {
+          description:
+            'The polynomial, whose total degree is returned; a constant gives 0, and a lone symbol leaves the call unevaluated.',
+          sample: 'x^2 + 1',
+        },
+      ],
       sgn: (): Sign => 'non-negative',
       evaluate: ([object], { engine: ce }) => {
         const op = object;
@@ -4112,6 +4292,13 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
       description: 'Hom-set of morphisms between objects',
       complexity: 8200,
       signature: '(value*) -> value',
+      parameters: [
+        {
+          description:
+            'An object: the first argument is the domain and the second the codomain.',
+          sample: '[1, 2]',
+        },
+      ],
       evaluate: (ops, { engine: ce }) => {
         return ce._fn('Hom', ops);
       },
@@ -4121,11 +4308,24 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
     // Handles matrix × matrix, matrix × vector, vector × matrix
     MatrixMultiply: withRangeRowsListed({
       examples: ['MatrixMultiply([[1, 2], [3, 4]], [[5, 6], [7, 8]])'],
-      description: 'Matrix and vector multiplication.',
+      description:
+        'Return the matrix product of two matrices, of a matrix and a vector, or of two vectors (their inner product).',
       complexity: 8300,
       // The product of two vectors is their inner product, a number, so the
       // declared result includes `number`.
       signature: '(matrix|vector, matrix|vector) -> matrix|vector|number',
+      parameters: [
+        {
+          description:
+            'The left factor; its number of columns is the number of rows of the right factor.',
+          sample: '[[1, 2], [3, 4]]',
+        },
+        {
+          description:
+            'The right factor; the product of two vectors is their inner product.',
+          sample: '[[5, 6], [7, 8]]',
+        },
+      ],
       // An m×n matrix times an n×p matrix is m×p, times a vector of n cells
       // is a vector of m cells, and a vector of m cells times an m×n matrix
       // is a vector of n cells (`matrixProductDims()`). The cells are sums of
@@ -4324,6 +4524,17 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
       // non-numeric component.
       signature:
         '(matrix|vector|tuple|list<tuple>, matrix|vector|tuple|list<tuple>) -> value',
+      parameters: [
+        {
+          description: 'The first vector, point or matrix.',
+          sample: '[1, 2, 3]',
+        },
+        {
+          description:
+            'The second vector, point or matrix, whose length matches the inner extent of the first.',
+          sample: '[4, 5, 6]',
+        },
+      ],
       // An ABSENT operand is admitted, as it is for `Norm`: the value of a
       // restricted point `P {c}`, or of a restricted list of points, is
       // absent when the condition is false, and the product then answers the
@@ -4666,6 +4877,17 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
         'Hadamard (element-wise) product of two vectors or matrices of the same shape.',
       complexity: 8300,
       signature: '(matrix|vector, matrix|vector) -> matrix|vector',
+      parameters: [
+        {
+          description: 'The first vector or matrix.',
+          sample: '[1, 2]',
+        },
+        {
+          description:
+            'The second vector or matrix, of the same shape as the first.',
+          sample: '[3, 4]',
+        },
+      ],
       // The product has the shape of its operands, and each cell is the
       // product of two cells (`matrixResultCellType()`, `'ring'`). The
       // handler declines when the ranks differ or two extents are known and
@@ -4726,6 +4948,13 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
         'Rank of a matrix (number of linearly independent rows/columns).',
       complexity: 8200,
       signature: '(value) -> integer',
+      parameters: [
+        {
+          description:
+            'The matrix whose independent rows are counted; a vector is read as a matrix of one row.',
+          sample: '[[1, 2], [2, 4]]',
+        },
+      ],
       sgn: (): Sign => 'non-negative',
       evaluate: ([map], { engine: ce }) => {
         // A `Range` row is a row of its integers (`listedLazyRows`).
@@ -4809,6 +5038,13 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
       description: 'Whether the value is a square matrix.',
       complexity: 8200,
       signature: '(value) -> boolean',
+      parameters: [
+        {
+          description:
+            'The value to test; a value that is not a matrix gives `False`.',
+          sample: '[[1, 2], [3, 4]]',
+        },
+      ],
       evaluate: ([m], { engine: ce }) => {
         // A `Range` row is a row of its integers (`listedLazyRows`).
         const op = listedLazyRows(ce, m);
@@ -4826,6 +5062,13 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
       description: 'Whether the matrix is symmetric (A equals its transpose).',
       complexity: 8200,
       signature: '(value) -> boolean',
+      parameters: [
+        {
+          description:
+            'The value to test; a value that is not a square matrix gives `False`.',
+          sample: '[[1, 2], [2, 3]]',
+        },
+      ],
       evaluate: ([m], { engine: ce }) => {
         // A `Range` row is a row of its integers (`listedLazyRows`).
         const op = listedLazyRows(ce, m);
@@ -4844,6 +5087,13 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
         'Whether the matrix is diagonal (all off-diagonal entries are zero).',
       complexity: 8200,
       signature: '(value) -> boolean',
+      parameters: [
+        {
+          description:
+            'The value to test; a value that is not a square matrix gives `False`.',
+          sample: '[[1, 0], [0, 5]]',
+        },
+      ],
       evaluate: ([m], { engine: ce }) => {
         // A `Range` row is a row of its integers (`listedLazyRows`).
         const op = listedLazyRows(ce, m);
@@ -4876,6 +5126,16 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
       // the result was a list). Two lists, or a list beside a point, give a
       // list, as before.
       signature: '(vector|tuple, vector|tuple) -> vector | tuple',
+      parameters: [
+        {
+          description: 'The first vector, of three elements.',
+          sample: '[1, 0, 0]',
+        },
+        {
+          description: 'The second vector, of three elements.',
+          sample: '[0, 1, 0]',
+        },
+      ],
       // An ABSENT operand is admitted, as it is for `Dot`: the value of a
       // restricted point `P {c}` is absent when the condition is false, and
       // the product is then absent too (see the evaluate handler). The
@@ -5040,6 +5300,17 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
       // scalars record of
       // `docs/plans/2026-08-30-error-model-implementation.md`.
       signature: '(matrix, real) -> matrix',
+      parameters: [
+        {
+          description: 'The square matrix to raise to a power.',
+          sample: '[[1, 1], [1, 0]]',
+        },
+        {
+          description:
+            'The exponent: 0 gives the identity matrix, and a negative integer a power of the inverse.',
+          sample: '10',
+        },
+      ],
       nanBehavior: 'reject',
       // A power of a square matrix keeps its shape, and its element type
       // follows from the element type of the operand and from what is known
@@ -5209,7 +5480,17 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
       // The variable is accepted as `any` (not `symbol`): an undeclared symbol
       // is inferred to have a numeric type, which would fail a `symbol`
       // signature check. The evaluate handler validates it with `isSymbol`.
-      signature: '(matrix, any?) -> expression',
+      signature: '(matrix, variable: any?) -> expression',
+      parameters: [
+        {
+          description: 'The square matrix.',
+          sample: '[[2, 1], [1, 2]]',
+        },
+        {
+          description: 'The variable of the polynomial; by default, `x`.',
+          sample: 't',
+        },
+      ],
       // The characteristic polynomial of a square matrix of numbers is a
       // polynomial in a numeric variable, so it is a `number`. This also
       // holds for an `unknown` variable (the default `x` when it is not
@@ -5282,9 +5563,16 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
 
     RowReduce: withRangeRowsListed({
       examples: ['RowReduce([[1, 2, 3], [4, 5, 6]])'],
-      description: 'Reduced row echelon form (RREF) of a matrix.',
+      description: 'Return the reduced row echelon form (RREF) of a matrix.',
       complexity: 8200,
       signature: '(matrix) -> matrix',
+      parameters: [
+        {
+          description:
+            'The matrix to reduce, of any shape; exact entries give an exact result.',
+          sample: '[[1, 2, 3], [4, 5, 6]]',
+        },
+      ],
       // The reduced row echelon form has the shape of the operand. A matrix
       // with a float entry (also an entry typed `integer`, such as
       // `1.5e308`) is reduced in machine precision, where an overflow gives
@@ -5337,6 +5625,13 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
       description: 'Extract a matrix diagonal or build a diagonal matrix.',
       complexity: 8200,
       signature: '(value) -> value',
+      parameters: [
+        {
+          description:
+            'A matrix, whose diagonal is returned, or a vector, which gives the diagonal matrix of its elements; a number is returned as is.',
+          sample: '[1, 2, 3]',
+        },
+      ],
       // - A number is returned as is, so the result has its type.
       // - A vector of n cells gives the n×n matrix with these cells on the
       //   diagonal and the integer 0 elsewhere. The cell tier is kept
@@ -5438,6 +5733,12 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
       description: 'n-by-n identity matrix.',
       complexity: 8100,
       signature: '(integer) -> matrix',
+      parameters: [
+        {
+          description: 'The number of rows and columns, at least 1.',
+          sample: '3',
+        },
+      ],
       // `matrix<integer^(n×n)>` for a literal n (`constantMatrixType()`).
       type: ([n], context) => {
         const size = positiveIntegerLiteral(n);
@@ -5474,9 +5775,21 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
     // Creates an m×n matrix of zeros
     ZeroMatrix: {
       examples: ['ZeroMatrix(2, 3)'],
-      description: 'Matrix filled with zeros.',
+      description:
+        'Return a matrix of the given size whose every element is 0.',
       complexity: 8100,
-      signature: '(integer, integer?) -> matrix',
+      signature: '(rows: integer, columns: integer?) -> matrix',
+      parameters: {
+        rows: {
+          description:
+            'The number of rows, at least 1; a symbol with no value leaves the call unevaluated.',
+          sample: '2',
+        },
+        columns: {
+          description: 'The number of columns, at least 1; `rows` by default.',
+          sample: '3',
+        },
+      },
       // `matrix<integer^(m×n)>` for literal extents, m×m with one operand
       // (`constantMatrixType()`).
       type: ([m, n], context) => {
@@ -5536,6 +5849,17 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
       // of its body are not effects of `Fill`.
       invokes: false,
       signature: '(value: any, integer+) -> list',
+      parameters: [
+        {
+          description: 'The value of each element.',
+          sample: '7',
+        },
+        {
+          description:
+            'The length of one axis: one length gives a list, two give a matrix, and a length of 0 gives an empty list.',
+          sample: '3',
+        },
+      ],
       type: ([value, ...extents], context) =>
         constantTensorType(
           literalElementType([storedComponentTypeD(value)]),
@@ -5552,9 +5876,16 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
     Zeros: {
       examples: ['Zeros(3)', 'Zeros(2, 3)'],
       description:
-        'List or tensor filled with zeros. Each operand is the length of one axis.',
+        'Return a list, or a tensor of any rank, whose every element is 0. Each argument is the length of one axis.',
       complexity: 8100,
       signature: '(integer+) -> list',
+      parameters: [
+        {
+          description:
+            'The length of one axis; 0 or a negative length gives an empty axis.',
+          sample: '3',
+        },
+      ],
       type: (extents, context) =>
         constantTensorType('integer', extents, context),
       evaluate: (extents, { engine: ce }) =>
@@ -5566,9 +5897,16 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
     Ones: {
       examples: ['Ones(3)', 'Ones(2, 3)'],
       description:
-        'List or tensor filled with ones. Each operand is the length of one axis.',
+        'Return a list, or a tensor of any rank, whose every element is 1. Each argument is the length of one axis.',
       complexity: 8100,
       signature: '(integer+) -> list',
+      parameters: [
+        {
+          description:
+            'The length of one axis; 0 or a negative length gives an empty axis.',
+          sample: '3',
+        },
+      ],
       type: (extents, context) =>
         constantTensorType('integer', extents, context),
       evaluate: (extents, { engine: ce }) =>
@@ -5578,9 +5916,21 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
     // Creates an m×n matrix of ones
     OnesMatrix: {
       examples: ['OnesMatrix(2, 3)'],
-      description: 'Matrix filled with ones.',
+      description:
+        'Return a matrix of the given size whose every element is 1.',
       complexity: 8100,
-      signature: '(integer, integer?) -> matrix',
+      signature: '(rows: integer, columns: integer?) -> matrix',
+      parameters: {
+        rows: {
+          description:
+            'The number of rows, at least 1; a symbol with no value leaves the call unevaluated.',
+          sample: '2',
+        },
+        columns: {
+          description: 'The number of columns, at least 1; `rows` by default.',
+          sample: '3',
+        },
+      },
       // `matrix<integer^(m×n)>` for literal extents, m×m with one operand
       // (`constantMatrixType()`).
       type: ([m, n], context) => {
@@ -5635,7 +5985,8 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
     //   - order 1: max column sum; order ∞: max row sum
     Norm: withRangeRowsListed({
       examples: ['Norm([3, 4])', 'Norm([3, 4], 1)'],
-      description: 'Vector or matrix norm.',
+      description:
+        'Return the norm of a vector, a matrix or a point, or the absolute value of a number.',
       complexity: 8200,
       // The operand is a scalar, a numeric tensor (a vector or a matrix), a
       // POINT (a tuple), or a LIST of points. A string, a boolean or a list
@@ -5655,6 +6006,18 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
       // `docs/plans/2026-08-30-error-model-implementation.md`.
       signature:
         '(number | tensor | tuple | list<tuple>, real | +oo | string?) -> real | +oo | nan',
+      parameters: [
+        {
+          description:
+            'The vector, matrix, point or number to measure; a list of points gives the norm of each point.',
+          sample: '[3, 4]',
+        },
+        {
+          description:
+            'The order p, by default 2 for a vector and `"Frobenius"` for a matrix: a positive real or `+oo` for a vector; 1, 2, `+oo` (or `"Infinity"`) or `"Frobenius"` for a matrix, and another order leaves a matrix norm unevaluated.',
+          sample: '1',
+        },
+      ],
       // Explicit, because the derived policy for a carrier that ADMITS
       // `nan` is `inert`, and the order slot must reject: a NaN order is an
       // administrative slot with no meaning, so it is an `Error` at boxing,
@@ -6375,6 +6738,12 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
       description: 'Eigenvalues of a square matrix.',
       complexity: 8500,
       signature: '(matrix) -> list',
+      parameters: [
+        {
+          description: 'The square matrix.',
+          sample: '[[2, 1], [1, 2]]',
+        },
+      ],
       // An n×n matrix has n eigenvalues, repeated ones included. They can be
       // irrational or complex for an integer matrix, and the kernels for a
       // 3×3 or larger matrix compute in machine precision
@@ -6496,6 +6865,12 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
       description: 'Eigenvectors of a square matrix.',
       complexity: 8600,
       signature: '(matrix) -> list',
+      parameters: [
+        {
+          description: 'The square matrix.',
+          sample: '[[2, 1], [1, 2]]',
+        },
+      ],
       // One eigenvector of n cells for each of the n eigenvalues of an n×n
       // matrix, so the result is n×n. The cells are `number`, as for
       // `Eigenvalues`.
@@ -6573,6 +6948,12 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
       description: 'Eigenvalue-eigenvector decomposition of a square matrix.',
       complexity: 8700,
       signature: '(matrix) -> tuple',
+      parameters: [
+        {
+          description: 'The square matrix.',
+          sample: '[[2, 1], [1, 2]]',
+        },
+      ],
       // The pair of the `Eigenvalues` and the `Eigenvectors` results.
       type: ([m], context) => {
         const operand = matrixOperandShape(m);
@@ -6628,9 +7009,16 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
     // Returns [L, U] for no pivoting or [P, L, U] with pivoting
     LUDecomposition: withRangeRowsListed({
       examples: ['LUDecomposition([[4, 3], [2, 1]])'],
-      description: 'LU decomposition of a square matrix.',
+      description:
+        'Return the LU decomposition of a square matrix A: the tuple (P, L, U) with P·A = L·U, where P is a permutation matrix, L is lower triangular with ones on its diagonal and U is upper triangular.',
       complexity: 8600,
       signature: '(matrix) -> tuple',
+      parameters: [
+        {
+          description: 'The square matrix to decompose.',
+          sample: '[[4, 3], [2, 1]]',
+        },
+      ],
       // The triple `(P, L, U)` of n×n matrices for an n×n matrix. P is a
       // permutation matrix of the integers 0 and 1. For a matrix literal of
       // exact rational cells, L and U are computed in exact rational
@@ -6694,9 +7082,16 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
     // Returns [Q, R] where Q is orthogonal and R is upper triangular
     QRDecomposition: withRangeRowsListed({
       examples: ['QRDecomposition([[0, 1], [1, 1]])'],
-      description: 'QR decomposition of a matrix.',
+      description:
+        'Return the QR decomposition of an m×n matrix A: the tuple (Q, R) with A = Q·R, where Q is an m×m orthogonal matrix and R is an m×n upper triangular matrix.',
       complexity: 8600,
       signature: '(matrix) -> tuple',
+      parameters: [
+        {
+          description: 'The matrix to decompose, of any shape.',
+          sample: '[[1, 2], [3, 4], [5, 6]]',
+        },
+      ],
       // The pair `(Q, R)` for an m×n matrix: Q is m×m and R is m×n. For a
       // matrix literal of exact rational cells, both are computed exactly,
       // and each cell is a rational times the square root of a positive
@@ -6762,6 +7157,13 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
       description: 'Cholesky decomposition of a positive-definite matrix.',
       complexity: 8600,
       signature: '(matrix) -> matrix',
+      parameters: [
+        {
+          description:
+            'The symmetric positive-definite matrix; another matrix gives an error.',
+          sample: '[[4, 2], [2, 5]]',
+        },
+      ],
       // The n×n factor L of an n×n matrix. For a matrix literal of exact
       // rational cells, L is computed exactly, and each cell is a rational
       // times the square root of a non-negative rational, so the cells are
@@ -6815,9 +7217,17 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
     // Returns [U, Σ, V] where U and V are orthogonal, Σ is diagonal
     SVD: withRangeRowsListed({
       examples: ['N(SVD([[3, 0], [0, 4]]))'],
-      description: 'Singular value decomposition of a matrix.',
+      description:
+        'Return the singular value decomposition of an m×n matrix A, computed in machine precision: the tuple (U, S, V) with A = U·S·Vᵀ, where U and V are orthogonal and S is diagonal.',
       complexity: 8700,
       signature: '(matrix) -> tuple',
+      parameters: [
+        {
+          description:
+            'The matrix to decompose, of any shape; a matrix of exact entries stays unevaluated outside `N`.',
+          sample: '[[3, 0], [0, 4]]',
+        },
+      ],
       // The triple `(U, S, V)` for an m×n matrix: U is m×m, S is m×n and V
       // is n×n. All three are computed in machine precision
       // (`matrixResultCellType()`, `'numeric'`), so their cells are
@@ -6890,6 +7300,13 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
         'numeric otherwise.',
       complexity: 8700,
       signature: '(matrix) -> list',
+      parameters: [
+        {
+          description:
+            'The matrix of any shape; an m×n matrix has min(m, n) singular values.',
+          sample: '[[3, 0], [0, 4]]',
+        },
+      ],
       // An m×n matrix has min(m, n) singular values, zeros included. They
       // are irrational for most exact matrices and are computed in machine
       // precision for a larger one (`matrixResultCellType()`, `'numeric'`),

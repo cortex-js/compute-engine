@@ -40,7 +40,7 @@ describe('epsilDiagnosticMessage', () => {
     // A function name used as a value is quoted once, as it is typed
     // (CE-1660).
     expect(messages('const A : matrix = onesMatrix')).toEqual([
-      'Type error: The value "onesMatrix" of type "(integer, integer?) -> matrix" is not compatible with the declared type "matrix" in `const A: matrix = onesMatrix`',
+      'Type error: The value "onesMatrix" of type "(rows: integer, columns: integer?) -> matrix" is not compatible with the declared type "matrix" in `const A: matrix = onesMatrix`',
     ]);
   });
 
