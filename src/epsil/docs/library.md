@@ -450,15 +450,15 @@ The [Arithmetic reference](/epsil/reference/arithmetic/) has the full descriptio
 | `airyBiPrime` | `AiryBiPrime` | `(complex \| infinity) -> number` | Derivative of the Airy function of the second kind |
 | `arg` | `Arg` | `(complex \| infinity) -> number` | `arg` is an alias for `argument`, which is the preferred name. |
 | `argument` | `Argument` | `(complex \| infinity) -> number` | Complex argument (phase angle) of a number, in the engine's angular unit. |
-| `besselI` | `BesselI` | `(order: complex, complex \| infinity) -> number` | Modified Bessel function of the first kind |
-| `besselJ` | `BesselJ` | `(order: complex, complex \| infinity) -> number` | Bessel function of the first kind |
-| `besselK` | `BesselK` | `(order: complex, complex \| infinity) -> number` | Modified Bessel function of the second kind (Macdonald function) |
-| `besselY` | `BesselY` | `(order: complex, complex \| infinity) -> number` | Bessel function of the second kind (Neumann function) |
+| `besselI` | `BesselI` | `(order: complex, z: complex \| infinity) -> number` | Modified Bessel function of the first kind |
+| `besselJ` | `BesselJ` | `(order: complex, z: complex \| infinity) -> number` | Bessel function of the first kind |
+| `besselK` | `BesselK` | `(order: complex, z: complex \| infinity) -> number` | Modified Bessel function of the second kind (Macdonald function) |
+| `besselY` | `BesselY` | `(order: complex, z: complex \| infinity) -> number` | Bessel function of the second kind (Neumann function) |
 | `beta` | `Beta` | `(complex \| infinity, complex \| infinity, (complex \| infinity)?, (complex \| infinity)?) -> number` | Euler beta function |
 | `catalanConstant` | `CatalanConstant` | constant `real<0.915965594177219..0.9159655941772191>` = `0.915965594177219015055` | Catalan's constant G ≈ 0.9160. |
 | `ceil` | `Ceil` | `(x: real \| signed_infinity \| ~oo, step: real?) -> real \| signed_infinity \| ~oo` | Rounds a number up to the next largest integer, or with a step to the least multiple of the step that is at least the number. |
-| `chop` | `Chop` | `(T, real<0..>?) -> T where T: number` | Replace tiny numeric values with zero. |
-| `clamp` | `Clamp` | `(real \| signed_infinity, real \| signed_infinity, real \| signed_infinity) -> real \| signed_infinity` | Clamp a value to the range [lo, hi] = min(max(x, lo), hi). |
+| `chop` | `Chop` | `(x: T, tolerance: real<0..>?) -> T where T: number` | Replace tiny numeric values with zero. |
+| `clamp` | `Clamp` | `(x: real \| signed_infinity, lower: real \| signed_infinity, upper: real \| signed_infinity) -> real \| signed_infinity` | Clamp a value to the range [lo, hi] = min(max(x, lo), hi). |
 | `complex` | `Complex` | `(real: number, imaginary: number) -> complex` | Construct a complex number from real and imaginary parts. |
 | `complexInfinity` | `ComplexInfinity` | constant `number` = `~oo` | Complex infinity, a single unsigned infinity in the complex plane. |
 | `complexRoots` | `ComplexRoots` | `(complex, integer) -> list<number>` | All n-th complex roots of a number. |
@@ -493,7 +493,7 @@ The [Arithmetic reference](/epsil/reference/arithmetic/) has the full descriptio
 | `imaginary` | `Imaginary` | `(complex \| infinity) -> number` | Imaginary part of a complex number. |
 | `imaginaryUnit` | `ImaginaryUnit` | constant `imaginary` = `i` | The imaginary unit, whose square is −1. |
 | — | `Indeterminate` | constant `number` = `NaN` | An input spelling of NaN. |
-| `infimum` | `Infimum` | `(value*) -> number` | Like Min, but defined for open sets. |
+| `infimum` | `Infimum` | `(value*) -> number` | The greatest lower bound of numbers, collections and intervals: like `min`, but the open end of an interval is a bound too. |
 | `interpret` | `Interpret` | `(any) -> any` | Interpret a notational expression as its mathematical meaning. |
 | `isComposite` | `IsComposite` | `(number) -> boolean` | `isComposite(n)` returns `True` if `n` is a composite number |
 | `isEven` | `IsEven` | `(number) -> boolean` | `isEven(n)` returns `True` if `n` is an even number |
@@ -502,7 +502,7 @@ The [Arithmetic reference](/epsil/reference/arithmetic/) has the full descriptio
 | `lcm` | `LCM` | `(any*) -> number` | Least Common Multiple |
 | `lambertW` | `LambertW` | `(z: complex \| infinity, branch: integer?) -> number` | Lambert W function (product logarithm) |
 | `lb` | `Lb` | `(number) -> number` | Base-2 Logarithm |
-| `lerchPhi` | `LerchPhi` | `(complex, complex, complex) -> number` | Lerch transcendent Φ(z,s,a) = Σ_&#123;k=0&#125;^∞ zᵏ(k+a)^&#123;-s&#125; |
+| `lerchPhi` | `LerchPhi` | `(z: complex, s: complex, a: complex) -> number` | Lerch transcendent Φ(z,s,a) = Σ_&#123;k=0&#125;^∞ zᵏ(k+a)^&#123;-s&#125; |
 | `lg` | `Lg` | `(number) -> number` | Base-10 Logarithm |
 | `ln` | `Ln` | `(complex \| infinity, base: (complex \| infinity)?) -> complex \| infinity` | Natural Logarithm |
 | `log` | `Log` | `(complex \| infinity, base: (complex \| infinity)?) -> number` | Log(z, b = 10) = Logarithm of base b |
@@ -510,7 +510,7 @@ The [Arithmetic reference](/epsil/reference/arithmetic/) has the full descriptio
 | `log2` | `Log2` | `(number) -> number` | Base-2 Logarithm |
 | `machineEpsilon` | `MachineEpsilon` | constant `real` = `2.220446049250313e-16` | The difference between 1 and the next larger floating point number (machine epsilon). |
 | `max` | `Max` | `(value*) -> number` | Maximum of two or more numbers. |
-| `measurement` | `Measurement` | `(value, value) -> measurement` | A nominal value carrying a 1σ absolute uncertainty. |
+| `measurement` | `Measurement` | `(value: value, uncertainty: value) -> measurement` | A nominal value carrying a 1σ absolute uncertainty. |
 | `min` | `Min` | `(value+) -> number` | Minimum of two or more numbers. |
 | — | `Mod` | `(real, real, real?) -> real` | Modulo: the remainder of the floored division of x by y. |
 | — | `Multiply` | `(number*) -> number` | Product of two or more values. |
@@ -525,24 +525,24 @@ The [Arithmetic reference](/epsil/reference/arithmetic/) has the full descriptio
 | — | `Power` | `(complex \| infinity, complex \| signed_infinity) -> number` | Exponentiation: raise a base to a power. |
 | — | `PreDecrement` | `(number) -> number` | Decrement a number by one. |
 | — | `PreIncrement` | `(number) -> number` | Increment a number by one. |
-| `product` | `Product` | `(any, tuple*) -> number` | `product(f, a, b)` computes the product of `f` from `a` to `b`. |
+| `product` | `Product` | `(any, tuple*) -> number` | `product(f, (k, a, b))` computes the product of `f` for `k` from `a` to `b`; `product(L)` multiplies the elements of a collection `L`. |
 | `rational` | `Rational` | `((integer, integer) -> rational) \| ((real) -> rational)` | Construct a rational number from a numerator and denominator. |
-| `rationalize` | `Rationalize` | `(real, real<0..>?) -> rational` | Approximate a real number by a rational. |
+| `rationalize` | `Rationalize` | `(x: real, tolerance: real<0..>?) -> rational` | Approximate a real number by a rational. |
 | `re` | `Re` | `(complex \| infinity) -> number` | `re` is an alias for `real`, which is the preferred name. |
 | `real` | `Real` | `(complex \| infinity) -> number` | Real part of a complex number. |
 | `remainder` | `Remainder` | `(T, T) -> T where T: number` | IEEE remainder: the signed remainder after dividing x by y, with the quotient rounded to the nearest integer (ties round toward +Infinity, matching JavaScript `Math.round`) |
 | `root` | `Root` | `(complex \| infinity, complex \| infinity) -> number` | n-th root of a value. |
 | `round` | `Round` | `(x: real \| signed_infinity \| ~oo, step: real?) -> real \| signed_infinity \| ~oo` | Rounds a number to the nearest integer, or with a step to the nearest multiple of the step. |
 | `sign` | `Sign` | `(complex \| signed_infinity \| ~oo) -> complex` | Sign of a number: -1, 0, or 1 for a real; `z/\|z\|`, the point of the unit circle in its direction, for a complex `z`. |
-| `smoothstep` | `Smoothstep` | `(real \| signed_infinity, real \| signed_infinity, real \| signed_infinity) -> nan \| real` | Smooth Hermite interpolation between 0 and 1 as x goes from e0 to e1: t²(3 − 2t) with t = Clamp((x − e0)/(e1 − e0), 0, 1). |
+| `smoothstep` | `Smoothstep` | `(edge0: real \| signed_infinity, edge1: real \| signed_infinity, x: real \| signed_infinity) -> nan \| real` | Smooth Hermite interpolation between 0 and 1 as x goes from edge0 to edge1: t²(3 − 2t) with t = Clamp((x − edge0)/(edge1 − edge0), 0, 1). |
 | `sqrt` | `Sqrt` | `(complex \| infinity) -> complex \| infinity` | Square Root |
 | — | `Square` | `(number) -> number` | Square of a number: x^2. |
 | — | `Subtract` | `(number+) -> number` | Difference between two or more values. |
-| `sum` | `Sum` | `(any, tuple*) -> number` | `sum(f, [a, b])` computes the sum of `f` from `a` to `b`; `sum(L)` sums the elements of a collection `L`. |
-| `supremum` | `Supremum` | `(value*) -> number` | Like Max, but defined for open sets. |
+| `sum` | `Sum` | `(any, tuple*) -> number` | `sum(f, (k, a, b))` computes the sum of `f` for `k` from `a` to `b`; `sum(L)` sums the elements of a collection `L`. |
+| `supremum` | `Supremum` | `(value*) -> number` | The least upper bound of numbers, collections and intervals: like `max`, but the open end of an interval is a bound too. |
 | `trigamma` | `Trigamma` | `(complex \| infinity) -> number` | Trigamma function, the derivative of the digamma function |
 | `truncate` | `Truncate` | `(x: real \| signed_infinity \| ~oo, step: real?) -> real \| signed_infinity \| ~oo` | Rounds a number towards zero (removes the fractional part), or with a step to the multiple of the step nearest to the number in the direction of zero. |
-| `zeta` | `Zeta` | `(complex \| infinity, (complex \| infinity)?) -> number` | Riemann zeta function; with two arguments, Wolfram's generalized zeta: for a real a, ζ(s,a) = Σ_&#123;n=0&#125;^∞ \|n+a\|^&#123;-s&#125; (a term with n+a = 0 omitted, except at s = 0, where ζ(0,a) = 1/2 - a), which is HurwitzZeta(s,a) for a &gt; 0; for a complex… |
+| `zeta` | `Zeta` | `(s: complex \| infinity, a: (complex \| infinity)?) -> number` | Riemann zeta function; with two arguments, Wolfram's generalized zeta: for a real a, ζ(s,a) = Σ_&#123;n=0&#125;^∞ \|n+a\|^&#123;-s&#125; (a term with n+a = 0 omitted, except at s = 0, where ζ(0,a) = 1/2 - a), which is HurwitzZeta(s,a) for a &gt; 0; for a complex… |
 | — | `e` | constant `real<2.718281828459045..2.718281828459046>` = `e` | Euler's number e ≈ 2.71828, the base of the natural logarithm. |
 | — | `i` | constant `imaginary` = `i` | The imaginary unit, whose square is −1. |
 

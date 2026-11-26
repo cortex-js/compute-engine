@@ -197,6 +197,18 @@ export const ENCLOSURE_LIBRARY: SymbolDefinitions = {
     // The result can be `NaN` for an empty set or a `NaN` endpoint.
     signature:
       '(real | signed_infinity | nan | set<real>, (real | signed_infinity | nan)?) -> enclosure | nan',
+    parameters: [
+      {
+        description:
+          'The lower endpoint, or an `Interval` to enclose; a number alone gives the enclosure of that point.',
+        sample: '0',
+      },
+      {
+        description:
+          'The upper endpoint; two endpoints in the wrong order are swapped.',
+        sample: '1',
+      },
+    ],
     // An enclosure with two endpoints that are not `NaN` is a value; a set
     // operand or an endpoint that may be `NaN` can give the indeterminate
     // value.

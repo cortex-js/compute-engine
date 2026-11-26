@@ -532,6 +532,12 @@ export const COMPLEX_LIBRARY: SymbolDefinitions[] = [
       // tightens the claim per call (the `Abs` arrangement).
       signature: '(complex | infinity) -> number',
       examples: ['Real(3 + 4i)'],
+      parameters: [
+        {
+          description: 'The number whose real part is taken.',
+          sample: '3 + 4i',
+        },
+      ],
       nanBehavior: 'propagate',
       type: realPartType,
       sgn: ([op], { engine: ce }) => {
@@ -582,6 +588,12 @@ export const COMPLEX_LIBRARY: SymbolDefinitions[] = [
       // claims `nan` for `~oo`.
       signature: '(complex | infinity) -> number',
       examples: ['Imaginary(3 + 4i)'],
+      parameters: [
+        {
+          description: 'The number whose imaginary part is taken.',
+          sample: '3 + 4i',
+        },
+      ],
       nanBehavior: 'propagate',
       type: imaginaryPartType,
       sgn: ([op], { engine: ce }) => {
@@ -635,6 +647,12 @@ export const COMPLEX_LIBRARY: SymbolDefinitions[] = [
       complexity: 1200,
       signature: '(complex | infinity) -> number',
       examples: ['Re(3 + 4i)'],
+      parameters: [
+        {
+          description: 'The number whose real part is taken.',
+          sample: '3 + 4i',
+        },
+      ],
       nanBehavior: 'propagate',
       type: realPartType,
       canonical: (ops, { engine: ce }) => ce.function('Real', ops),
@@ -646,6 +664,12 @@ export const COMPLEX_LIBRARY: SymbolDefinitions[] = [
       broadcastable: true,
       complexity: 1200,
       signature: '(complex | infinity) -> number',
+      parameters: [
+        {
+          description: 'The complex number; a real number gives 0.',
+          sample: '3 + 4i',
+        },
+      ],
       examples: ['Im(3 + 4i)'],
       nanBehavior: 'propagate',
       type: imaginaryPartType,
@@ -660,6 +684,13 @@ export const COMPLEX_LIBRARY: SymbolDefinitions[] = [
       // Top numeric result for the same reason as `Real`: the handler
       // claims `nan` for `~oo`.
       signature: '(complex | infinity) -> number',
+      parameters: [
+        {
+          description:
+            'The complex number; a negative real number gives π, and 0 gives 0.',
+          sample: '1 + i',
+        },
+      ],
       examples: ['[Argument(1 + i), Argument(-1)]'],
       nanBehavior: 'propagate',
       type: argumentType,
@@ -774,6 +805,13 @@ export const COMPLEX_LIBRARY: SymbolDefinitions[] = [
       broadcastable: true,
       complexity: 1200,
       signature: '(complex | infinity) -> number',
+      parameters: [
+        {
+          description:
+            'The complex number; a negative real number gives π, and 0 gives 0.',
+          sample: '1 + i',
+        },
+      ],
       examples: ['[Arg(i), Arg(1 + i)]'],
       nanBehavior: 'propagate',
       type: argumentType,
@@ -793,6 +831,12 @@ export const COMPLEX_LIBRARY: SymbolDefinitions[] = [
       // bare marker, not to a tuple of markers (ruled 2026-09-02; batch 9
       // of `docs/plans/2026-08-30-error-model-implementation.md`).
       signature: '(complex | infinity) -> tuple<real | +oo, real>',
+      parameters: [
+        {
+          description: 'The complex number to write in polar form.',
+          sample: '1 + i',
+        },
+      ],
       examples: ['[AbsArg(1 + i), AbsArg(-2)]'],
       nanBehavior: 'propagate',
       type: absArgType,
@@ -857,6 +901,12 @@ export const COMPLEX_LIBRARY: SymbolDefinitions[] = [
       // threading over a collection operand and the `number` narrowing of a
       // valueless symbol that the handler-less path used to provide.
       signature: '(T) -> T where T: number',
+      parameters: [
+        {
+          description: 'The number, or a collection of numbers.',
+          sample: '3 + 4i',
+        },
+      ],
       examples: ['Conjugate(3 + 4i)'],
       nanBehavior: 'propagate',
       canonical: (ops, { engine: ce }) => {
@@ -912,6 +962,14 @@ export const COMPLEX_LIBRARY: SymbolDefinitions[] = [
       // a positive integer: `requires` decides it for a literal count and
       // leaves a symbolic count to the handler.
       signature: '(complex, integer) -> list<number>',
+      parameters: [
+        { description: 'The number whose roots are returned.', sample: '8' },
+        {
+          description:
+            'The number of roots, a positive integer; the list starts at the principal root and goes counterclockwise.',
+          sample: '3',
+        },
+      ],
       nanBehavior: ['propagate', 'reject'],
       requires: ([, n]) => {
         if (n === undefined || !isNumber(n)) return undefined;

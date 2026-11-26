@@ -305,6 +305,8 @@ category.
 
 MathJSON `Abs` · `(complex | infinity | quantity) -> number`
 
+- argument 1 — The number; a complex number gives its modulus. Sample: `-3`.
+
 Absolute value (magnitude) of a number.
 
 ```epsil
@@ -315,6 +317,8 @@ Absolute value (magnitude) of a number.
 ### absArg
 
 MathJSON `AbsArg` · `(complex | infinity) -> tuple<+oo | real, real>`
+
+- argument 1 — The complex number to write in polar form. Sample: `1 + i`.
 
 Tuple of magnitude and argument of a complex number.
 
@@ -338,6 +342,8 @@ Sum of two or more values.
 
 MathJSON `AiryAi` · `(complex | infinity) -> number`
 
+- argument 1 — The point at which the function is evaluated. Sample: `1`.
+
 Airy function of the first kind
 
 ```epsil
@@ -348,6 +354,8 @@ N(airyAi(1))
 ### airyAiPrime
 
 MathJSON `AiryAiPrime` · `(complex | infinity) -> number`
+
+- argument 1 — The point at which the function is evaluated. Sample: `1`.
 
 Derivative of the Airy function of the first kind
 
@@ -360,6 +368,8 @@ N(airyAiPrime(0))
 
 MathJSON `AiryBi` · `(complex | infinity) -> number`
 
+- argument 1 — The point at which the function is evaluated. Sample: `1`.
+
 Airy function of the second kind
 
 ```epsil
@@ -370,6 +380,8 @@ N(airyBi(0))
 ### airyBiPrime
 
 MathJSON `AiryBiPrime` · `(complex | infinity) -> number`
+
+- argument 1 — The point at which the function is evaluated. Sample: `1`.
 
 Derivative of the Airy function of the second kind
 
@@ -382,6 +394,8 @@ N(airyBiPrime(0))
 
 MathJSON `Arg` · `(complex | infinity) -> number`
 
+- argument 1 — The complex number; a negative real number gives π, and 0 gives 0. Sample: `1 + i`.
+
 `arg` is an alias for `argument`, which is the preferred name. Returns the complex argument (phase angle) of a number.
 
 ```epsil
@@ -393,6 +407,8 @@ MathJSON `Arg` · `(complex | infinity) -> number`
 
 MathJSON `Argument` · `(complex | infinity) -> number`
 
+- argument 1 — The complex number; a negative real number gives π, and 0 gives 0. Sample: `1 + i`.
+
 Complex argument (phase angle) of a number, in the engine's angular unit.
 
 ```epsil
@@ -402,7 +418,10 @@ Complex argument (phase angle) of a number, in the engine's angular unit.
 
 ### besselI
 
-MathJSON `BesselI` · `(order: complex, complex | infinity) -> number`
+MathJSON `BesselI` · `(order: complex, z: complex | infinity) -> number`
+
+- `order` — The order ν of the function. Sample: `0`.
+- `z` — The point at which the function is evaluated. Sample: `1`.
 
 Modified Bessel function of the first kind
 
@@ -413,7 +432,10 @@ N(besselI(0, 1))
 
 ### besselJ
 
-MathJSON `BesselJ` · `(order: complex, complex | infinity) -> number`
+MathJSON `BesselJ` · `(order: complex, z: complex | infinity) -> number`
+
+- `order` — The order ν of the function. Sample: `0`.
+- `z` — The point at which the function is evaluated. Sample: `1`.
 
 Bessel function of the first kind
 
@@ -424,7 +446,10 @@ N(besselJ(0, 1))
 
 ### besselK
 
-MathJSON `BesselK` · `(order: complex, complex | infinity) -> number`
+MathJSON `BesselK` · `(order: complex, z: complex | infinity) -> number`
+
+- `order` — The order ν of the function. Sample: `0`.
+- `z` — The point at which the function is evaluated; at 0 the function is infinite, or stays unevaluated for some orders. Sample: `1`.
 
 Modified Bessel function of the second kind (Macdonald function)
 
@@ -435,7 +460,10 @@ N(besselK(0, 1))
 
 ### besselY
 
-MathJSON `BesselY` · `(order: complex, complex | infinity) -> number`
+MathJSON `BesselY` · `(order: complex, z: complex | infinity) -> number`
+
+- `order` — The order ν of the function. Sample: `0`.
+- `z` — The point at which the function is evaluated; at 0 the function is infinite, or stays unevaluated for some orders. Sample: `1`.
 
 Bessel function of the second kind (Neumann function)
 
@@ -447,6 +475,11 @@ N(besselY(0, 1))
 ### beta
 
 MathJSON `Beta` · `(complex | infinity, complex | infinity, (complex | infinity)?, (complex | infinity)?) -> number`
+
+- argument 1 — With two arguments, the parameter a; with three, the upper limit z of the incomplete beta function B_z(a, b); with four, the lower limit z0. Sample: `2`.
+- argument 2 — With two arguments, the parameter b; with three, the parameter a; with four, the upper limit z1 of B_z1(a, b) − B_z0(a, b). Sample: `3`.
+- argument 3 — With three arguments, the parameter b; with four, the parameter a. Sample: `2`.
+- argument 4 — With four arguments, the parameter b. Sample: `3`.
 
 Euler beta function
 
@@ -480,6 +513,9 @@ N(catalanConstant)
 
 MathJSON `Ceil` · `(x: real | signed_infinity | ~oo, step: real?) -> real | signed_infinity | ~oo`
 
+- `x` — The number to round up. Sample: `2.3`.
+- `step` — The step whose multiple is the result, 1 by default; a negative step acts as its magnitude, and 0 gives NaN. Sample: `10`.
+
 Rounds a number up to the next largest integer, or with a step to the least multiple of the step that is at least the number.
 
 ```epsil
@@ -489,7 +525,10 @@ Rounds a number up to the next largest integer, or with a step to the least mult
 
 ### chop
 
-MathJSON `Chop` · `(T, real<0..>?) -> T where T: number`
+MathJSON `Chop` · `(x: T, tolerance: real<0..>?) -> T where T: number`
+
+- `x` — The number, or a collection of numbers, whose tiny parts are set to zero; the real and imaginary parts of a complex number are chopped separately. Sample: `3 + 1e-15i`.
+- `tolerance` — The largest magnitude that is set to zero; by default the tolerance of the engine, 1e-10. Sample: `0.01`.
 
 Replace tiny numeric values with zero.
 
@@ -505,7 +544,11 @@ chop([0.004, 0.5, 3 + 0.002i], 0.01)
 
 ### clamp
 
-MathJSON `Clamp` · `(real | signed_infinity, real | signed_infinity, real | signed_infinity) -> real | signed_infinity`
+MathJSON `Clamp` · `(x: real | signed_infinity, lower: real | signed_infinity, upper: real | signed_infinity) -> real | signed_infinity`
+
+- `x` — The value to clamp. Sample: `12`.
+- `lower` — The lower bound. Sample: `0`.
+- `upper` — The upper bound; when it is below `lower`, the result is `upper`. Sample: `10`.
 
 Clamp a value to the range [lo, hi] = min(max(x, lo), hi). Broadcasts over collection arguments.
 
@@ -517,6 +560,9 @@ Clamp a value to the range [lo, hi] = min(max(x, lo), hi). Broadcasts over colle
 ### complex
 
 MathJSON `Complex` · `(real: number, imaginary: number) -> complex`
+
+- `real` — The real part. Sample: `3`.
+- `imaginary` — The imaginary part. Sample: `4`.
 
 Construct a complex number from real and imaginary parts. Converted directly to a BoxedNumber during boxing; this entry exists so `operatorInfo("Complex")` returns a signature.
 
@@ -540,6 +586,9 @@ Complex infinity, a single unsigned infinity in the complex plane.
 
 MathJSON `ComplexRoots` · `(complex, integer) -> list<number>`
 
+- argument 1 — The number whose roots are returned. Sample: `8`.
+- argument 2 — The number of roots, a positive integer; the list starts at the principal root and goes counterclockwise. Sample: `3`.
+
 All n-th complex roots of a number.
 
 ```epsil
@@ -555,6 +604,8 @@ complexRoots(8, 3)
 ### conjugate
 
 MathJSON `Conjugate` · `(T) -> T where T: number`
+
+- argument 1 — The number, or a collection of numbers. Sample: `3 + 4i`.
 
 Complex conjugate of a number, or the pointwise conjugate of a function.
 
@@ -578,6 +629,8 @@ This symbol indicates that some elements in a collection have been omitted, for 
 
 MathJSON `Denominator` · `(number) -> nothing | number`
 
+- argument 1 — The fraction or expression, read as written: `Denominator(6/8)` is 8. Sample: `3/4`.
+
 Denominator of an expression
 
 ```epsil
@@ -588,6 +641,8 @@ Denominator of an expression
 ### digamma
 
 MathJSON `Digamma` · `(complex | infinity) -> number`
+
+- argument 1 — The point; 0 and the negative integers are poles. Sample: `1`.
 
 Digamma function, the logarithmic derivative of the gamma function
 
@@ -600,6 +655,8 @@ Digamma function, the logarithmic derivative of the gamma function
 
 MathJSON `DirichletBeta` · `(complex | infinity) -> number`
 
+- argument 1 — The point s; the function is entire. Sample: `2`.
+
 Dirichlet beta function β(s) = Σ_&#123;n≥0&#125; (−1)^n/(2n+1)^s = 4^(−s) (ζ(s, 1/4) − ζ(s, 3/4)), entire; β(1) = π/4, β(2) = G, β(+∞) = 1.
 
 ```epsil
@@ -611,6 +668,8 @@ Dirichlet beta function β(s) = Σ_&#123;n≥0&#125; (−1)^n/(2n+1)^s = 4^(−s
 
 MathJSON `DirichletEta` · `(complex | infinity) -> number`
 
+- argument 1 — The point s; the function is entire. Sample: `2`.
+
 Dirichlet eta function η(s) = Σ_&#123;n≥1&#125; (−1)^(n−1)/n^s = (1 − 2^(1−s)) ζ(s), entire; η(1) = ln 2, η(+∞) = 1.
 
 ```epsil
@@ -621,6 +680,9 @@ Dirichlet eta function η(s) = Σ_&#123;n≥1&#125; (−1)^(n−1)/n^s = (1 − 
 ### distance
 
 MathJSON `Distance` · `(list<list<number>> | list<number> | list<tuple> | tuple, list<list<number>> | list<number> | list<tuple> | tuple) -> number`
+
+- argument 1 — A point, or a list of points that gives one distance per point. Sample: `(0, 0)`.
+- argument 2 — The other point, or a list of points paired with the first list in order. Sample: `(3, 4)`.
 
 Euclidean distance between two points, broadcasting over a list of points.
 
@@ -644,6 +706,9 @@ Quotient of a numerator and one or more denominators.
 
 MathJSON `ElementMax` · `(real | signed_infinity, (real | signed_infinity)+) -> real | signed_infinity`
 
+- argument 1 — A number, or a collection of numbers. Sample: `3`.
+- arguments 2, … — More numbers or collections; two collections are compared element by element and must have the same length. Sample: `5`.
+
 Element-wise maximum: broadcasts scalars over collections (and zips collections), returning a collection; all-scalar arguments give a scalar. Variadic.
 
 ```epsil
@@ -655,6 +720,9 @@ elementMax([1, 5, 3], [4, 2, 6])
 
 MathJSON `ElementMin` · `(real | signed_infinity, (real | signed_infinity)+) -> real | signed_infinity`
 
+- argument 1 — A number, or a collection of numbers. Sample: `3`.
+- arguments 2, … — More numbers or collections; two collections are compared element by element and must have the same length. Sample: `5`.
+
 Element-wise minimum: broadcasts scalars over collections (and zips collections), returning a collection; all-scalar arguments give a scalar. Variadic.
 
 ```epsil
@@ -665,6 +733,9 @@ elementMin([1, 5, 3], [4, 2, 6])
 ### enclosure
 
 MathJSON `Enclosure` · `(nan | real | set<real> | signed_infinity, (nan | real | signed_infinity)?) -> enclosure | nan`
+
+- argument 1 — The lower endpoint, or an `Interval` to enclose; a number alone gives the enclosure of that point. Sample: `0`.
+- argument 2 — The upper endpoint; two endpoints in the wrong order are swapped. Sample: `1`.
 
 A closed interval [lo, hi] that encloses one real number, with interval arithmetic.
 
@@ -698,6 +769,8 @@ N(eulerGamma)
 
 MathJSON `Exp` · `(number) -> number`
 
+- argument 1 — The exponent; a collection is mapped element by element. Sample: `1`.
+
 Natural exponential function: e^x. Applied to a matrix (or any collection), it broadcasts ELEMENTWISE — it is NOT the matrix exponential e^M (which is not currently implemented).
 
 ```epsil
@@ -708,6 +781,8 @@ Natural exponential function: e^x. Applied to a matrix (or any collection), it b
 ### exp2
 
 MathJSON `Exp2` · `(number) -> number`
+
+- argument 1 — The exponent. Sample: `10`.
 
 Base-2 exponential: 2^x
 
@@ -742,6 +817,8 @@ Factorial function: the product of all positive integers less than or equal to n
 
 MathJSON `Factorial2` · `(complex | infinity) -> number`
 
+- argument 1 — The number n; a negative odd integer has a finite value, and a negative even integer is a pole. Sample: `7`.
+
 Double Factorial Function
 
 ```epsil
@@ -752,6 +829,9 @@ Double Factorial Function
 ### floor
 
 MathJSON `Floor` · `(x: real | signed_infinity | ~oo, step: real?) -> real | signed_infinity | ~oo`
+
+- `x` — The number to round down. Sample: `2.7`.
+- `step` — The step whose multiple is the result, 1 by default; a negative step acts as its magnitude, and 0 gives NaN. Sample: `10`.
 
 Rounds a number down to the nearest integer, or with a step to the greatest multiple of the step that is at most the number.
 
@@ -764,6 +844,8 @@ Rounds a number down to the nearest integer, or with a step to the greatest mult
 
 MathJSON `Fract` · `(real | signed_infinity | ~oo) -> real<0..1>`
 
+- argument 1 — The number; the result is in [0, 1), also for a negative number. Sample: `3.75`.
+
 Fractional part of a number: x - floor(x)
 
 ```epsil
@@ -775,6 +857,8 @@ Fractional part of a number: x - floor(x)
 
 MathJSON `GCD` · `(any*) -> number`
 
+- arguments 1, … — An integer, a polynomial or a list of integers; with no argument the result is 0. Sample: `12`.
+
 Greatest Common Divisor
 
 ```epsil
@@ -785,6 +869,10 @@ Greatest Common Divisor
 ### gamma
 
 MathJSON `Gamma` · `(complex | infinity, (complex | infinity)?, (complex | infinity)?) -> number`
+
+- argument 1 — The point z; with two or three arguments, the parameter s of the incomplete gamma function. Sample: `5`.
+- argument 2 — The lower limit z of the upper incomplete gamma function Γ(s, z); with three arguments, the lower limit z0. Sample: `1`.
+- argument 3 — The upper limit z1: the result is Γ(s, z0) − Γ(s, z1), the integral from z0 to z1. Sample: `3`.
 
 Gamma function Γ(z); with two arguments, the upper incomplete gamma Γ(s, z) = ∫_z^∞ tˢ⁻¹ e⁻ᵗ dt; with three, Γ(s, z0) − Γ(s, z1).
 
@@ -806,6 +894,8 @@ N(gamma(2, 1, 3))
 ### gammaLn
 
 MathJSON `GammaLn` · `(complex | infinity) -> number`
+
+- argument 1 — The point; at a pole of Γ, 0 or a negative integer, the result is +∞. Sample: `10`.
 
 Natural logarithm of the gamma function.
 
@@ -840,6 +930,9 @@ The rational number one half (1/2).
 
 MathJSON `HarmonicNumber` · `(complex | infinity, (complex | infinity)?) -> number`
 
+- argument 1 — The index n; a negative integer is a pole. Sample: `10`.
+- argument 2 — The order r of the generalized harmonic number, 1 by default. Sample: `2`.
+
 Harmonic number H_n = Σ_&#123;k=1&#125;^n 1/k, exact at a non-negative integer and continued by ψ(n+1) + γ; with a second argument r, the generalized H_n^(r) = Σ_&#123;k=1&#125;^n 1/k^r = ζ(r) − ζ(r, n+1).
 
 ```epsil
@@ -850,6 +943,8 @@ Harmonic number H_n = Σ_&#123;k=1&#125;^n 1/k, exact at a non-negative integer 
 ### heaviside
 
 MathJSON `Heaviside` · `(real | signed_infinity) -> rational<0..1>`
+
+- argument 1 — The real number; the result is 1/2 at 0. Sample: `3`.
 
 Heaviside step function.
 
@@ -862,6 +957,10 @@ Heaviside step function.
 
 MathJSON `HurwitzZeta` · `(complex | infinity, complex | infinity, integer?) -> number`
 
+- argument 1 — The exponent s; s = 1 is a pole. Sample: `2`.
+- argument 2 — The shift a; 0 or a negative integer is a pole when the real part of s is positive. Sample: `2`.
+- argument 3 — The order n of the derivative with respect to a; a call with it stays unevaluated. Sample: `1`.
+
 Hurwitz zeta function ζ(s,a) = Σ_&#123;n=0&#125;^∞ (n+a)^&#123;-s&#125;
 
 ```epsil
@@ -873,6 +972,8 @@ hurwitzZeta(2, 2)
 
 MathJSON `Im` · `(complex | infinity) -> number`
 
+- argument 1 — The complex number; a real number gives 0. Sample: `3 + 4i`.
+
 `im` is an alias for `imaginary`, which is the preferred name. Returns the imaginary part of a complex number.
 
 ```epsil
@@ -883,6 +984,8 @@ im(3 + 4i)
 ### imaginary
 
 MathJSON `Imaginary` · `(complex | infinity) -> number`
+
+- argument 1 — The number whose imaginary part is taken. Sample: `3 + 4i`.
 
 Imaginary part of a complex number.
 
@@ -917,7 +1020,9 @@ An input spelling of NaN.
 
 MathJSON `Infimum` · `(value*) -> number`
 
-Like Min, but defined for open sets.
+- arguments 1, … — A number, or a collection or an interval whose elements are bounded. Sample: `interval(open(0), 1)`.
+
+The greatest lower bound of numbers, collections and intervals: like `min`, but the open end of an interval is a bound too.
 
 ```epsil
 [infimum(1, 3, 2), infimum(interval(0, 1))]
@@ -927,6 +1032,8 @@ Like Min, but defined for open sets.
 ### interpret
 
 MathJSON `Interpret` · `(any) -> any`
+
+- argument 1 — The expression to interpret, such as a sum or a product written with a continuation. Sample: `1 + 2 + ContinuationPlaceholder + n`.
 
 Interpret a notational expression as its mathematical meaning. In v1: a continuation-bearing `Add`/`Multiply` (e.g. `1 + 2 + \dots + n`) becomes a `sum`/`product`. Returns the argument unchanged when the (strict) inference gate does not pass
 
@@ -939,6 +1046,8 @@ interpret(1 + 2 + ContinuationPlaceholder + n)
 
 MathJSON `IsComposite` · `(number) -> boolean`
 
+- argument 1 — The number to test; a non-integer or an integer below 4 is not composite. Sample: `21`.
+
 `isComposite(n)` returns `True` if `n` is a composite number
 
 ```epsil
@@ -949,6 +1058,8 @@ MathJSON `IsComposite` · `(number) -> boolean`
 ### isEven
 
 MathJSON `IsEven` · `(number) -> boolean`
+
+- argument 1 — The number to test; a non-integer is not even. Sample: `8`.
 
 `isEven(n)` returns `True` if `n` is an even number
 
@@ -961,6 +1072,8 @@ MathJSON `IsEven` · `(number) -> boolean`
 
 MathJSON `IsOdd` · `(number) -> boolean`
 
+- argument 1 — The number to test; a non-integer is not odd. Sample: `7`.
+
 `isOdd(n)` returns `True` if `n` is an odd number
 
 ```epsil
@@ -971,6 +1084,8 @@ MathJSON `IsOdd` · `(number) -> boolean`
 ### isPrime
 
 MathJSON `IsPrime` · `(number) -> boolean`
+
+- argument 1 — The number to test; a non-integer or an integer below 2 is not prime. Sample: `17`.
 
 `isPrime(n)` returns `True` if `n` is a prime number
 
@@ -983,6 +1098,8 @@ MathJSON `IsPrime` · `(number) -> boolean`
 
 MathJSON `LCM` · `(any*) -> number`
 
+- arguments 1, … — An integer, or a collection of integers; with no argument the result is 1. Sample: `6`.
+
 Least Common Multiple
 
 ```epsil
@@ -993,6 +1110,9 @@ Least Common Multiple
 ### lambertW
 
 MathJSON `LambertW` · `(z: complex | infinity, branch: integer?) -> number`
+
+- `z` — The argument; on the principal branch the value is real for z ≥ -1/e. Sample: `1`.
+- `branch` — The branch: 0, the default, is the principal branch, and -1 the other real branch, for -1/e ≤ z &lt; 0. Sample: `-1`.
 
 Lambert W function (product logarithm)
 
@@ -1010,6 +1130,8 @@ N(lambertW(-0.1, branch: -1))
 
 MathJSON `Lb` · `(number) -> number`
 
+- argument 1 — The number whose base-2 logarithm is taken. Sample: `8`.
+
 Base-2 Logarithm
 
 ```epsil
@@ -1019,13 +1141,29 @@ Base-2 Logarithm
 
 ### lerchPhi
 
-MathJSON `LerchPhi` · `(complex, complex, complex) -> number`
+MathJSON `LerchPhi` · `(z: complex, s: complex, a: complex) -> number`
+
+- `z` — The base of the powers zᵏ in the numerators. Sample: `1/2`.
+- `s` — The exponent of the denominators (k + a)^s. Sample: `2`.
+- `a` — The shift of the denominators (k + a)^s. Sample: `1`.
 
 Lerch transcendent Φ(z,s,a) = Σ_&#123;k=0&#125;^∞ zᵏ(k+a)^&#123;-s&#125;
+
+```epsil
+lerchPhi(1, 2, 1)
+// ➔ 1/6 * pi^2
+```
+
+```epsil
+N(lerchPhi(1/2, 1, 1))
+// ➔ 1.38629436111989061883
+```
 
 ### lg
 
 MathJSON `Lg` · `(number) -> number`
+
+- argument 1 — The number whose base-10 logarithm is taken. Sample: `100`.
 
 Base-10 Logarithm
 
@@ -1037,6 +1175,9 @@ Base-10 Logarithm
 ### ln
 
 MathJSON `Ln` · `(complex | infinity, base: (complex | infinity)?) -> complex | infinity`
+
+- argument 1 — The number whose logarithm is taken; the logarithm of 0 is -oo. Sample: `2`.
+- `base` — The base of the logarithm; by default e. Sample: `2`.
 
 Natural Logarithm
 
@@ -1054,6 +1195,9 @@ ln(8, 2)
 
 MathJSON `Log` · `(complex | infinity, base: (complex | infinity)?) -> number`
 
+- argument 1 — The number whose logarithm is taken; the logarithm of 0 is -oo. Sample: `1000`.
+- `base` — The base of the logarithm; by default 10. Sample: `2`.
+
 Log(z, b = 10) = Logarithm of base b
 
 ```epsil
@@ -1065,6 +1209,8 @@ Log(z, b = 10) = Logarithm of base b
 
 MathJSON `Log10` · `(number) -> number`
 
+- argument 1 — The number whose base-10 logarithm is taken. Sample: `1000`.
+
 Base-10 Logarithm
 
 ```epsil
@@ -1075,6 +1221,8 @@ Base-10 Logarithm
 ### log2
 
 MathJSON `Log2` · `(number) -> number`
+
+- argument 1 — The number whose base-2 logarithm is taken. Sample: `32`.
 
 Base-2 Logarithm
 
@@ -1098,6 +1246,8 @@ N(machineEpsilon)
 
 MathJSON `Max` · `(value*) -> number`
 
+- arguments 1, … — A number, or a collection or an interval whose elements are compared; with no argument the result is NaN. Sample: `3`.
+
 Maximum of two or more numbers.
 
 ```epsil
@@ -1107,7 +1257,10 @@ Maximum of two or more numbers.
 
 ### measurement
 
-MathJSON `Measurement` · `(value, value) -> measurement`
+MathJSON `Measurement` · `(value: value, uncertainty: value) -> measurement`
+
+- `value` — The nominal value. Sample: `9.81`.
+- `uncertainty` — The 1σ absolute uncertainty; its sign is dropped, and 0 gives the nominal value alone. Sample: `0.02`.
 
 A nominal value carrying a 1σ absolute uncertainty.
 
@@ -1124,6 +1277,8 @@ N(measurement(5, 0.2) * measurement(3, 0.4))
 ### min
 
 MathJSON `Min` · `(value+) -> number`
+
+- arguments 1, … — A number, or a collection or an interval whose elements are compared. Sample: `3`.
 
 Minimum of two or more numbers.
 
@@ -1196,6 +1351,8 @@ Negative infinity (−∞).
 
 MathJSON `Numerator` · `(number) -> nothing | number`
 
+- argument 1 — The fraction or the expression whose numerator is taken; an integer is its own numerator. Sample: `3/4`.
+
 Numerator of an expression
 
 ```epsil
@@ -1206,6 +1363,8 @@ Numerator of an expression
 ### numeratorDenominator
 
 MathJSON `NumeratorDenominator` · `(number) -> nothing | tuple<number, number>`
+
+- argument 1 — The fraction or the expression whose numerator and denominator are taken; an integer n gives (n, 1). Sample: `3/4`.
 
 Sequence of Numerator and Denominator of an expression
 
@@ -1228,6 +1387,9 @@ PlusMinus(1, 0.1)
 ### polyGamma
 
 MathJSON `PolyGamma` · `(order: integer, complex | infinity) -> number`
+
+- `order` — The order m of the derivative, 0 for the digamma function; a call with one argument is the digamma of that argument. Sample: `1`.
+- argument 2 — The argument; the function has poles at 0 and at the negative integers. Sample: `2`.
 
 Polygamma function, the n-th derivative of the digamma function
 
@@ -1289,7 +1451,10 @@ PreIncrement(5)
 
 MathJSON `Product` · `(any, tuple*) -> number`
 
-`product(f, a, b)` computes the product of `f` from `a` to `b`.
+- argument 1 — The factor, written with the index variables; with no range, a collection whose elements are multiplied. Sample: `1 - 1/k^2`.
+- arguments 2, … — A range of an index variable: (k, a, b) from a to b, (k, a, b, step) with a step, (k, n) from 1 to n; an empty range gives 1, and several ranges nest. Sample: `(k, 2, 10)`.
+
+`product(f, (k, a, b))` computes the product of `f` for `k` from `a` to `b`; `product(L)` multiplies the elements of a collection `L`.
 
 ```epsil
 product(k, (k, 1, 5))
@@ -1305,6 +1470,9 @@ product(1 - 1/k^2, (k, 2, 10))
 
 MathJSON `Rational` · `((integer, integer) -> rational) | ((real) -> rational)`
 
+- argument 1 — The numerator, or with one argument the real number to convert. Sample: `3`.
+- argument 2 — The denominator. Sample: `6`.
+
 Construct a rational number from a numerator and denominator.
 
 ```epsil
@@ -1314,9 +1482,12 @@ Construct a rational number from a numerator and denominator.
 
 ### rationalize
 
-MathJSON `Rationalize` · `(real, real<0..>?) -> rational`
+MathJSON `Rationalize` · `(x: real, tolerance: real<0..>?) -> rational`
 
-Approximate a real number by a rational. With a second argument `tolerance`, return the rational with the smallest denominator that approximates the number to within `tolerance` (a continued-fraction convergent); with no tolerance, rationalize at full working precision, as single-argument `rational`.
+- `x` — The real number to approximate. Sample: `sqrt(3)`.
+- `tolerance` — The largest error allowed; by default about 1e-15, the precision of a machine float. Sample: `0.01`.
+
+Approximate a real number by a rational. With a second argument `tolerance`, return the rational with the smallest denominator that approximates the number to within `tolerance` (a continued-fraction convergent); with no tolerance, rationalize the machine float of the number (about 15 digits), as single-argument `rational`.
 
 ```epsil
 rationalize(1.75)
@@ -1332,6 +1503,8 @@ rationalize(sqrt(3), 1/500)
 
 MathJSON `Re` · `(complex | infinity) -> number`
 
+- argument 1 — The number whose real part is taken. Sample: `3 + 4i`.
+
 `re` is an alias for `real`, which is the preferred name. Returns the real part of a complex number.
 
 ```epsil
@@ -1342,6 +1515,8 @@ re(3 + 4i)
 ### real
 
 MathJSON `Real` · `(complex | infinity) -> number`
+
+- argument 1 — The number whose real part is taken. Sample: `3 + 4i`.
 
 Real part of a complex number.
 
@@ -1354,6 +1529,9 @@ real(3 + 4i)
 
 MathJSON `Remainder` · `(T, T) -> T where T: number`
 
+- argument 1 — The dividend. Sample: `7`.
+- argument 2 — The divisor; a divisor of 0 gives NaN. Sample: `3`.
+
 IEEE remainder: the signed remainder after dividing x by y, with the quotient rounded to the nearest integer (ties round toward +Infinity, matching JavaScript `Math.round`)
 
 ```epsil
@@ -1364,6 +1542,9 @@ IEEE remainder: the signed remainder after dividing x by y, with the quotient ro
 ### root
 
 MathJSON `Root` · `(complex | infinity, complex | infinity) -> number`
+
+- argument 1 — The number whose root is taken; a negative number has a real root of an odd degree. Sample: `8`.
+- argument 2 — The degree n of the root, not 0. Sample: `3`.
 
 n-th root of a value.
 
@@ -1376,6 +1557,9 @@ n-th root of a value.
 
 MathJSON `Round` · `(x: real | signed_infinity | ~oo, step: real?) -> real | signed_infinity | ~oo`
 
+- `x` — The number to round; a tie rounds away from zero. Sample: `3.14159`.
+- `step` — The step whose nearest multiple is returned; by default 1. Its sign is ignored, and a step of 0 gives NaN. Sample: `1/100`.
+
 Rounds a number to the nearest integer, or with a step to the nearest multiple of the step.
 
 ```epsil
@@ -1387,6 +1571,8 @@ Rounds a number to the nearest integer, or with a step to the nearest multiple o
 
 MathJSON `Sign` · `(complex | signed_infinity | ~oo) -> complex`
 
+- argument 1 — The number whose sign is taken. Sample: `-3`.
+
 Sign of a number: -1, 0, or 1 for a real; `z/|z|`, the point of the unit circle in its direction, for a complex `z`.
 
 ```epsil
@@ -1396,9 +1582,13 @@ Sign of a number: -1, 0, or 1 for a real; `z/|z|`, the point of the unit circle 
 
 ### smoothstep
 
-MathJSON `Smoothstep` · `(real | signed_infinity, real | signed_infinity, real | signed_infinity) -> nan | real`
+MathJSON `Smoothstep` · `(edge0: real | signed_infinity, edge1: real | signed_infinity, x: real | signed_infinity) -> nan | real`
 
-Smooth Hermite interpolation between 0 and 1 as x goes from e0 to e1: t²(3 − 2t) with t = Clamp((x − e0)/(e1 − e0), 0, 1). Broadcasts over collection arguments.
+- `edge0` — The value of x at which the result starts to rise from 0. Sample: `0`.
+- `edge1` — The value of x at which the result reaches 1; an edge1 below edge0 makes the curve fall from 1 to 0. Sample: `1`.
+- `x` — The point at which the curve is evaluated. Sample: `0.25`.
+
+Smooth Hermite interpolation between 0 and 1 as x goes from edge0 to edge1: t²(3 − 2t) with t = Clamp((x − edge0)/(edge1 − edge0), 0, 1). Broadcasts over collection arguments.
 
 ```epsil
 [smoothstep(0, 1, -1), smoothstep(0, 1, 1/2), smoothstep(0, 1, 2)]
@@ -1408,6 +1598,8 @@ Smooth Hermite interpolation between 0 and 1 as x goes from e0 to e1: t²(3 − 
 ### sqrt
 
 MathJSON `Sqrt` · `(complex | infinity) -> complex | infinity`
+
+- argument 1 — The number whose square root is taken; a negative number gives an imaginary root. Sample: `2`.
 
 Square Root
 
@@ -1442,7 +1634,10 @@ Difference between two or more values.
 
 MathJSON `Sum` · `(any, tuple*) -> number`
 
-`sum(f, [a, b])` computes the sum of `f` from `a` to `b`; `sum(L)` sums the elements of a collection `L`.
+- argument 1 — The term, written with the index variables; with no range, a collection whose elements are summed. Sample: `k^2`.
+- arguments 2, … — A range of an index variable: (k, a, b) from a to b, (k, a, b, step) with a step, (k, n) from 1 to n; an empty range gives 0, and several ranges nest. Sample: `(k, 1, 10)`.
+
+`sum(f, (k, a, b))` computes the sum of `f` for `k` from `a` to `b`; `sum(L)` sums the elements of a collection `L`.
 
 ```epsil
 sum(k^2, (k, 1, 10))
@@ -1458,7 +1653,9 @@ sum(1/k^2, (k, 1, oo))
 
 MathJSON `Supremum` · `(value*) -> number`
 
-Like Max, but defined for open sets.
+- arguments 1, … — A number, or a collection or an interval whose elements are bounded. Sample: `interval(0, open(1))`.
+
+The least upper bound of numbers, collections and intervals: like `max`, but the open end of an interval is a bound too.
 
 ```epsil
 [supremum(1, 3, 2), supremum(interval(0, 1))]
@@ -1468,6 +1665,8 @@ Like Max, but defined for open sets.
 ### trigamma
 
 MathJSON `Trigamma` · `(complex | infinity) -> number`
+
+- argument 1 — The argument; the function has poles at 0 and at the negative integers. Sample: `1`.
 
 Trigamma function, the derivative of the digamma function
 
@@ -1480,6 +1679,9 @@ N(trigamma(1))
 
 MathJSON `Truncate` · `(x: real | signed_infinity | ~oo, step: real?) -> real | signed_infinity | ~oo`
 
+- `x` — The number to truncate. Sample: `2.7`.
+- `step` — The step whose multiple is returned; by default 1. Its sign is ignored, and a step of 0 gives NaN. Sample: `10`.
+
 Rounds a number towards zero (removes the fractional part), or with a step to the multiple of the step nearest to the number in the direction of zero.
 
 ```epsil
@@ -1489,7 +1691,10 @@ Rounds a number towards zero (removes the fractional part), or with a step to th
 
 ### zeta
 
-MathJSON `Zeta` · `(complex | infinity, (complex | infinity)?) -> number`
+MathJSON `Zeta` · `(s: complex | infinity, a: (complex | infinity)?) -> number`
+
+- `s` — The argument; the function has a pole at 1. Sample: `2`.
+- `a` — The shift of the generalized zeta; by default 1, the Riemann zeta. Sample: `2`.
 
 Riemann zeta function; with two arguments, Wolfram's generalized zeta: for a real a, ζ(s,a) = Σ_&#123;n=0&#125;^∞ |n+a|^&#123;-s&#125; (a term with n+a = 0 omitted, except at s = 0, where ζ(0,a) = 1/2 - a), which is HurwitzZeta(s,a) for a &gt; 0; for a complex a, the Hurwitz sum.
 

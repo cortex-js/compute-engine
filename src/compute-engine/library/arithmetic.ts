@@ -8726,6 +8726,12 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // quantity is a quantity (`Abs(-2 m)` is `2 m`, typed `quantity` by
       // the `resultType` hook of `QUANTITY_ARITHMETIC`, `quantity-kind.ts`).
       signature: '(complex | infinity | quantity) -> number',
+      parameters: [
+        {
+          description: 'The number; a complex number gives its modulus.',
+          sample: '-3',
+        },
+      ],
       examples: ['[Abs(-3), Abs(3 - 4i)]'],
       nanBehavior: 'propagate',
       // A TYPE test, not an `operator === 'Tuple'` check: a tuple-TYPED
@@ -8929,6 +8935,14 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // least multiple of the step that is at least `x` (see
       // `ROUNDING_STEP_SIGNATURE` and `roundToStep()`).
       signature: ROUNDING_STEP_SIGNATURE,
+      parameters: {
+        x: { description: 'The number to round up.', sample: '2.3' },
+        step: {
+          description:
+            'The step whose multiple is the result, 1 by default; a negative step acts as its magnitude, and 0 gives NaN.',
+          sample: '10',
+        },
+      },
       examples: ['[Ceil(2.3), Ceil(-2.7), Ceil(226, 10)]'],
       // Explicit: the DERIVED default answers `reject` for an
       // extended-real carrier, and `Ceil(NaN)` must be `NaN`.
@@ -8984,7 +8998,19 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // The optional second operand is the tolerance (Wolfram's `Chop[x, tol]`):
       // a part whose magnitude is at most `tol` becomes 0. Without it the
       // engine's `ce.tolerance` applies.
-      signature: '(T, real<0..>?) -> T where T: number',
+      signature: '(x: T, tolerance: real<0..>?) -> T where T: number',
+      parameters: {
+        x: {
+          description:
+            'The number, or a collection of numbers, whose tiny parts are set to zero; the real and imaginary parts of a complex number are chopped separately.',
+          sample: '3 + 1e-15i',
+        },
+        tolerance: {
+          description:
+            'The largest magnitude that is set to zero; by default the tolerance of the engine, 1e-10.',
+          sample: '0.01',
+        },
+      },
       examples: [
         'Chop([1e-20, 0.5, 3 + 1e-15i])',
         'Chop([0.004, 0.5, 3 + 0.002i], 0.01)',
@@ -9029,6 +9055,10 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       wikidata: 'Q11567',
       complexity: 500,
       signature: '(real: number, imaginary: number) -> complex',
+      parameters: {
+        real: { description: 'The real part.', sample: '3' },
+        imaginary: { description: 'The imaginary part.', sample: '4' },
+      },
       examples: ['[Complex(3, 4), Complex(1, -2)]'],
     },
 
@@ -9574,6 +9604,13 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // incompatible-type error (the exponent slot excludes `~oo`),
       // `Exp(NaN)` propagates, `Exp(±∞)` keeps its values (+∞ and 0).
       signature: '(number) -> number',
+      parameters: [
+        {
+          description:
+            'The exponent; a collection is mapped element by element.',
+          sample: '1',
+        },
+      ],
       examples: ['[Exp(1), Exp(Ln(x)), N(Exp(2))]'],
       // Because it gets canonicalized to Power, the sgn handler is not called
       // sgn: ([x]) => {
@@ -9604,6 +9641,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       complexity: 3500,
       broadcastable: true,
       signature: '(number) -> number',
+      parameters: [{ description: 'The exponent.', sample: '10' }],
       examples: ['[Exp2(10), Exp2(1/2)]'],
       canonical: (args, { engine }) => {
         // A value of a kind admitted as a number whose kind has a `power`
@@ -9875,6 +9913,13 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // capability gap, not an off-carrier point. No `canonical` handler,
       // so a proven off-carrier operand (a string) is rejected at boxing.
       signature: '(complex | infinity) -> number',
+      parameters: [
+        {
+          description:
+            'The number n; a negative odd integer has a finite value, and a negative even integer is a pole.',
+          sample: '7',
+        },
+      ],
       examples: ['[Factorial2(7), Factorial2(8)]'],
       nanBehavior: 'propagate',
       // Same shape as `Factorial` above: the negative-integer branch claims
@@ -10020,6 +10065,14 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // The optional second argument is a step: `Floor(x, step)` is the
       // greatest multiple of the step that is at most `x`.
       signature: ROUNDING_STEP_SIGNATURE,
+      parameters: {
+        x: { description: 'The number to round down.', sample: '2.7' },
+        step: {
+          description:
+            'The step whose multiple is the result, 1 by default; a negative step acts as its magnitude, and 0 gives NaN.',
+          sample: '10',
+        },
+      },
       examples: ['[Floor(2.7), Floor(-2.3), Floor(226, 10)]'],
       nanBehavior: 'propagate',
       definedWhen: roundingStepDefined,
@@ -10085,6 +10138,13 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // Ruling recorded in `docs/plans/2026-08-30-error-model-implementation.md`,
       // Phase F batch 10.
       signature: '(real | signed_infinity | ~oo) -> real<0..1>',
+      parameters: [
+        {
+          description:
+            'The number; the result is in [0, 1), also for a negative number.',
+          sample: '3.75',
+        },
+      ],
       examples: ['[Fract(3.75), Fract(-3.25)]'],
       nanBehavior: 'propagate',
       definedWhen: ([x]) => {
@@ -10198,6 +10258,23 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // point in the carrier, that seam only ever sees a non-number.
       signature:
         '(complex | infinity, (complex | infinity)?, (complex | infinity)?) -> number',
+      parameters: [
+        {
+          description:
+            'The point z; with two or three arguments, the parameter s of the incomplete gamma function.',
+          sample: '5',
+        },
+        {
+          description:
+            'The lower limit z of the upper incomplete gamma function Γ(s, z); with three arguments, the lower limit z0.',
+          sample: '1',
+        },
+        {
+          description:
+            'The upper limit z1: the result is Γ(s, z0) − Γ(s, z1), the integral from z0 to z1.',
+          sample: '3',
+        },
+      ],
       examples: [
         '[Gamma(1/2), N(Gamma(1/2)), N(Gamma(5))]',
         'N(Gamma(2, 1))',
@@ -10274,6 +10351,13 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // `ln Γ` has a value at every finite complex point (`+∞` at the
       // poles) and takes the Γ-family values at the infinite points.
       signature: '(complex | infinity) -> number',
+      parameters: [
+        {
+          description:
+            'The point; at a pole of Γ, 0 or a negative integer, the result is +∞.',
+          sample: '10',
+        },
+      ],
       examples: ['N(GammaLn(100))'],
       nanBehavior: 'propagate',
       // The value at a pole of Γ is `+oo`.
@@ -10353,6 +10437,12 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // non-real finite argument uses the complex kernel of `PolyGamma`
       // (`polygammaComplex` of order 0).
       signature: '(complex | infinity) -> number',
+      parameters: [
+        {
+          description: 'The point; 0 and the negative integers are poles.',
+          sample: '1',
+        },
+      ],
       examples: ['[Digamma(1), N(Digamma(1))]'],
       nanBehavior: 'propagate',
       type: (ops, context) =>
@@ -10393,6 +10483,13 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // `polygammaValueAtExceptionalPoint`'s (`ψ₁(+∞) = 0`).
       signature: '(complex | infinity) -> number',
       examples: ['N(Trigamma(1))'],
+      parameters: [
+        {
+          description:
+            'The argument; the function has poles at 0 and at the negative integers.',
+          sample: '1',
+        },
+      ],
       nanBehavior: 'propagate',
       type: (ops, context) =>
         BoxedType.forResult(
@@ -10453,6 +10550,18 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         );
       },
       examples: ['N(PolyGamma(2, 1))', 'N(PolyGamma(1))'],
+      parameters: [
+        {
+          description:
+            'The order m of the derivative, 0 for the digamma function; a call with one argument is the digamma of that argument.',
+          sample: '1',
+        },
+        {
+          description:
+            'The argument; the function has poles at 0 and at the negative integers.',
+          sample: '2',
+        },
+      ],
       nanBehavior: 'propagate',
       // ψⁿ(x) has poles (value `~oo`) at the non-positive integers. A
       // provably-NaN operand declines (`specialFunctionType` records what
@@ -10557,8 +10666,19 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // off-carrier operand is rejected at boxing. The two-argument form
       // keeps the generic `specialFunctionType` claim below rather than the
       // single-argument pole refinement.
-      signature: '(complex | infinity, (complex | infinity)?) -> number',
+      signature: '(s: complex | infinity, a: (complex | infinity)?) -> number',
       examples: ['[Zeta(2), Zeta(-1), N(Zeta(3))]'],
+      parameters: {
+        s: {
+          description: 'The argument; the function has a pole at 1.',
+          sample: '2',
+        },
+        a: {
+          description:
+            'The shift of the generalized zeta; by default 1, the Riemann zeta.',
+          sample: '2',
+        },
+      },
       nanBehavior: 'propagate',
       // ζ(1) is the pole; its value `~oo` is neither finite nor a member of
       // the signed pair `+oo | -oo`, so only `number` admits it. The
@@ -10688,6 +10808,19 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // symbolic, but the signature still admits it: those rules box
       // against this same head and must not fail to box.
       signature: '(complex | infinity, complex | infinity, integer?) -> number',
+      parameters: [
+        { description: 'The exponent s; s = 1 is a pole.', sample: '2' },
+        {
+          description:
+            'The shift a; 0 or a negative integer is a pole when the real part of s is positive.',
+          sample: '2',
+        },
+        {
+          description:
+            'The order n of the derivative with respect to a; a call with it stays unevaluated.',
+          sample: '1',
+        },
+      ],
       examples: ['HurwitzZeta(2, 2)'],
       nanBehavior: 'propagate',
       // Real operands give a real value only on the real branch: a proven
@@ -10732,6 +10865,17 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // The carrier of `Digamma` and `HurwitzZeta`; the poles at the negative
       // integers are `~oo`, so the result claims `number`.
       signature: '(complex | infinity, (complex | infinity)?) -> number',
+      parameters: [
+        {
+          description: 'The index n; a negative integer is a pole.',
+          sample: '10',
+        },
+        {
+          description:
+            'The order r of the generalized harmonic number, 1 by default.',
+          sample: '2',
+        },
+      ],
       examples: [
         '[HarmonicNumber(10), HarmonicNumber(10, 2), N(HarmonicNumber(1/2))]',
       ],
@@ -10753,6 +10897,9 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       complexity: 8500,
       broadcastable: true,
       signature: '(complex | infinity) -> number',
+      parameters: [
+        { description: 'The point s; the function is entire.', sample: '2' },
+      ],
       examples: ['[DirichletEta(2), DirichletEta(1), N(DirichletEta(1/2))]'],
       nanBehavior: 'propagate',
       evaluate: guardDigitsSizeN((ops, { numericApproximation, engine }) =>
@@ -10770,6 +10917,9 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       complexity: 8500,
       broadcastable: true,
       signature: '(complex | infinity) -> number',
+      parameters: [
+        { description: 'The point s; the function is entire.', sample: '2' },
+      ],
       examples: ['[DirichletBeta(1), DirichletBeta(3), N(DirichletBeta(1/2))]'],
       nanBehavior: 'propagate',
       evaluate: guardDigitsN((ops, { numericApproximation, engine }) =>
@@ -10791,7 +10941,22 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // is implemented here (unlike `Zeta`/`HurwitzZeta` above), so the
       // signature does not admit an infinite operand, and
       // `LerchPhi(0.5, +oo, 2)` is an `incompatible-type` error.
-      signature: '(complex, complex, complex) -> number',
+      signature: '(z: complex, s: complex, a: complex) -> number',
+      examples: ['LerchPhi(1, 2, 1)', 'N(LerchPhi(1/2, 1, 1))'],
+      parameters: {
+        z: {
+          description: 'The base of the powers zᵏ in the numerators.',
+          sample: '1/2',
+        },
+        s: {
+          description: 'The exponent of the denominators (k + a)^s.',
+          sample: '2',
+        },
+        a: {
+          description: 'The shift of the denominators (k + a)^s.',
+          sample: '1',
+        },
+      },
       nanBehavior: 'propagate',
       // Real only on the branch-cut-free, real-operand side: a > 0 keeps
       // every term's base (k+a) positive, so its (−s) power is real for a
@@ -10853,6 +11018,24 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // (`evaluateIncompleteBeta`).
       signature:
         '(complex | infinity, complex | infinity, (complex | infinity)?, (complex | infinity)?) -> number',
+      parameters: [
+        {
+          description:
+            'With two arguments, the parameter a; with three, the upper limit z of the incomplete beta function B_z(a, b); with four, the lower limit z0.',
+          sample: '2',
+        },
+        {
+          description:
+            'With two arguments, the parameter b; with three, the parameter a; with four, the upper limit z1 of B_z1(a, b) − B_z0(a, b).',
+          sample: '3',
+        },
+        {
+          description:
+            'With three arguments, the parameter b; with four, the parameter a.',
+          sample: '2',
+        },
+        { description: 'With four arguments, the parameter b.', sample: '3' },
+      ],
       examples: [
         '[Beta(2, 3), N(Beta(1/2, 1/2))]',
         'Beta(1/2, 2, 3)',
@@ -11036,6 +11219,18 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         '[LambertW(1), N(LambertW(1))]',
         'N(LambertW(-0.1, branch: -1))',
       ],
+      parameters: {
+        z: {
+          description:
+            'The argument; on the principal branch the value is real for z ≥ -1/e.',
+          sample: '1',
+        },
+        branch: {
+          description:
+            'The branch: 0, the default, is the principal branch, and -1 the other real branch, for -1/e ≤ z < 0.',
+          sample: '-1',
+        },
+      },
       nanBehavior: 'propagate',
       type: (ops, context) =>
         BoxedType.forResult(lambertWType(ops), context.engine._typeResolver),
@@ -11124,7 +11319,14 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       wikidata: 'Q219637',
       complexity: 8500,
       broadcastable: true,
-      signature: '(order: complex, complex | infinity) -> number',
+      signature: '(order: complex, z: complex | infinity) -> number',
+      parameters: {
+        order: { description: 'The order ν of the function.', sample: '0' },
+        z: {
+          description: 'The point at which the function is evaluated.',
+          sample: '1',
+        },
+      },
       examples: ['N(BesselJ(0, 1))'],
       nanBehavior: 'propagate',
       type: (ops, context) =>
@@ -11144,7 +11346,15 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       complexity: 8500,
       broadcastable: true,
       // Signature shape and seams: see `BesselJ` above.
-      signature: '(order: complex, complex | infinity) -> number',
+      signature: '(order: complex, z: complex | infinity) -> number',
+      parameters: {
+        order: { description: 'The order ν of the function.', sample: '0' },
+        z: {
+          description:
+            'The point at which the function is evaluated; at 0 the function is infinite, or stays unevaluated for some orders.',
+          sample: '1',
+        },
+      },
       examples: ['N(BesselY(0, 1))'],
       nanBehavior: 'propagate',
       type: (ops, context) =>
@@ -11163,7 +11373,14 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       complexity: 8500,
       broadcastable: true,
       // Signature shape and seams: see `BesselJ` above.
-      signature: '(order: complex, complex | infinity) -> number',
+      signature: '(order: complex, z: complex | infinity) -> number',
+      parameters: {
+        order: { description: 'The order ν of the function.', sample: '0' },
+        z: {
+          description: 'The point at which the function is evaluated.',
+          sample: '1',
+        },
+      },
       examples: ['N(BesselI(0, 1))'],
       nanBehavior: 'propagate',
       type: (ops, context) =>
@@ -11184,7 +11401,15 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       complexity: 8500,
       broadcastable: true,
       // Signature shape and seams: see `BesselJ` above.
-      signature: '(order: complex, complex | infinity) -> number',
+      signature: '(order: complex, z: complex | infinity) -> number',
+      parameters: {
+        order: { description: 'The order ν of the function.', sample: '0' },
+        z: {
+          description:
+            'The point at which the function is evaluated; at 0 the function is infinite, or stays unevaluated for some orders.',
+          sample: '1',
+        },
+      },
       examples: ['N(BesselK(0, 1))'],
       nanBehavior: 'propagate',
       type: (ops, context) =>
@@ -11212,6 +11437,12 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // `complex`). No `canonical` handler, so a proven off-carrier
       // operand is rejected at boxing.
       signature: '(complex | infinity) -> number',
+      parameters: [
+        {
+          description: 'The point at which the function is evaluated.',
+          sample: '1',
+        },
+      ],
       examples: ['N(AiryAi(1))'],
       nanBehavior: 'propagate',
       type: (ops, context) =>
@@ -11231,6 +11462,12 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       broadcastable: true,
       // Signature and seams: see `AiryAi` above.
       signature: '(complex | infinity) -> number',
+      parameters: [
+        {
+          description: 'The point at which the function is evaluated.',
+          sample: '1',
+        },
+      ],
       examples: ['N(AiryBi(0))'],
       nanBehavior: 'propagate',
       type: (ops, context) =>
@@ -11250,6 +11487,12 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       broadcastable: true,
       // Signature and seams: see `AiryAi` above.
       signature: '(complex | infinity) -> number',
+      parameters: [
+        {
+          description: 'The point at which the function is evaluated.',
+          sample: '1',
+        },
+      ],
       examples: ['N(AiryAiPrime(0))'],
       nanBehavior: 'propagate',
       type: (ops, context) =>
@@ -11270,6 +11513,12 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       broadcastable: true,
       // Signature and seams: see `AiryAi` above.
       signature: '(complex | infinity) -> number',
+      parameters: [
+        {
+          description: 'The point at which the function is evaluated.',
+          sample: '1',
+        },
+      ],
       examples: ['N(AiryBiPrime(0))'],
       nanBehavior: 'propagate',
       type: (ops, context) =>
@@ -11285,6 +11534,17 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
     Ln: {
       description: 'Natural Logarithm',
       examples: ['[Ln(1), Ln(2), N(Ln(2))]', 'Ln(8, 2)'],
+      parameters: [
+        {
+          description:
+            'The number whose logarithm is taken; the logarithm of 0 is -oo.',
+          sample: '2',
+        },
+        {
+          description: 'The base of the logarithm; by default e.',
+          sample: '2',
+        },
+      ],
       wikidata: 'Q204037',
       complexity: 4000,
       broadcastable: true,
@@ -11413,6 +11673,17 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // sharpness lives in the type handler.
       signature: '(complex | infinity, base: complex | infinity?) -> number',
       examples: ['[Log(1000), Log(8, 2)]'],
+      parameters: [
+        {
+          description:
+            'The number whose logarithm is taken; the logarithm of 0 is -oo.',
+          sample: '1000',
+        },
+        {
+          description: 'The base of the logarithm; by default 10.',
+          sample: '2',
+        },
+      ],
       nanBehavior: 'propagate',
       type: (ops, context) =>
         BoxedType.forResult(
@@ -11557,6 +11828,12 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
 
       signature: '(number) -> number',
       examples: ['[Lb(8), N(Lb(3))]'],
+      parameters: [
+        {
+          description: 'The number whose base-2 logarithm is taken.',
+          sample: '8',
+        },
+      ],
       sgn: ([x]) => lnSign(x),
       canonical: (ops, { engine }) => {
         // The operand is checked as the canonical form of `Log` checks it
@@ -11578,6 +11855,12 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       broadcastable: true,
       signature: '(number) -> number',
       examples: ['[Lg(100), N(Lg(2))]'],
+      parameters: [
+        {
+          description: 'The number whose base-10 logarithm is taken.',
+          sample: '100',
+        },
+      ],
       sgn: ([x]) => lnSign(x),
       canonical: (ops, { engine }) => {
         // An extra operand stays after the base 10, so that it is not read
@@ -11603,6 +11886,12 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       broadcastable: true,
       signature: '(number) -> number',
       examples: ['[Log10(1000), N(Log10(2))]'],
+      parameters: [
+        {
+          description: 'The number whose base-10 logarithm is taken.',
+          sample: '1000',
+        },
+      ],
       sgn: ([x]) => lnSign(x),
       canonical: (ops, { engine }) => {
         // An extra operand stays after the base 10, so that it is not read
@@ -11628,6 +11917,12 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       broadcastable: true,
       signature: '(number) -> number',
       examples: ['[Log2(32), N(Log2(3))]'],
+      parameters: [
+        {
+          description: 'The number whose base-2 logarithm is taken.',
+          sample: '32',
+        },
+      ],
       sgn: ([x]) => lnSign(x),
       canonical: (ops, { engine }) => {
         // The operand is checked as the canonical form of `Log` checks it
@@ -13258,7 +13553,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // (`MEASUREMENT_ARITHMETIC`, `measurement-arithmetic.ts`): an opaque
       // type, admitted where a number is admitted, with its own arithmetic
       // and order. `docs/plans/2026-10-26-value-kinds.md`, section 4.7.
-      signature: '(value, value) -> measurement',
+      signature: '(value: value, uncertainty: value) -> measurement',
       arithmetic: MEASUREMENT_ARITHMETIC,
       // Two measurements, or a measurement and a value, are equal when their
       // nominals are (`measurementEq()`); `Equal` asks it when the order
@@ -13268,6 +13563,17 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         'Measurement(9.81, 0.02)',
         'N(Measurement(5, 0.2) * Measurement(3, 0.4))',
       ],
+      parameters: {
+        value: {
+          description: 'The nominal value.',
+          sample: '9.81',
+        },
+        uncertainty: {
+          description:
+            'The 1σ absolute uncertainty; its sign is dropped, and 0 gives the nominal value alone.',
+          sample: '0.02',
+        },
+      },
       canonical: (args, { engine: ce }) => {
         if (args.length !== 2) return ce.error('incompatible-type');
         const value = args[0].canonical;
@@ -13946,6 +14252,17 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // evaluated to `1.2`), which almost always indicates a caller error.
       signature: '((real) -> rational) | ((integer, integer) -> rational)',
       examples: ['[Rational(3, 6), Rational(1.25)]'],
+      parameters: [
+        {
+          description:
+            'The numerator, or with one argument the real number to convert.',
+          sample: '3',
+        },
+        {
+          description: 'The denominator.',
+          sample: '6',
+        },
+      ],
       sgn: ([n]) => n.sgn,
       canonical: (args, { engine }) => {
         const ce = engine;
@@ -14008,7 +14325,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
 
     Rationalize: {
       description:
-        'Approximate a real number by a rational. With a second argument `tolerance`, return the rational with the smallest denominator that approximates the number to within `tolerance` (a continued-fraction convergent); with no tolerance, rationalize at full working precision, as single-argument `Rational`.',
+        'Approximate a real number by a rational. With a second argument `tolerance`, return the rational with the smallest denominator that approximates the number to within `tolerance` (a continued-fraction convergent); with no tolerance, rationalize the machine float of the number (about 15 digits), as single-argument `Rational`.',
       complexity: 2400,
       // The value is a FINITE real: no rational lies within any tolerance of
       // an infinity, and the continued-fraction expansion needs the order of
@@ -14023,13 +14340,24 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // be `propagate`, hence the explicit pair. Ruling recorded in
       // `docs/plans/2026-08-30-error-model-implementation.md`, Phase F
       // batch 10.
-      signature: '(real, real<0..>?) -> rational',
+      signature: '(x: real, tolerance: real<0..>?) -> rational',
       broadcastable: true,
       nanBehavior: ['propagate', 'reject'],
       examples: [
         'Rationalize(1.75)  // 7/4',
         'Rationalize(Sqrt(3), 1/500)  // 26/15',
       ],
+      parameters: {
+        x: {
+          description: 'The real number to approximate.',
+          sample: 'sqrt(3)',
+        },
+        tolerance: {
+          description:
+            'The largest error allowed; by default about 1e-15, the precision of a machine float.',
+          sample: '0.01',
+        },
+      },
       evaluate: (ops, { engine }) => {
         const ce = engine;
         // See `Rational`: a symbolic argument cannot numericize.
@@ -14095,6 +14423,17 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // which delegates the non-finite cases to `pow`.
       signature: '(complex | infinity, complex | infinity) -> number',
       examples: ['[Root(8, 3), N(Root(2, 3))]'],
+      parameters: [
+        {
+          description:
+            'The number whose root is taken; a negative number has a real root of an odd degree.',
+          sample: '8',
+        },
+        {
+          description: 'The degree n of the root, not 0.',
+          sample: '3',
+        },
+      ],
       nanBehavior: 'propagate',
       requires: ([, n]) => {
         if (n === undefined || !isNumber(n)) return undefined;
@@ -14298,6 +14637,16 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       broadcastable: true,
       signature: '(T, T) -> T where T: number',
       examples: ['[Remainder(7, 3), Remainder(-7, 3)]'],
+      parameters: [
+        {
+          description: 'The dividend.',
+          sample: '7',
+        },
+        {
+          description: 'The divisor; a divisor of 0 gives NaN.',
+          sample: '3',
+        },
+      ],
       // A zero divisor has no remainder, as for `Mod(5, 0)`: the
       // indeterminate form `NaN`. This is decided here, not with a
       // `definedWhen` predicate as for `Mod`: the codomain marker of that
@@ -14405,6 +14754,17 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       examples: [
         '[Round(2.5), Round(-2.5), Round(226, 10), Round(3.14159, 1/100)]',
       ],
+      parameters: {
+        x: {
+          description: 'The number to round; a tie rounds away from zero.',
+          sample: '3.14159',
+        },
+        step: {
+          description:
+            'The step whose nearest multiple is returned; by default 1. Its sign is ignored, and a step of 0 gives NaN.',
+          sample: '1/100',
+        },
+      },
       nanBehavior: 'propagate',
       definedWhen: roundingStepDefined,
       type: ([x, step], context) => roundingType(x, step, context),
@@ -14517,6 +14877,12 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // used to compute is now read off this declaration by the generic
       // derivation).
       signature: '(real | signed_infinity) -> rational<0..1>',
+      parameters: [
+        {
+          description: 'The real number; the result is 1/2 at 0.',
+          sample: '3',
+        },
+      ],
       examples: ['[Heaviside(-2), Heaviside(0), Heaviside(3)]'],
       // Explicit: the DERIVED default answers `reject` for this carrier
       // (an extended-real carrier is not a subtype of `complex`, which is
@@ -14570,6 +14936,12 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // (Domain-signature doctrine: `docs/ERROR-MODEL.md` §4.)
       signature: '(complex | signed_infinity | ~oo) -> complex',
       examples: ['[Sign(-3), Sign(0), Sign(3 + 4i)]'],
+      parameters: [
+        {
+          description: 'The number whose sign is taken.',
+          sample: '-3',
+        },
+      ],
       type: ([x], context) => {
         if (x === undefined)
           return BoxedType.forResult('complex', context.engine._typeResolver);
@@ -14689,6 +15061,13 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // which the signed pair excludes.
       signature: '(complex | infinity) -> complex | infinity',
       examples: ['[Sqrt(8), Sqrt(-4), N(Sqrt(2))]'],
+      parameters: [
+        {
+          description:
+            'The number whose square root is taken; a negative number gives an imaginary root.',
+          sample: '2',
+        },
+      ],
       // Explicit: the DERIVED default answers `reject` for a carrier that
       // is not a subtype of `complex`, and `Sqrt(NaN)` must be `NaN`.
       nanBehavior: 'propagate',
@@ -14965,6 +15344,17 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // multiple of the step nearest to `x` in the direction of zero.
       signature: ROUNDING_STEP_SIGNATURE,
       examples: ['[Truncate(2.7), Truncate(-2.7), Truncate(-226, 10)]'],
+      parameters: {
+        x: {
+          description: 'The number to truncate.',
+          sample: '2.7',
+        },
+        step: {
+          description:
+            'The step whose multiple is returned; by default 1. Its sign is ignored, and a step of 0 gives NaN.',
+          sample: '10',
+        },
+      },
       nanBehavior: 'propagate',
       definedWhen: roundingStepDefined,
       type: ([x, step], context) => roundingType(x, step, context),
@@ -15311,6 +15701,13 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // `incompatible-type` error without touching inference.
       signature: '(number) -> boolean',
       examples: ['[IsPrime(17), IsPrime(21)]'],
+      parameters: [
+        {
+          description:
+            'The number to test; a non-integer or an integer below 2 is not prime.',
+          sample: '17',
+        },
+      ],
       nanBehavior: 'handle',
       // Under `.N()`, the operand is read as written when its float stands
       // for an exact integer (`exactIntegerOriginals()`): the float of
@@ -15341,6 +15738,13 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // The same carrier as `IsPrime`, for the same reasons — see there.
       signature: '(number) -> boolean',
       examples: ['[IsComposite(21), IsComposite(7)]'],
+      parameters: [
+        {
+          description:
+            'The number to test; a non-integer or an integer below 4 is not composite.',
+          sample: '21',
+        },
+      ],
       nanBehavior: 'handle',
       // A composite number is a positive integer greater than 1 that is not
       // prime, so `0`, `1`, the negative integers and every non-integer are
@@ -15378,6 +15782,12 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // of the infinities is not written into the declaration.
       signature: '(number) -> boolean',
       examples: ['[IsOdd(7), IsOdd(8)]'],
+      parameters: [
+        {
+          description: 'The number to test; a non-integer is not odd.',
+          sample: '7',
+        },
+      ],
       nanBehavior: 'handle',
       // The written operand is read under `.N()`, as for `IsPrime`.
       evaluate: ([n], { engine, numericApproximation, expression }) =>
@@ -15402,6 +15812,12 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // policy as `IsOdd`.
       signature: '(number) -> boolean',
       examples: ['[IsEven(7), IsEven(8)]'],
+      parameters: [
+        {
+          description: 'The number to test; a non-integer is not even.',
+          sample: '8',
+        },
+      ],
       nanBehavior: 'handle',
       // The written operand is read under `.N()`, as for `IsPrime`.
       evaluate: ([n], { engine, numericApproximation, expression }) =>
@@ -15420,6 +15836,13 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       broadcastable: false, // The function take a variable number of arguments,
       // including collections
       signature: '(any*) -> number',
+      parameters: [
+        {
+          description:
+            'An integer, a polynomial or a list of integers; with no argument the result is 0.',
+          sample: '12',
+        },
+      ],
       examples: ['[GCD(12, 18), GCD(12, 18, 27)]'],
       // Integer operands → a positive integer; polynomial operands → a
       // (monic) polynomial whose type and sign aren't known statically.
@@ -15464,6 +15887,13 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // a (non-negative) real via the tolerant float LCM.
       signature: '(any*) -> number',
       examples: ['[LCM(4, 6), LCM(4, 6, 10)]'],
+      parameters: [
+        {
+          description:
+            'An integer, or a collection of integers; with no argument the result is 1.',
+          sample: '6',
+        },
+      ],
       type: (ops, context) =>
         BoxedType.forResult(
           ops.every((x) => factsOf(x.type).integer) ? 'integer' : 'number',
@@ -15513,6 +15943,13 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // `NumeratorDenominator` below.
       signature: '(number) -> number | nothing',
       examples: ['[Numerator(3/4), Numerator(x / y)]'],
+      parameters: [
+        {
+          description:
+            'The fraction or the expression whose numerator is taken; an integer is its own numerator.',
+          sample: '3/4',
+        },
+      ],
       nanBehavior: 'handle',
       canonical: (ops, { engine }) => {
         // **IMPORTANT**: We want Numerator to work on non-canonical
@@ -15572,6 +16009,13 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // A structural accessor over the whole of `number`, `NaN` handled —
       // see `Numerator`.
       signature: '(number) -> number | nothing',
+      parameters: [
+        {
+          description:
+            'The fraction or expression, read as written: `Denominator(6/8)` is 8.',
+          sample: '3/4',
+        },
+      ],
       examples: ['[Denominator(3/4), Denominator(x / y)]'],
       nanBehavior: 'handle',
       canonical: (ops, { engine }) => {
@@ -15624,6 +16068,13 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // see `Numerator`.
       signature: '(number) -> tuple<number, number> | nothing',
       examples: ['NumeratorDenominator(3/4)'],
+      parameters: [
+        {
+          description:
+            'The fraction or the expression whose numerator and denominator are taken; an integer n gives (n, 1).',
+          sample: '3/4',
+        },
+      ],
       nanBehavior: 'handle',
       canonical: (ops, { engine }) => {
         // **IMPORTANT**: We want NumeratorDenominator to work on non-canonical
@@ -15690,6 +16141,13 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // including collections
       signature: '(value*) -> number',
       examples: ['[Max(3, 7, 2), Max([3, 7, 2])]'],
+      parameters: [
+        {
+          description:
+            'A number, or a collection or an interval whose elements are compared; with no argument the result is NaN.',
+          sample: '3',
+        },
+      ],
       // A data-consuming aggregate: it OWNS its `Missing` runtime (§3.C). An
       // absent datum (a `Missing` operand or element, or a `NaN`) or empty
       // input evaluates to `NaN` (I6 absorption). `missingStrip: 'all'` (the
@@ -15742,6 +16200,13 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // including collections
       signature: '(value+) -> number',
       examples: ['[Min(3, 7, 2), Min([3, 7, 2])]'],
+      parameters: [
+        {
+          description:
+            'A number, or a collection or an interval whose elements are compared.',
+          sample: '3',
+        },
+      ],
       missingBehavior: 'handle',
       type: (ops, context) =>
         BoxedType.forResult(
@@ -15805,6 +16270,17 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // See the shared note above the `ElementMax` entry for the carrier.
       signature:
         '(real | signed_infinity, (real | signed_infinity)+) -> real | signed_infinity',
+      parameters: [
+        {
+          description: 'A number, or a collection of numbers.',
+          sample: '3',
+        },
+        {
+          description:
+            'More numbers or collections; two collections are compared element by element and must have the same length.',
+          sample: '5',
+        },
+      ],
       nanBehavior: 'propagate',
       partiality: 'total',
       type: (ops, context) =>
@@ -15835,6 +16311,17 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // See the shared note above the `ElementMax` entry for the carrier.
       signature:
         '(real | signed_infinity, (real | signed_infinity)+) -> real | signed_infinity',
+      parameters: [
+        {
+          description: 'A number, or a collection of numbers.',
+          sample: '3',
+        },
+        {
+          description:
+            'More numbers or collections; two collections are compared element by element and must have the same length.',
+          sample: '5',
+        },
+      ],
       nanBehavior: 'propagate',
       partiality: 'total',
       type: (ops, context) =>
@@ -15864,7 +16351,16 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       broadcastable: true,
       // See the shared note above the `ElementMax` entry for the carrier.
       signature:
-        '(real | signed_infinity, real | signed_infinity, real | signed_infinity) -> real | signed_infinity',
+        '(x: real | signed_infinity, lower: real | signed_infinity, upper: real | signed_infinity) -> real | signed_infinity',
+      parameters: {
+        x: { description: 'The value to clamp.', sample: '12' },
+        lower: { description: 'The lower bound.', sample: '0' },
+        upper: {
+          description:
+            'The upper bound; when it is below `lower`, the result is `upper`.',
+          sample: '10',
+        },
+      },
       nanBehavior: 'propagate',
       partiality: 'total',
       type: (ops, context) =>
@@ -15893,14 +16389,30 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
 
     Smoothstep: {
       description:
-        'Smooth Hermite interpolation between 0 and 1 as x goes from e0 to e1: t²(3 − 2t) with t = Clamp((x − e0)/(e1 − e0), 0, 1). Broadcasts over collection arguments.',
+        'Smooth Hermite interpolation between 0 and 1 as x goes from edge0 to edge1: t²(3 − 2t) with t = Clamp((x − edge0)/(edge1 − edge0), 0, 1). Broadcasts over collection arguments.',
       examples: [
         '[Smoothstep(0, 1, -1), Smoothstep(0, 1, 1/2), Smoothstep(0, 1, 2)]',
       ],
       complexity: 1200,
       broadcastable: true,
       signature:
-        '(real | signed_infinity, real | signed_infinity, real | signed_infinity) -> real | nan',
+        '(edge0: real | signed_infinity, edge1: real | signed_infinity, x: real | signed_infinity) -> real | nan',
+      parameters: {
+        edge0: {
+          description:
+            'The value of x at which the result starts to rise from 0.',
+          sample: '0',
+        },
+        edge1: {
+          description:
+            'The value of x at which the result reaches 1; an edge1 below edge0 makes the curve fall from 1 to 0.',
+          sample: '1',
+        },
+        x: {
+          description: 'The point at which the curve is evaluated.',
+          sample: '0.25',
+        },
+      },
       nanBehavior: 'propagate',
       // A finite real when both edges are finite. An infinite edge can give
       // a quotient with no value (`∞/∞` for `Smoothstep(−∞, ∞, 0)`).
@@ -15961,13 +16473,21 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
     },
 
     Supremum: {
-      description: 'Like Max, but defined for open sets.',
+      description:
+        'The least upper bound of numbers, collections and intervals: like `Max`, but the open end of an interval is a bound too.',
       complexity: 1200,
       broadcastable: false, // The function take a variable number of arguments,
       // including collections
 
       signature: '(value*) -> number',
       examples: ['[Supremum(1, 3, 2), Supremum(Interval(0, 1))]'],
+      parameters: [
+        {
+          description:
+            'A number, or a collection or an interval whose elements are bounded.',
+          sample: 'interval(0, open(1))',
+        },
+      ],
       missingBehavior: 'handle',
       type: (ops, context) =>
         BoxedType.forResult(
@@ -15980,13 +16500,21 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
     },
 
     Infimum: {
-      description: 'Like Min, but defined for open sets.',
+      description:
+        'The greatest lower bound of numbers, collections and intervals: like `Min`, but the open end of an interval is a bound too.',
       complexity: 1200,
       broadcastable: false, // The function take a variable number of arguments,
       // including collections
 
       signature: '(value*) -> number',
       examples: ['[Infimum(1, 3, 2), Infimum(Interval(0, 1))]'],
+      parameters: [
+        {
+          description:
+            'A number, or a collection or an interval whose elements are bounded.',
+          sample: 'interval(open(0), 1)',
+        },
+      ],
       missingBehavior: 'handle',
       type: (ops, context) =>
         BoxedType.forResult(
@@ -16011,6 +16539,18 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // boundary (Tycho items 130/138).
       signature:
         '(tuple | list<tuple> | list<number> | list<list<number>>, tuple | list<tuple> | list<number> | list<list<number>>) -> number',
+      parameters: [
+        {
+          description:
+            'A point, or a list of points that gives one distance per point.',
+          sample: '(0, 0)',
+        },
+        {
+          description:
+            'The other point, or a list of points paired with the first list in order.',
+          sample: '(3, 4)',
+        },
+      ],
       // An `At` access types `missing | tuple<…>` (the out-of-range arm);
       // strip-before-validate (§3.B) admits it, or `Distance(S[n], p)` errors
       // at canonicalization (Tycho item 164's sibling). The runtime marker is
@@ -16156,7 +16696,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
 
     Product: {
       description:
-        '`Product(f, a, b)` computes the product of `f` from `a` to `b`.',
+        '`Product(f, (k, a, b))` computes the product of `f` for `k` from `a` to `b`; `Product(L)` multiplies the elements of a collection `L`.',
       wikidata: 'Q901718',
       complexity: 1000,
       broadcastable: false,
@@ -16171,6 +16711,18 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       lazy: true,
       signature: '(any, tuple*) -> number',
       examples: ['Product(k, (k, 1, 5))', 'Product(1 - 1/k^2, (k, 2, 10))'],
+      parameters: [
+        {
+          description:
+            'The factor, written with the index variables; with no range, a collection whose elements are multiplied.',
+          sample: '1 - 1/k^2',
+        },
+        {
+          description:
+            'A range of an index variable: (k, a, b) from a to b, (k, a, b, step) with a step, (k, n) from 1 to n; an empty range gives 1, and several ranges nest.',
+          sample: '(k, 2, 10)',
+        },
+      ],
       type: (ops, context) =>
         BoxedType.forResult(
           kindReductionType(ops, context, 'Multiply') ??
@@ -16566,7 +17118,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
 
     Sum: {
       description:
-        '`Sum(f, [a, b])` computes the sum of `f` from `a` to `b`; `Sum(L)` sums the elements of a collection `L`.',
+        '`Sum(f, (k, a, b))` computes the sum of `f` for `k` from `a` to `b`; `Sum(L)` sums the elements of a collection `L`.',
       keywords: ['summation', 'sigma'],
       wikidata: 'Q218005',
       complexity: 1000,
@@ -16582,6 +17134,18 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       lazy: true,
       signature: '(any, tuple*) -> number',
       examples: ['Sum(k^2, (k, 1, 10))', 'Sum(1/k^2, (k, 1, oo))'],
+      parameters: [
+        {
+          description:
+            'The term, written with the index variables; with no range, a collection whose elements are summed.',
+          sample: 'k^2',
+        },
+        {
+          description:
+            'A range of an index variable: (k, a, b) from a to b, (k, a, b, step) with a step, (k, n) from 1 to n; an empty range gives 0, and several ranges nest.',
+          sample: '(k, 1, 10)',
+        },
+      ],
       type: (ops, context) =>
         BoxedType.forResult(
           kindReductionType(ops, context, 'Add') ??
@@ -17222,6 +17786,13 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
 
     Interpret: {
       examples: ['Interpret(1 + 2 + ContinuationPlaceholder + n)'],
+      parameters: [
+        {
+          description:
+            'The expression to interpret, such as a sum or a product written with a continuation.',
+          sample: '1 + 2 + ContinuationPlaceholder + n',
+        },
+      ],
       description:
         'Interpret a notational expression as its mathematical meaning. In v1: a continuation-bearing `Add`/`Multiply` (e.g. `1 + 2 + \\dots + n`) becomes a `Sum`/`Product`. Returns the argument unchanged when the (strict) inference gate does not pass',
       complexity: 9000,

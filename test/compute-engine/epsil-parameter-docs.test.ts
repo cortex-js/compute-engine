@@ -269,7 +269,18 @@ describe('THE LIBRARY DOCUMENTATION', () => {
       const candidates =
         types === undefined ? [] : Array.isArray(types) ? types : [types];
       if (candidates.length === 0) return;
-      const value = engine.box(resolveLibraryNames(ast, sample, engine));
+      // A sample is one statement: box it alone, not in the `Program` of
+      // the parse, whose type is widened (`0.01` is `real`, where the
+      // literal is `real<0.01..0.01>`, which a ranged parameter admits).
+      const resolved = resolveLibraryNames(ast, sample, engine);
+      const statement =
+        typeof resolved === 'object' &&
+        'fn' in resolved &&
+        resolved.fn[0] === 'Program' &&
+        resolved.fn.length === 2
+          ? resolved.fn[1]
+          : resolved;
+      const value = engine.box(statement);
       if (!candidates.some((type) => value.type.matches(type)))
         broken.push(`${where}: ${sample} is not of the type of its parameter`);
     };
@@ -367,6 +378,26 @@ describe('THE LIBRARY DOCUMENTATION', () => {
     });
     expect(brokenSamples(engine, ['Pad'])).toEqual([
       'Pad(count): "two" is not of the type of its parameter',
+    ]);
+  });
+
+  test('a sample of a ranged parameter keeps the type of its literal', () => {
+    const engine = new ComputeEngine();
+    engine.declare('Nudge', {
+      signature: '(x: real, tolerance: real<0..>) -> real',
+      evaluate: ([x]) => x,
+      parameters: {
+        x: { sample: '2' },
+        tolerance: { sample: '0.01' },
+      },
+    });
+    engine.declare('Shrink', {
+      signature: '(tolerance: real<0..>) -> real',
+      evaluate: ([x]) => x,
+      parameters: { tolerance: { sample: '-1' } },
+    });
+    expect(brokenSamples(engine, ['Nudge', 'Shrink'])).toEqual([
+      'Shrink(tolerance): -1 is not of the type of its parameter',
     ]);
   });
 
