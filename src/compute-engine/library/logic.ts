@@ -1424,8 +1424,8 @@ export const LOGIC_FUNCTION_LIBRARY: SymbolDefinitions = {
    *
    * Uses the Quine-McCluskey algorithm to find prime implicants, then
    * selects a cover. The result is a disjunction of conjunctions
-   * of literals built from the prime implicants, usually with few terms (the
-   * cover after the essential primes is chosen greedily).
+   * of literals built from the prime implicants, with the fewest terms
+   * (`findMinimalCover()` in `logic-analysis.ts`).
    *
    * **Performance**: O(3^n) worst case, limited to 12 variables.
    *
@@ -1436,7 +1436,7 @@ export const LOGIC_FUNCTION_LIBRARY: SymbolDefinitions = {
   MinimalDNF: {
     examples: ['MinimalDNF(Or(And(a, b), And(a, Not(b)), And(Not(a), b)))'],
     description: [
-      'Return a disjunctive normal form (DNF) of a boolean expression built from its prime implicants: an OR of ANDs, usually with few terms.',
+      'Return a minimal disjunctive normal form (DNF) of a boolean expression: an OR of ANDs of its prime implicants with the fewest terms (for a large expression, the search for the fewest can stop at a budget and give a few more).',
       'Uses the Quine-McCluskey algorithm, at most 12 variables.',
     ],
     signature: '(boolean) -> boolean',
@@ -1462,8 +1462,8 @@ export const LOGIC_FUNCTION_LIBRARY: SymbolDefinitions = {
    *
    * Uses the Quine-McCluskey algorithm to find prime implicates, then
    * selects a cover. The result is a conjunction of disjunctions
-   * of literals built from the prime implicates, usually with few clauses (the
-   * cover after the essential primes is chosen greedily).
+   * of literals built from the prime implicates, with the fewest clauses
+   * (`findMinimalCover()` in `logic-analysis.ts`).
    *
    * **Performance**: O(3^n) worst case, limited to 12 variables.
    *
@@ -1474,7 +1474,7 @@ export const LOGIC_FUNCTION_LIBRARY: SymbolDefinitions = {
   MinimalCNF: {
     examples: ['MinimalCNF(And(Or(a, b), Or(a, Not(b))))'],
     description: [
-      'Return a conjunctive normal form (CNF) of a boolean expression built from its prime implicates: an AND of ORs, usually with few clauses.',
+      'Return a minimal conjunctive normal form (CNF) of a boolean expression: an AND of ORs of its prime implicates with the fewest clauses (for a large expression, the search for the fewest can stop at a budget and give a few more).',
       'Uses the Quine-McCluskey algorithm, at most 12 variables.',
     ],
     signature: '(boolean) -> boolean',

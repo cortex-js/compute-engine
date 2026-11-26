@@ -1117,7 +1117,11 @@ function getCoveredMinterms(term: QMTerm, numVars: number): number[] {
 }
 
 /**
- * Greedy algorithm to find a minimal cover of prime implicants/implicates.
+ * A cover of `termsTocover` by prime implicants/implicates with the fewest
+ * terms: the essential primes, then a greedy cover of the rest, then an
+ * exact search (`exactCover()`) that replaces the greedy part when it finds
+ * a smaller one. The search has a budget of nodes; past it, the best cover
+ * found so far stays, which is never larger than the greedy one.
  */
 function findMinimalCover(
   primes: QMTerm[],
@@ -1163,6 +1167,9 @@ function findMinimalCover(
   }
 
   // Greedy cover for remaining minterms
+  const remaining = [...uncovered];
+  const essentialCount = cover.length;
+  const essential = new Set(usedPrimes);
   while (uncovered.size > 0) {
     let bestPrime = -1;
     let bestCount = 0;
@@ -1190,5 +1197,98 @@ function findMinimalCover(
     }
   }
 
+  // The greedy part can have more terms than needed (CE-1858): search for a
+  // smaller cover of the minterms that the essential primes leave.
+  const greedy = cover.slice(essentialCount);
+  if (greedy.length > 1) {
+    const candidates = primes.filter((_, i) => !essential.has(i));
+    const smaller = exactCover(
+      candidates,
+      remaining,
+      numVars,
+      greedy.length - 1
+    );
+    if (smaller !== undefined)
+      return [...cover.slice(0, essentialCount), ...smaller];
+  }
+
   return cover;
+}
+
+/** The number of nodes after which `exactCover()` stops searching. */
+const EXACT_COVER_BUDGET = 20_000;
+
+/**
+ * A cover of the minterms `toCover` by at most `maxSize` of the `primes`,
+ * the smallest that a branch-and-bound search finds within
+ * `EXACT_COVER_BUDGET` nodes, or `undefined` when it finds none.
+ *
+ * At each node the search branches on the uncovered minterm that the
+ * fewest primes cover, and cuts a branch whose size plus a lower bound (the
+ * uncovered count over the largest cover of one prime) cannot beat the best
+ * cover found.
+ */
+function exactCover(
+  primes: readonly QMTerm[],
+  toCover: readonly number[],
+  numVars: number,
+  maxSize: number
+): QMTerm[] | undefined {
+  const index = new Map(toCover.map((m, j) => [m, j]));
+  // For each prime, the indices (in `toCover`) of the minterms it covers.
+  const bits: number[][] = [];
+  const kept: QMTerm[] = [];
+  for (const prime of primes) {
+    const covered = getCoveredMinterms(prime, numVars)
+      .map((m) => index.get(m))
+      .filter((j): j is number => j !== undefined);
+    if (covered.length > 0) {
+      bits.push(covered);
+      kept.push(prime);
+    }
+  }
+  if (kept.length === 0) return undefined;
+  // For each minterm, the primes that cover it, largest cover first.
+  const coveredBy: number[][] = toCover.map(() => []);
+  for (let c = 0; c < kept.length; c++)
+    for (const j of bits[c]) coveredBy[j].push(c);
+  for (const list of coveredBy)
+    list.sort((a, b) => bits[b].length - bits[a].length || a - b);
+  const largest = Math.max(...bits.map((b) => b.length));
+
+  const count = new Int32Array(toCover.length);
+  let uncoveredCount = toCover.length;
+  const chosen: number[] = [];
+  let best: number[] | undefined;
+  let bestSize = maxSize + 1;
+  let nodes = 0;
+
+  const search = (): void => {
+    if (++nodes > EXACT_COVER_BUDGET) return;
+    if (uncoveredCount === 0) {
+      if (chosen.length < bestSize) {
+        best = [...chosen];
+        bestSize = chosen.length;
+      }
+      return;
+    }
+    if (chosen.length + Math.ceil(uncoveredCount / largest) >= bestSize) return;
+    let pick = -1;
+    for (let j = 0; j < toCover.length; j++)
+      if (
+        count[j] === 0 &&
+        (pick < 0 || coveredBy[j].length < coveredBy[pick].length)
+      )
+        pick = j;
+    for (const c of coveredBy[pick]) {
+      for (const j of bits[c]) if (count[j]++ === 0) uncoveredCount -= 1;
+      chosen.push(c);
+      search();
+      chosen.pop();
+      for (const j of bits[c]) if (--count[j] === 0) uncoveredCount += 1;
+      if (nodes > EXACT_COVER_BUDGET) return;
+    }
+  };
+  search();
+  return best?.map((c) => kept[c]);
 }

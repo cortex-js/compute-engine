@@ -214,6 +214,16 @@
 
 ### Resolved Issues
 
+- **`minimalDNF` and `minimalCNF` give the fewest terms** (CE-1858). After
+  the terms that every cover needs, the remaining terms were chosen
+  greedily, which could give more than needed:
+  `MinimalDNF(Or(And(a, c), And(Not(a), Not(b), d), And(Not(a), b, Not(c)), And(Not(a), b, Not(d)), And(b, Not(c), d)))`
+  gave 5 terms and now gives 4,
+  `a && c || !a && !b && d || !a && b && !d || b && !c && d`. A search for
+  the smallest cover now follows the greedy one, within a budget: for a
+  large expression it can stop early, and the result is then never larger
+  than before.
+
 - **A compiled function literal whose untyped parameter can be a list
   declines** (CE-1837). A parameter of no declared type of a function
   literal compiled to JavaScript was read as a number, also where the body
