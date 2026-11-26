@@ -653,12 +653,24 @@ export const QUANTITY_LIBRARY: SymbolDefinitions = {
   Quantity: {
     description: 'A value paired with a physical unit',
     wikidata: 'Q309314',
+    examples: ['Quantity(3, m) + Quantity(50, cm)', 'Quantity(30, "km/h")'],
+    parameters: {
+      magnitude: {
+        description: 'The numeric value, in the unit that follows.',
+        sample: '3',
+      },
+      unit: {
+        description:
+          'The unit, a unit name or a string such as `"km/h"`; a compound unit whose factors cancel gives a plain number.',
+        sample: '"m"',
+      },
+    },
     complexity: 1200,
     lazy: true,
     // A quantity is a value of the VALUE KIND `quantity`
     // (`QUANTITY_ARITHMETIC` above): an opaque type, with its own
     // arithmetic and order.
-    signature: '(value, value) -> quantity',
+    signature: '(magnitude: value, unit: value) -> quantity',
     arithmetic: QUANTITY_ARITHMETIC,
     // Two values of different dimensions are not equal; `Equal` asks it when
     // the order (`compare`) has no answer (`quantityEq()`).

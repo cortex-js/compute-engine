@@ -752,6 +752,14 @@ export const UNITS_LIBRARY: SymbolDefinitions = {
 
   QuantityMagnitude: {
     description: 'Extract the numeric value from a quantity',
+    examples: ['QuantityMagnitude(Quantity(3, m))'],
+    parameters: [
+      {
+        description:
+          'The quantity; a value that is not a quantity leaves the call unevaluated.',
+        sample: 'quantity(3, m)',
+      },
+    ],
     complexity: 1200,
     signature: '(value) -> value',
     evaluate: (ops) => {
@@ -763,6 +771,14 @@ export const UNITS_LIBRARY: SymbolDefinitions = {
 
   QuantityUnit: {
     description: 'Extract the unit from a quantity',
+    examples: ['QuantityUnit(Quantity(3, m))'],
+    parameters: [
+      {
+        description:
+          'The quantity; a value that is not a quantity leaves the call unevaluated.',
+        sample: 'quantity(3, m)',
+      },
+    ],
     complexity: 1200,
     signature: '(value) -> value',
     evaluate: (ops) => {
@@ -774,9 +790,24 @@ export const UNITS_LIBRARY: SymbolDefinitions = {
 
   UnitConvert: {
     description: 'Convert a quantity to a different compatible unit',
+    examples: [
+      'UnitConvert(Quantity(5, km), m)',
+      'UnitConvert(Quantity(1, h), "min")',
+    ],
     complexity: 1200,
     lazy: true,
-    signature: '(value, value) -> value',
+    signature: '(quantity: value, unit: value) -> value',
+    parameters: {
+      quantity: {
+        description: 'The quantity to convert.',
+        sample: 'quantity(5, km)',
+      },
+      unit: {
+        description:
+          'The target unit, a unit name or a string such as `"km/h"`; a unit of another dimension is an error.',
+        sample: '"m"',
+      },
+    },
     canonical: (args, { engine: ce }) => {
       if (args.length !== 2) return ce.error('incompatible-type');
       // Canonicalize the quantity (first arg) but leave the target unit as-is.
@@ -818,6 +849,14 @@ export const UNITS_LIBRARY: SymbolDefinitions = {
 
   UnitSimplify: {
     description: 'Simplify a quantity unit to a named derived unit if possible',
+    examples: ['UnitSimplify(Quantity(1, kg * m / s^2))'],
+    parameters: [
+      {
+        description:
+          'The quantity; it is returned unchanged when no named unit has its dimension, or when it is not a quantity.',
+        sample: 'quantity(1, kg * m / s^2)',
+      },
+    ],
     complexity: 1200,
     signature: '(value) -> value',
     evaluate: (ops, { engine: ce }) => {
@@ -872,6 +911,17 @@ export const UNITS_LIBRARY: SymbolDefinitions = {
   IsCompatibleUnit: {
     description:
       'Check if two units have the same dimension and convert into each other (`dB` and `Np` do, `dB` and `percent` do not)',
+    examples: ['IsCompatibleUnit(km, mi)', 'IsCompatibleUnit("km", "s")'],
+    parameters: [
+      {
+        description: 'A unit, a unit name or a string such as `"km/h"`.',
+        sample: '"km"',
+      },
+      {
+        description: 'A unit, a unit name or a string such as `"km/h"`.',
+        sample: '"mi"',
+      },
+    ],
     complexity: 1200,
     lazy: true,
     signature: '(value, value) -> value',
@@ -905,6 +955,14 @@ export const UNITS_LIBRARY: SymbolDefinitions = {
 
   UnitDimension: {
     description: 'Return the dimension vector of a unit',
+    examples: ['UnitDimension(N)', 'UnitDimension("km/h")'],
+    parameters: [
+      {
+        description:
+          'The unit, a unit name or a string such as `"km/h"`; the result lists its exponents of length, mass, time, current, temperature, amount, luminous intensity and currency.',
+        sample: '"N"',
+      },
+    ],
     complexity: 1200,
     lazy: true,
     signature: '(value) -> value',
