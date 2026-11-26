@@ -337,6 +337,87 @@ describe('Kernel/Dimension/Degree/Hom', () => {
     const result = ce.expr(['Dimension', ['Kernel', sq2_n]]).evaluate();
     expect(result.toString()).toBe('0');
   });
+
+  // CE-1849: the operand was evaluated first, so `Dimension` counted the
+  // cells of the basis (2 for the one basis vector `[-2, 1]`).
+  describe('the dimension of a kernel is the number of its basis vectors', () => {
+    const singular: Expression = ['List', ['List', 1, 2], ['List', 2, 4]];
+    const dim = (json: Expression) => ce.expr(json).evaluate().toString();
+
+    it('counts the basis vectors, not their cells', () => {
+      expect(dim(['Kernel', singular])).toBe('[[-2,1]]');
+      expect(dim(['Dimension', ['Kernel', singular]])).toBe('1');
+      // A 1×3 matrix of rank 1: two basis vectors of three cells.
+      expect(dim(['Dimension', ['Kernel', ['List', ['List', 1, 0, 0]]]])).toBe(
+        '2'
+      );
+      // A matrix of floats, a `Range` row, and a scalar that is zero.
+      expect(
+        dim(['Dimension', ['Kernel', ['List', ['List', 1.5, 3], ['List', 3, 6]]]])
+      ).toBe('1');
+      expect(
+        dim(['Dimension', ['Kernel', ['List', ['Range', 1, 2], ['List', 2, 4]]]])
+      ).toBe('1');
+      expect(dim(['Dimension', ['Kernel', ['Add', 1, -1]]])).toBe('1');
+      expect(dim(['Dimension', ['Kernel', 5]])).toBe('0');
+    });
+
+    it('gives the same value on each route and under N()', async () => {
+      const json: Expression = ['Dimension', ['Kernel', singular]];
+      expect(ce.box(json).evaluate().toString()).toBe('1');
+      expect(ce.expr(json).N().toString()).toBe('1');
+      expect((await ce.expr(json).evaluateAsync()).toString()).toBe('1');
+      expect(
+        ce
+          .function('Dimension', [ce.function('Kernel', [ce.box(singular)])])
+          .evaluate()
+          .toString()
+      ).toBe('1');
+      expect(
+        ce
+          .parse('\\dim(\\ker(\\begin{pmatrix}1&2\\\\2&4\\end{pmatrix}))')
+          .evaluate()
+          .toString()
+      ).toBe('1');
+      expect(dim(['Add', 1, json])).toBe('2');
+    });
+
+    it('reads a matrix that a variable holds', () => {
+      const engine = new ComputeEngine();
+      engine.declare('m', 'matrix');
+      engine.assign('m', engine.box(singular));
+      expect(
+        engine.box(['Dimension', ['Kernel', 'm']]).evaluate().toString()
+      ).toBe('1');
+    });
+
+    it('stays unevaluated, with its operand evaluated, when the kernel does', () => {
+      expect(dim(['Dimension', ['Kernel', 'x']])).toBe('Dimension(Kernel(x))');
+      expect(
+        dim([
+          'Dimension',
+          ['Kernel', ['List', ['List', ['Add', 'x', 'x'], 2], ['List', 2, 4]]],
+        ])
+      ).toBe('Dimension(Kernel([[2x,2],[2,4]]))');
+    });
+
+    it('gives the error of the kernel', () => {
+      expect(
+        dim([
+          'Dimension',
+          ['Kernel', ['List', ['List', ['List', 1, 2]], ['List', ['List', 3, 4]]]],
+        ])
+      ).toBe('Error("expected-matrix", "[[[1,2]],[[3,4]]]")');
+    });
+
+    it('counts the elements of a kernel basis that a variable holds', () => {
+      // The value of the variable is a list of rows: a 1×2 matrix.
+      const engine = new ComputeEngine();
+      engine.declare('k', 'list');
+      engine.assign('k', engine.box(['Kernel', singular]).evaluate());
+      expect(engine.box(['Dimension', 'k']).evaluate().toString()).toBe('2');
+    });
+  });
 });
 
 describe('Matrix addition', () => {

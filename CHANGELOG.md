@@ -263,6 +263,14 @@
   `Slice([10, 20, 30, 40, 50], 1, -9)` was `[10]`; both are now `[]`. Write
   an end of `-1` for the last element. Compiled code gives the same values.
 
+- **`Dimension` of a `Kernel` is the dimension of the kernel: the number of
+  vectors of its basis** (CE-1849). It was the number of cells of the basis.
+  `Dimension(Kernel([[1, 2], [2, 4]]))` was 2 and is now 1, for the basis
+  `[[-2, 1]]`. This applies to a
+  `Kernel` written as the argument (`\dim(\ker M)`). A variable that holds
+  the basis of a kernel is a matrix, and `Dimension` still gives its number
+  of elements: use `Length` for the number of basis vectors.
+
 ### Resolved Issues
 
 - **A function that is declared with a signature and has no body refuses a
