@@ -10726,11 +10726,13 @@ volumes
     NLimit: {
       description: [
         'Numerical approximation of the limit of a function.',
-        'NLimit(f, a) finds its variable with the same rule as Limit(f, a):',
-        'the first of the symbols written in the expression f, in sorted',
-        'order, also when it has an assigned value. A bare symbol f names a',
-        'function, or, when it holds a formula (G := sin(x)), is read as',
-        'that formula, whose variable is chosen with the same rule.',
+        // A line that ends with `:` or `)` ends its paragraph
+        // (`libraryParagraphs()`), so the line break is not after the colon.
+        'NLimit(f, a) finds its variable with the same rule as',
+        'Limit(f, a): the first of the symbols written in the expression f,',
+        'in sorted order, also when it has an assigned value. A bare symbol',
+        'f names a function, or, when it holds a formula (G := sin(x)), is',
+        'read as that formula, whose variable is chosen with the same rule.',
       ],
       examples: ['NLimit((1 + 1/x)^x, Infinity)', 'NLimit(Abs(x)/x, 0, -1)'],
       complexity: 5000,

@@ -6969,9 +6969,9 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       description: [
         'NamedArgument(name, value): one named argument of a call (Epsil',
         'surface syntax: `f(rate: 0.05)`).',
-        'A parse-level carrier, like `Spread`, but one that never survives:',
-        'the enclosing call consumes it at canonicalization, permuting the',
-        'written arguments into the order its callee declares.',
+        'A parse-level carrier, like `Spread`, but one that never',
+        'survives: the enclosing call consumes it at canonicalization,',
+        'permuting the written arguments into the order its callee declares.',
         'Reaching this definition therefore means the carrier was NOT',
         'consumed — the callee supplied no parameter names to match — which',
         'is the `argument-names-unavailable` error.',
@@ -10220,8 +10220,8 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         "The unknown may be omitted: it defaults to the equation's single free",
         'variable, or to `x` when there are several and one of them is `x`.',
         'Solve([eq1, eq2, …], [x, y, …]): solve a system of equations; each',
-        'solution is a tuple of values in the order of the variable list, e.g.',
-        'Solve([x + y == 3, x - y == 1], [x, y]) → [(2, 1)].',
+        'solution is a tuple of values in the order of the variable list,',
+        'e.g. Solve([x + y == 3, x - y == 1], [x, y]) → [(2, 1)].',
       ],
       keywords: ['roots', 'zeros', 'equation', 'solve equation'],
       // Hold the arguments: the equation must NOT be pre-evaluated, or an
@@ -10260,9 +10260,10 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         'a list of specs (a bare symbol, `(a, a0)`, or `(a, a0, lo, hi)` with',
         'box constraints), matching `FindFit`. Returns a record',
         '{parameters, converged, stationary, residualNorm, iterations}.',
-        // Each line of a description keeps its code spans whole: the Epsil
-        // reference generator (`scripts/build-library-reference.ts`) refuses
-        // a line with an unmatched backtick.
+        // The lines of a paragraph are joined (`libraryParagraphs()` in
+        // `src/epsil/doc-tags.ts`): a line that ends with `.`, `:`, `!`, `?`
+        // or `)` ends its paragraph, so a line break inside a sentence is
+        // not after one of these.
         '`converged` is true only at a root: every residual is within the',
         "engine's tolerance scaled by its own equation,",
         '`|r_i| ≤ tolerance · (1 + Σ_j |J_ij| · max(1, |θ_j|))`, with `J` the',
@@ -10338,7 +10339,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         'NSolve(equation, unknown): the solutions of an equation as floats.',
         'It is Mathematica `NSolve`: it takes the same operands as `Solve`,',
         'including domain specs and systems of equations, and gives the `N` of',
-        'each solution of `Solve`:',
+        'each solution of `Solve`, so',
         '`NSolve(x^2 == 2, x)` → `[1.414…, -1.414…]`. When `Solve` finds no',
         'solution set, `NSolve` stays unevaluated: for a polynomial `Solve`',
         'already gives numeric roots when there is no closed form, and',
@@ -10488,7 +10489,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
 
     CanonicalForm: {
       description: [
-        'Return the canonical form of an expression',
+        'Return the canonical form of an expression.',
         'Can be used to sort arguments of an expression.',
         'Sorting arguments of commutative functions is a weak form of canonicalization that can be useful in some cases, for example to accept "x+1" and "1+x" while rejecting "x+1" and "2x-x+1"',
       ],
@@ -10537,9 +10538,9 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
 
     N: {
       description: [
-        'N(expr): numerically evaluate an expression',
-        'N(expr, precision): evaluate to `precision` significant digits',
-        'N(expr, [precision, accuracy]): evaluate with a precision goal and an accuracy goal',
+        'N(expr): numerically evaluate an expression.',
+        'N(expr, precision): evaluate to `precision` significant digits.',
+        'N(expr, [precision, accuracy]): evaluate with a precision goal and an accuracy goal.',
       ],
       lazy: true,
       signature: '(any, (integer | list<number>)?) -> unknown',
@@ -10660,8 +10661,8 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       description: [
         'Random(): non-deterministic real in [0, 1)',
         'Random(Interval(a, b)): a real in [a, b) (endpoint markers ignored)',
-        'Random(Range(...)): an element of the range',
-        'Random(xs): an element of the finite collection `xs`',
+        'Random(Range(...)): an element of the range.',
+        'Random(xs): an element of the finite collection `xs`.',
       ],
       // One plain signature: it accepts `Random()` and `Random(xs)`, and
       // rejects `Random(5)` and `Random(5, 7)`. The `random` specifier is the

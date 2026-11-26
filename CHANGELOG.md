@@ -253,6 +253,16 @@
 
 ### Resolved Issues
 
+- **The Epsil editor functions give whole paragraphs for the description of
+  a library function** (CE-1811). For `findRoot`, `limit`, `map`, `solve` and
+  about twenty other names, each element of the `description` of
+  `epsilCompletions()`, `epsilHover()` and `epsilSignatureHelp()` was one
+  line of a wrapped paragraph, and the `documentation` stopped in the middle
+  of a sentence: for `solve`, "Solve(equation, unknown): the list of
+  solutions of an equation for the". Each element is now a paragraph, and
+  the `documentation` is the first paragraph. `epsil doc solve` prints the
+  same paragraphs.
+
 - **A list that holds a `Tabulate` of random numbers holds the numbers**
   (CE-1809). A `Tabulate` whose function has an effect (a random draw, a
   call of an impure function) stayed unevaluated as an element of a list or

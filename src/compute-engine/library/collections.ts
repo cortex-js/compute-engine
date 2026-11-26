@@ -14813,9 +14813,11 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     description: [
       'Return the collection where each element has been transformed by the mapping function.',
       'With a single collection, equivalent to `[f(x) for x in xs]`. With',
-      'multiple collections, combines them element-wise (like `zipWith`): ',
-      '`Map(f, xs, ys) = [f(x1, y1), f(x2, y2), …]`, with the length of the',
-      'shortest input.',
+      // A line that ends with `:` or `)` ends its paragraph
+      // (`libraryParagraphs()`), so the line break is not after the colon.
+      'multiple collections, combines them element-wise (like',
+      '`zipWith`): `Map(f, xs, ys) = [f(x1, y1), f(x2, y2), …]`, with the',
+      'length of the shortest input.',
       'The mapping function is the first argument, because `Map` takes any number of collections after it. Most other operations that take a function, such as `Filter`, `FlatMap` and `Reduce`, take one collection and put it first: `Filter(xs, p)`. `Map(xs, f)` is an `incompatible-type` error.',
     ],
     complexity: 8200,

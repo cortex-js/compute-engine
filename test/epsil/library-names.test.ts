@@ -7,6 +7,7 @@ import { compile } from '../../src/compute-engine/compilation/compile-expression
 import { STANDARD_LIBRARIES } from '../../src/compute-engine/library/library';
 import type { MathJsonExpression } from '../../src/math-json/types';
 import { describeName } from '../../src/cli/doc';
+import { epsilCompletions } from '../../src/epsil/completion';
 import { executeEpsil } from '../../src/epsil/execute-epsil';
 import {
   ENGINE_INTERNAL_NAMES,
@@ -841,6 +842,58 @@ describe('the tools', () => {
     expect(describeName(ce, 'Sin')?.epsilName).toBe('sin');
     expect(describeName(ce, 'Add')?.epsilName).toBeUndefined();
     expect(describeName(ce, 'add')).toBeUndefined();
+  });
+
+  // CE-1811: a library description can write a paragraph as several
+  // wrapped lines. The editor shows the first paragraph as the summary of a
+  // name, so the lines are joined.
+  test('the wrapped lines of a library description are one paragraph', () => {
+    const findRoot = describeName(ce, 'FindRoot')?.description ?? [];
+    expect(findRoot[0]).toMatch(
+      /^FindRoot\(equations, params\): numerically find parameter values that zero the residuals\. .* iterations\}\.$/
+    );
+    expect(findRoot).toHaveLength(4);
+    // One paragraph per element is kept.
+    expect(describeName(ce, 'Join')?.description).toHaveLength(4);
+    expect(describeName(ce, 'N')?.description).toHaveLength(3);
+    expect(describeName(ce, 'Random')?.description).toHaveLength(4);
+    // A string is one paragraph.
+    expect(describeName(ce, 'Sin')?.description).toHaveLength(1);
+
+    const item = epsilCompletions(ce, 'findRoo', 7).items.find(
+      (i) => i.label === 'findRoot'
+    );
+    expect(item?.documentation).toBe(item?.description?.[0]);
+    expect(item?.documentation).toMatch(/iterations\}\.$/);
+  });
+
+  // The rule that joins the lines reads the end of each line, so the lines
+  // of the definitions are checked: a line break after `:` or `)` inside a
+  // sentence would split a paragraph, and an item with no end punctuation
+  // would be joined to the next item.
+  test('the lines of a library description give the intended paragraphs', () => {
+    const split: string[] = [];
+    const merged: string[] = [];
+    for (const [name, def] of ce.contextStack[0].lexicalScope.bindings) {
+      const base = 'operator' in def ? def.operator : def.value;
+      const lines = base?.description;
+      if (!Array.isArray(lines)) continue;
+      for (let i = 0; i < lines.length - 1; i++) {
+        const line = lines[i].trimEnd();
+        const next = lines[i + 1];
+        if (/[:)]$/.test(line) && /^[a-z`(]/.test(next)) split.push(name);
+        // An item starts with a form of the call and a colon
+        // (`N(expr, precision): …`).
+        if (
+          !/[.:!?)]$/.test(line) &&
+          next.startsWith(`${name}(`) &&
+          /^\w+\(.*?\)+: /.test(next)
+        )
+          merged.push(name);
+      }
+    }
+    expect(split).toEqual([]);
+    expect(merged).toEqual([]);
   });
 
   test('the generated library page lists both spellings', () => {
