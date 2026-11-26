@@ -992,9 +992,13 @@ describe('POSSIBLY INFINITE EXTENDED-REAL OPERANDS', () => {
     [['Add', 'L', 'y'], 'list<real | signed_infinity>'],
     [['Add', 'y', 'z'], 'number'],
     // Two collections, an indexed collection, a matrix literal and a tuple
-    // take the same cell type as a list.
+    // take the same cell type as a list. An indexed collection can hold a
+    // point, so its product is an indexed collection (CE-1583).
     [['Multiply', 'y', 'L', 'K'], 'list<nan | real | signed_infinity>'],
-    [['Multiply', 'y', 'I'], 'list<nan | real | signed_infinity>'],
+    [
+      ['Multiply', 'y', 'I'],
+      'indexed_collection<nan | real | signed_infinity>',
+    ],
     [
       ['Multiply', 'y', ['List', ['List', 0, 1], ['List', 2, 3]]],
       'matrix<nan | real | signed_infinity^(2x2)>',

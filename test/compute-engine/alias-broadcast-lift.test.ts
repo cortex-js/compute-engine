@@ -114,15 +114,18 @@ survey(
   'indexed_collection<integer>',
   ['Range', 3, 5],
   [
-    ['Sin(L)', ['Sin', 'L'], 'list<number>'],
-    ['Mod(L, 2)', ['Mod', 'L', 2], 'list<integer>'],
-    ['Multiply(2, L)', ['Multiply', 2, 'L'], 'list<integer>'],
+    // `L` can hold a point, which a head that maps a point to a point maps
+    // to a point, so the result is an indexed collection (CE-1583). A user
+    // function binds a point whole, so `f(L)` is a list.
+    ['Sin(L)', ['Sin', 'L'], 'indexed_collection<number>'],
+    ['Mod(L, 2)', ['Mod', 'L', 2], 'indexed_collection<integer>'],
+    ['Multiply(2, L)', ['Multiply', 2, 'L'], 'indexed_collection<integer>'],
     [
       'Add([1,2], L)',
       ['Add', ['List', 1, 2], 'L'],
       'indexed_collection<integer>',
     ],
-    ['Negate(L)', ['Negate', 'L'], 'list<integer>'],
+    ['Negate(L)', ['Negate', 'L'], 'indexed_collection<integer>'],
     ['f(L)', ['f', 'L'], 'list<number>'],
   ]
 );

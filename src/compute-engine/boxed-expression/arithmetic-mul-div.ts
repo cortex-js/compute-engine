@@ -1758,7 +1758,25 @@ export function canonicalDivide(op1: Expression, op2: Expression): Expression {
   // value, and a canonical form must not depend on it (with `w := NaN`, a
   // folded `w / 2` stayed `NaN` after `w := 4`). A symbol is left to
   // `evaluate()`, which substitutes its value first.
-  if ((isNumber(op1) && op1.isNaN) || (isNumber(op2) && op2.isNaN))
+  // A point with readable components (a `Tuple` application), divided by
+  // `NaN`, is not folded here: the tuple branch below divides each
+  // component, so `(1, 2) / NaN` is the `NaN` point `(NaN, NaN)`, as
+  // `(1, 2) · NaN` is. A tuple with a list coordinate is data, not a point
+  // (`isTupleWithListCoordinate`), and folds to `NaN`, as does any other
+  // numerator. That includes a symbol typed as a point: the tuple branch
+  // cannot scale its components, and the inert quotient, typed as a point,
+  // would evaluate to the scalar `NaN`.
+  if (
+    (isNumber(op1) && op1.isNaN) ||
+    (isNumber(op2) &&
+      op2.isNaN &&
+      !(
+        hasAccessibleComponents(op1) &&
+        isFunction(op1) &&
+        couldBeNumericTuple(op1) &&
+        !isTupleWithListCoordinate(op1)
+      ))
+  )
     return ce.NaN;
 
   // Tuples (points/vectors in ℝⁿ): `tuple / scalar` scales component-wise;
@@ -2298,8 +2316,11 @@ export function div(num: Expression, denom: number | Expression): Expression {
   // `Divide(list<tuple>, list<number>)`, and the `Divide` evaluate handler
   // hands back whatever this function returns.
   //
-  // A NaN or not-provably-numeric divisor falls through to the rules below,
-  // matching `canonicalDivide`. The structural `hasAccessibleComponents` (a
+  // A not-provably-numeric divisor falls through to the rules below,
+  // matching `canonicalDivide`. A `NaN` divisor scales each component of a
+  // point, as in `canonicalDivide`: `(1, 2) / NaN` is `(NaN, NaN)`. A tuple
+  // with a list coordinate divided by `NaN` falls through to `NaN`, as in
+  // `canonicalDivide`. The structural `hasAccessibleComponents` (a
   // `Tuple`/`Pair`/… head with operands) is tested FIRST so an ordinary
   // quotient never pays the `type` computations behind the other two tests.
   //
@@ -2315,10 +2336,15 @@ export function div(num: Expression, denom: number | Expression): Expression {
     const d = typeof denom === 'number' ? ce.number(denom) : denom;
     // An absent divisor (`Negate(Missing)` is typed as a number) is not a
     // scale: the absence rule below answers `Missing` for the point.
+    // A `NaN` divisor divides each component as boxing does
+    // (`canonicalDivide`), so both routes give the `NaN` point, also for a
+    // point with an absent coordinate.
+    if (d.isNaN && !isTupleWithListCoordinate(num))
+      return ce.tuple(...num.ops.map((c) => canonicalDivide(c, d)));
     if (
-      !d.isNaN &&
       !isAbsentArithmeticOperand(d) &&
-      isSubtype(d.type.type, 'number')
+      isSubtype(d.type.type, 'number') &&
+      !d.isNaN
     )
       // Evaluate each component quotient, mirroring `mulTuples`: a component
       // that is itself a collection (`[1,2]` in a zipped point list) divides

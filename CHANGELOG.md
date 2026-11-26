@@ -181,6 +181,14 @@
 
 ### Resolved Issues
 
+- **An element-wise operation on a numeric indexed collection is typed so
+  that it holds a point** (CE-1583). With `u: indexed_collection<number>`,
+  `u / 5`, `Sin(u)` and `Mod(u / 5, 1)` were typed `list<…>`, but for
+  `u := (1, 2)` they give a point: `u / 5` is `(0.2, 0.4)`. They are now
+  typed `indexed_collection<…>`, which holds a list and a point. A point
+  divided by `NaN` is now the `NaN` point, as a point multiplied by `NaN`
+  is: `(1, 2) / NaN` was `NaN` and is now `(NaN, NaN)`.
+
 - **The linear-algebra operators evaluate an operand that is a lazy
   collection** (CE-1451). `Dot`, `MatrixMultiply`, `Trace`, `Determinant`,
   `Norm` and the other matrix operators left their application unevaluated

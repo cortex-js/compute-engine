@@ -2239,8 +2239,8 @@ describe('POINT/TUPLE ARITHMETIC — zipped point-list quotient folds its elemen
   // The degenerate divisors now answer the same on both routes. A zero
   // divisor divides each COMPONENT (`canonicalDivide` maps the components
   // before its own `a/0` rule), where the zipped element used to
-  // short-circuit to a bare scalar `~oo`; a NaN divisor stays a scalar NaN on
-  // both.
+  // short-circuit to a bare scalar `~oo`. A NaN divisor divides each
+  // component too, so the quotient is the `NaN` point (CE-1583).
   test('a zero or NaN divisor answers as the single-tuple form does', () => {
     const ce = new ComputeEngine();
     expect(
@@ -2254,7 +2254,7 @@ describe('POINT/TUPLE ARITHMETIC — zipped point-list quotient folds its elemen
         .box(['Divide', ['Tuple', 3, 4], NaN])
         .evaluate()
         .toString()
-    ).toBe('NaN');
+    ).toBe('(NaN, NaN)');
 
     const points = ['List', ['Tuple', 3, 4], ['Tuple', 6, 8]];
     expect(
@@ -2268,7 +2268,7 @@ describe('POINT/TUPLE ARITHMETIC — zipped point-list quotient folds its elemen
         .box(['Divide', points, ['List', NaN, 2]])
         .evaluate()
         .toString()
-    ).toBe('[NaN,(3, 4)]');
+    ).toBe('[(NaN, NaN),(3, 4)]');
   });
 
   // Control: the product route folds through `mulTuples`, which `mulImpl`

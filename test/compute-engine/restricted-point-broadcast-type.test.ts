@@ -387,8 +387,8 @@ describe('a list that holds a restricted point or masked points', () => {
   test('only the cell of an absent restricted point becomes a NaN point', () => {
     // The marker of each cell is decided from the operand cell at the same
     // position. A restricted point whose condition is false gives the point
-    // of `NaN` coordinates; a `NaN` computed from a present cell stays
-    // `NaN`, also in a list that holds a restricted point.
+    // of `NaN` coordinates. A present point divided by `NaN` gives the
+    // point of `NaN` coordinates too, by the division (CE-1583).
     const L = String.raw`[(1,2)\left\{0<t\right\}, (3,4)]`;
     const ce = new ComputeEngine();
     ce.assign('t', -1);
@@ -397,11 +397,13 @@ describe('a list that holds a restricted point or masked points', () => {
     ).toBe('[(NaN, NaN),(4, 6)]');
     const json = ['Divide', ce.parse(L).json, ['List', 1, 'x']];
     ce.assign('x', NaN);
-    expect(ce.box(json).evaluate().toString()).toBe('[(NaN, NaN),NaN]');
+    expect(ce.box(json).evaluate().toString()).toBe(
+      '[(NaN, NaN),(NaN, NaN)]'
+    );
     const ce2 = new ComputeEngine();
     ce2.assign('t', 1);
     ce2.assign('x', NaN);
-    expect(ce2.box(json).evaluate().toString()).toBe('[(1, 2),NaN]');
+    expect(ce2.box(json).evaluate().toString()).toBe('[(1, 2),(NaN, NaN)]');
   });
 
   test('the condition of a restricted point is evaluated once', async () => {

@@ -3148,7 +3148,14 @@ export function broadcastLiftType(input: BroadcastLiftInput): Type | undefined {
     // dimensions, that is, when it cannot be a list (`Sin(M)` is a
     // `matrix<2x2>`, `M < 3` is a `matrix<boolean^(2x2)>`), and spelled as
     // nested plain lists otherwise.
-    return shapedBroadcastResultType(shapeTypes, cellComponent, absentCell);
+    const shaped = shapedBroadcastResultType(
+      shapeTypes,
+      cellComponent,
+      absentCell
+    );
+    return input.armwiseTupleArms === true
+      ? asIndexedCollectionResult(shaped, types)
+      : shaped;
   }
 
   // Arm 2 (possibly a collection): the operand's collection-ness is not
@@ -3378,6 +3385,42 @@ function hasTupleCell(t: Type, seen?: AliasDescent): boolean {
   if (typeof r !== 'string' && r.kind === 'union')
     return r.types.some((m) => hasTupleCell(m, unfolded.seen));
   return hasTupleArm(r, unfolded.seen);
+}
+
+/**
+ * The result `list<C>` of the visible-collection lift as
+ * `indexed_collection<C>` when a trigger is typed `indexed_collection<E>`
+ * with numeric elements `E`, and `result` unchanged otherwise.
+ *
+ * Such a trigger can hold a list or a point (`u := [1, 2]` or
+ * `u := (1, 2)`), and a head whose tuple operand is a cell of its own
+ * (`armwiseTupleArms`) maps a point to a point: with
+ * `u: indexed_collection<number>` and `u := (1, 2)`, `u/5` is `(0.2, 0.4)`.
+ * So `list<C>` does not hold the point, and `indexed_collection<C>`, which
+ * holds both, does. The result keeps no dimensions.
+ *
+ * A list operand beside a trigger that holds a point gives a list of points
+ * (`u · [1, 2]` for `u := (1, 2)` is `[(1, 2), (2, 4)]`), which neither type
+ * holds (CE-1841).
+ */
+function asIndexedCollectionResult(
+  result: Type,
+  triggers: ReadonlyArray<Type>
+): Type {
+  const holdsPoint = triggers.some((t) => {
+    const r = resolveTypeAlias(t);
+    return (
+      typeof r !== 'string' &&
+      r.kind === 'indexed_collection' &&
+      isSubtype(r.elements, 'number')
+    );
+  });
+  if (!holdsPoint) return result;
+  const r = resolveTypeAlias(result);
+  if (typeof r === 'string' || r.kind !== 'list') return result;
+  if (r.dimensions != null && r.dimensions.length !== 1) return result;
+  if (!isSubtype(r.elements, 'number')) return result;
+  return { kind: 'indexed_collection', elements: r.elements };
 }
 
 /** The cell type `E` of an operand that may be a scalar or a tensor of `E`
