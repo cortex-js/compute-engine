@@ -1493,11 +1493,11 @@ describe('a name whose held value is an expression is that expression where it i
     e.box(['Assign', 's2', ['Sum', 'j', ['Limits', 'j', 0, ['Length', 'j']]]]).evaluate();
     for (const json of [['Add', 'x', 's1'], ['Add', 'x', 'p1'], ['Add', 'x', 's2']])
       againstInterpreter(e, json, points);
-    // The list of a clause is not in the scope of its index, but its j
-    // resolves to the binding of the Comprehension, not to the outer j that
-    // holds a value, so the value declines.
+    // The list of a clause is not in the scope of its index: its j is the
+    // outer j, the list (4, 5), as in the interpreter (CE-1827).
     e.box(['Assign', 'c4', ['Comprehension', 'j', ['Element', 'j', 'j']]]).evaluate();
-    expect(failure(e, ['Add', 'x', ['Sum', 'c4']])).toMatch(/the value of c4, which reads j of another binding/);
+    const r = againstInterpreter(e, ['Add', 'x', ['Sum', 'c4']], points);
+    expect(r.run!({ x: 0.5, S: 3 } as never)).toBe(9.5);
   });
 
   test('a value that reads itself, or a draw, declines', () => {

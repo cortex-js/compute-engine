@@ -13,6 +13,7 @@ import {
   functionLiteralParameterName,
   functionLiteralParameterNames,
 } from './function-literal.js';
+import { tuplePatternNames } from './tuple-pattern.js';
 
 /**
  * The binding sites of a binder: the places, among the operands of an
@@ -1218,20 +1219,31 @@ export function pointVariableNames(
  * `NDSolve` need no entry: `D` binds plain symbol operands, `Limit` the
  * parameter of a function literal, `NIntegrate` takes plain bounds, and
  * `NDSolve` is not a binder (its `Limits` clause binds nothing). The
- * clauses of `Loop`, `Comprehension` and the quantifiers keep the rule that
- * their index is in scope in its whole clause.
+ * clauses of the quantifiers keep the rule that their index is in scope in
+ * its whole clause.
+ *
+ * The loops read the collection of an `Element` clause before the clause
+ * binds its index: the collection sees the indexes of the earlier clauses,
+ * not its own. In `Loop(body, Element(n, Range(1, n)))` the `n` of the
+ * range is the `n` of the enclosing scope. The leaves of a destructuring
+ * pattern (`Element(Tuple(p, q), pairs)`) follow the same rule.
  */
 export const OWN_INDEX_OUTSIDE_BINDERS: ReadonlySet<string> = new Set([
   'Sum',
   'Product',
   'Integrate',
   'NDSolveFunction',
+  'Loop',
+  'Comprehension',
+  'ParallelLoop',
+  'ParallelComprehension',
 ]);
 
 /** An indexing clause and the operands of it that its index does not see. */
 export type OwnIndexClause = {
-  /** The name of the index of the clause. */
-  readonly name: string;
+  /** The names that the clause binds first: its index, or the leaves of the
+   * destructuring pattern of an `Element` clause. */
+  readonly names: readonly string[];
   /** Whether operand `j` of the clause is outside the scope of the index:
    * the bounds of a `Limits` clause (`j ≥ 1`), the collection of an
    * `Element` clause (`j = 1`; its condition, `j = 2`, reads the index). */
@@ -1246,7 +1258,8 @@ const ELEMENT_COLLECTION = (j: number): boolean => j === 1;
  * `binder`, is a `Limits` or `Element` clause of a binder of
  * `OWN_INDEX_OUTSIDE_BINDERS`, and this clause is the first one that binds
  * its index (`boundAt`, `DeclaredBinders`), the index and the operands of
- * the clause that are outside its scope.
+ * the clause that are outside its scope. For a destructuring pattern, the
+ * names are the leaves that this clause is the first to bind.
  * Otherwise `undefined`: the index is in scope in its whole clause.
  *
  * A clause of a node that is not canonical can have another range-shaped
@@ -1271,7 +1284,6 @@ export function ownIndexClause(
   if (!OWN_INDEX_OUTSIDE_BINDERS.has(binder)) return undefined;
   if (!isFunction(clause)) return undefined;
   const index = isFunction(clause.op1, 'Hold') ? clause.op1.op1 : clause.op1;
-  if (!isSymbol(index)) return undefined;
   const outside =
     clause.operator === 'Element'
       ? ELEMENT_COLLECTION
@@ -1279,9 +1291,16 @@ export function ownIndexClause(
         ? LIMITS_BOUNDS
         : undefined;
   if (outside === undefined) return undefined;
-  const name = index.symbol;
-  if (boundAt.get(name) !== operandIndex) return undefined;
-  return { name, outside };
+  // Only an `Element` clause has a destructuring pattern: the first operand
+  // of a `Tuple` clause is its index (`indexingSetSite()`).
+  const candidates = isSymbol(index)
+    ? [index.symbol]
+    : clause.operator === 'Element' && isFunction(index, 'Tuple')
+      ? tuplePatternNames(index)
+      : [];
+  const names = candidates.filter((x) => boundAt.get(x) === operandIndex);
+  if (names.length === 0) return undefined;
+  return { names, outside };
 }
 
 /**
@@ -1389,9 +1408,9 @@ export function flatBoundIndexAt(
 /**
  * The names shadowed in operand `j` of the clause `own`, when `inner` is the
  * set shadowed in the whole clause and `outer` the set shadowed outside the
- * binder: `inner` without the index of the clause for an operand outside
- * its scope, unless the walk entered the binder with that name already
- * shadowed by an enclosing binder.
+ * binder: `inner` without the names of the clause for an operand outside
+ * their scope, except a name that the walk already had as shadowed by an
+ * enclosing binder when it entered the binder.
  */
 export function clauseOperandShadow(
   outer: ReadonlySet<string> | undefined,
@@ -1399,12 +1418,14 @@ export function clauseOperandShadow(
   own: OwnIndexClause,
   j: number
 ): ReadonlySet<string> | undefined {
-  if (!own.outside(j) || inner === undefined || !inner.has(own.name))
-    return inner;
-  if (outer?.has(own.name)) return inner;
-  const result = new Set(inner);
-  result.delete(own.name);
-  return result;
+  if (!own.outside(j) || inner === undefined) return inner;
+  let result: Set<string> | undefined;
+  for (const name of own.names) {
+    if (!inner.has(name) || outer?.has(name)) continue;
+    result ??= new Set(inner);
+    result.delete(name);
+  }
+  return result ?? inner;
 }
 
 /**

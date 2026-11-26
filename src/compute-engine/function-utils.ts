@@ -5587,7 +5587,11 @@ function parameterWrites(
             return;
           }
           const clause = ownIndexClauseAt(e, i, binders);
-          if (clause === undefined || clause.name !== name || !isFunction(op)) {
+          if (
+            clause === undefined ||
+            !clause.names.includes(name) ||
+            !isFunction(op)
+          ) {
             const bound =
               own === 'held'
                 ? binderBoundAt(binders, name, i)

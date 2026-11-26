@@ -6002,6 +6002,7 @@ function canonicalLoopLike(
   // index in `loopScope` before later clauses are canonicalized — so a later
   // collection expression referencing an earlier name binds to the loop-scoped
   // symbol rather than triggering auto-declaration in the enclosing scope.
+  const earlierNames = new Set<string>();
   const canonicalIterators: Expression[] = iterators.map((it) => {
     if (!isFunction(it, 'Element')) {
       // Not an Element clause — flag as invalid rather than passing it
@@ -6016,6 +6017,60 @@ function canonicalLoopLike(
         (collExpr ?? ce.error('missing')).canonical,
       ]);
     }
+    const ownNames =
+      isSymbol(indexExpr) && indexExpr.symbol !== 'Nothing'
+        ? [indexExpr.symbol]
+        : isFunction(indexExpr, 'Tuple')
+          ? tuplePatternNames(indexExpr)
+          : [];
+    const readCollection = (): Expression => {
+      const collection = collExpr.canonical;
+      // These clauses are rebuilt with `_fn`, which bypasses the `Element`
+      // canonical handler — so nothing narrows the iterated operand. Yet
+      // iterating over a not-yet-typed symbol is collection evidence in the
+      // same way `Length(x)` or `x[i]` is: narrow it, so a function parameter
+      // whose only use is `for c in cs` types as a collection (and the lambda
+      // auto-broadcast then binds a collection argument whole instead of
+      // mapping over it).
+      // The guard reads an EFFECTIVE type, so it runs fact-blind together
+      // with the write it gates: an assumption that gives the operand a type
+      // would otherwise decide whether this contract-bearing narrowing
+      // happens at all.
+      ce._withoutFacts(() => {
+        if (
+          isSymbol(collection) &&
+          hasInferredType(collection) &&
+          isUntypedAtCollectionSlot(collection)
+        )
+          collection._infer(() => 'collection', 'narrow');
+      });
+      return collection;
+    };
+    // The collection of a clause is read before the clause binds its index,
+    // so it is outside the scope of the names that this clause is the first
+    // to bind: in `for n in 1..n`, the `n` of the range is the `n` around
+    // the loop. So
+    // the collection is canonicalized, and narrowed, before the clause
+    // declares its names, and the type of the index is then read from the
+    // collection that the loop runs over. A name of an earlier clause stays
+    // visible.
+    //
+    // The index of the first clause is already declared in the scope of the
+    // loop (`canonicalizeBinder()`, `boxed-expression/box.ts`). A collection
+    // of that clause that names the index sees no name of the loop, so it is
+    // read in the scope around the loop. A symbol reads its name again from
+    // the scope it was made in, so taking the index out of the scope of the
+    // loop for the time of the call would not be enough.
+    const clauseScope = ce.context.lexicalScope;
+    const collCanonical =
+      clauseScope === loopScope &&
+      earlierNames.size === 0 &&
+      ownNames.some(
+        (name) => clauseScope.bindings.has(name) && collExpr.has(name)
+      )
+        ? ce._inScope(clauseScope.parent ?? undefined, readCollection)
+        : readCollection();
+    for (const name of ownNames) earlierNames.add(name);
     if (isSymbol(indexExpr) && indexExpr.symbol !== 'Nothing') {
       if (!ce.context.lexicalScope.bindings.has(indexExpr.symbol))
         ce.declare(indexExpr.symbol, 'unknown');
@@ -6028,25 +6083,6 @@ function canonicalLoopLike(
         if (!ce.context.lexicalScope.bindings.has(name))
           ce.declare(name, 'unknown');
     }
-    const collCanonical = collExpr.canonical;
-    // These clauses are rebuilt with `_fn`, which bypasses the `Element`
-    // canonical handler — so nothing narrows the iterated operand. Yet
-    // iterating over a not-yet-typed symbol is collection evidence in the same
-    // way `Length(x)` or `x[i]` is: narrow it, so a function parameter whose
-    // only use is `for c in cs` types as a collection (and the lambda
-    // auto-broadcast then binds a collection argument whole instead of mapping
-    // over it).
-    // The guard reads an EFFECTIVE type, so it runs fact-blind together with
-    // the write it gates: an assumption that gives the operand a type would
-    // otherwise decide whether this contract-bearing narrowing happens at all.
-    ce._withoutFacts(() => {
-      if (
-        isSymbol(collCanonical) &&
-        hasInferredType(collCanonical) &&
-        isUntypedAtCollectionSlot(collCanonical)
-      )
-        collCanonical._infer(() => 'collection', 'narrow');
-    });
     // …and nothing typed the INDEX, either (the same bypass): the binder
     // hook declares each index `unknown`, and the body's arithmetic use
     // then widened it to `number` — so `for i in 1..3` typed `10 * i` as

@@ -3051,9 +3051,9 @@ export function serializeEpsil(
     if (!mentionsSymbol(body, variable)) return null;
     // A domain that names the index itself — `{n, n in 1..n}` with an
     // enclosing `n` — reads the ENCLOSING `n` in the set-builder (the domain
-    // is evaluated before the body is substituted), but a comprehension's
-    // clause declares its index before its collection is canonicalized, so
-    // the reprint would capture it. Such a set keeps the literal spelling.
+    // is evaluated before the body is substituted). The collection of a
+    // comprehension clause reads the enclosing `n` too, so the reprint would
+    // give the same value; such a set still keeps the literal spelling.
     const domain = operand(clause, 2);
     if (domain !== null && mentionsSymbol(domain, variable)) return null;
     return ['Comprehension', body, clause];

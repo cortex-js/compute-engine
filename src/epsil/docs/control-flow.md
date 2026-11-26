@@ -1087,6 +1087,13 @@ the loop, so in a function body it is not the `scope` effect, and the name
 after the loop is not the loop variable. Compiled code does not compile such
 a loop; the interpreter runs it.
 
+The domain is read once, before the first iteration, outside the loop: a
+name in it is never the loop variable. With `let n = 3`, the loop
+`for n in 1..n { … }` runs three times, because the `n` of `1..n` is the
+variable around the loop. A clause of a comprehension follows the same rule
+for its own variable: `[n for n in 1..n]` is `[1, 2, 3]`. The domain of a
+later clause still reads the variables of the earlier clauses.
+
 The loop variable may be a **tuple pattern**, using the same grammar as
 [`let (a, b) = v`](/epsil/declarations/#destructuring-declarations) — bare
 names, `_` to skip a position, nested `(…)` patterns:

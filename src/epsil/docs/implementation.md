@@ -212,8 +212,8 @@ function literal names the binding itself, so that
 `let f = (n) => if n == 0 { 1 } else { n * f(n - 1) }` is recursive. An
 assignment declares nothing: its target is a write of the binding that is
 visible, which is an `external` binding when the program has none. The
-collection of a `for` clause is read in the scope of its loop: in
-`for n in 1..n`, the second `n` is the loop variable.
+collection of a `for` clause is read outside its loop: in
+`for n in 1..n`, the second `n` is the binding around the loop.
 
 A host uses the result in three ways. The `external` sites with the role
 `read` or `read-write` are what the program depends on. To run the program

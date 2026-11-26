@@ -2337,7 +2337,7 @@ function collectReferences(
         const bound = (s: string): boolean =>
           (indexVars.has(s) &&
             boundIn(s, i) &&
-            !(own.outside(j) && s === own.name)) ||
+            !(own.outside(j) && own.names.includes(s))) ||
           localVars.has(s);
         for (const s of childFree) if (!bound(s)) freeVars.add(s);
         for (const s of childRef) if (!bound(s)) refFns.add(s);

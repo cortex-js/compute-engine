@@ -222,6 +222,23 @@
 
 ### Resolved Issues
 
+- **A loop whose variable has the name of a variable of its collection
+  runs** (CE-1827). The collection of a clause of `Loop`, `Comprehension`,
+  `ParallelLoop` and `ParallelComprehension` is read before the clause binds
+  its variable, so a name in it is the variable around the loop, as in the
+  bound of `Sum(n, Limits(n, 1, n))`. In Epsil, with `let n = 3`,
+  `[n for n in 1..n]` stayed unevaluated and now gives `[1, 2, 3]`, and
+  `for n in 1..n { s += n }` ran no pass and now runs three. The names of a
+  destructuring pattern follow the same rule: with `p = 10` and `q = 20`,
+  `[p + q for (p, q) in [(1, p), (q, 5)]]` gave `[p + 1, q + 5]` and now
+  gives `[11, 25]`. The `freeVariables` of
+  `Comprehension(n, Element(n, Range(1, n)))` are now `["n"]`, and
+  `subs({n: 3})` replaces the `n` of the range. The collection of a later
+  clause still reads the variables of the earlier clauses, and a quantifier
+  (`ForAll`, `Exists`) is not changed. Compiled JavaScript already read the
+  outer variable; `Comprehension(PointX(P) + 1, Element(P, P))` declined and
+  now compiles.
+
 - **`minimalDNF` and `minimalCNF` give the fewest terms** (CE-1858). After
   the terms that every cover needs, the remaining terms were chosen
   greedily, which could give more than needed:

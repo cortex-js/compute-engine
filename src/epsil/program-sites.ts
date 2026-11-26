@@ -26,9 +26,8 @@ import { binderSitesOf } from './resolve-library-names.js';
 // macro that expands to a read adds no site, and `v / v` has two sites also
 // when its value is the constant 1.
 //
-// The query gives what the interpreter does, also in two cases with an open
-// issue. In `for n in 1..n`, the second `n` is the loop variable (CE-1827).
-// A library spelling that `resolveLibraryNames()` rewrites before the
+// The query gives what the interpreter does, also in a case with an open
+// issue. A library spelling that `resolveLibraryNames()` rewrites before the
 // program is boxed is `library`, also where a `let` of the program binds
 // the name in the whole scope: a function body above the `let` (CE-1826).
 //
@@ -239,8 +238,8 @@ function treeFacts(
  *   the binding outside the block (`let k = k + 1` reads the outer `k`),
  *   except when the initializer is a function literal, whose body names
  *   the binding itself (`let f = (n) => … f(n - 1)` is recursive);
- * - the collection of a `for` clause is read in the scope of the loop: in
- *   `for n in 1..n`, the second `n` is the loop variable;
+ * - the collection of a `for` clause is read outside the loop: in
+ *   `for n in 1..n`, the second `n` is the binding around the loop;
  * - an assignment declares nothing: its target is a `write` of the binding
  *   that is visible, which is `external` when the program has none;
  * - a parameter, a loop or comprehension variable, a `match` binder and a

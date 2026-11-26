@@ -530,7 +530,11 @@ dependencies, whatever their order (`nestDependentLimits()`, `library/utils.ts`)
 in `Sum(i·j, Element(j, Range(1, i)), Limits(i, 1, 3))`, the `i` of the first
 clause is the index of the second, not the imaginary unit. The bounds of a
 clause (the collection of an `Element` clause) are still outside the scope of
-its own index. Then the engine canonicalizes each `statement` operand as a branch, in
+its own index. The same holds for the collection of a clause of `Loop`,
+`Comprehension`, `ParallelLoop` and `ParallelComprehension`, and for the
+leaves of a destructuring pattern: in `Loop(body, Element(n, Range(1, n)))`,
+the `n` of the range is the `n` of the enclosing scope
+(`OWN_INDEX_OUTSIDE_BINDERS`, `binding-sites.ts`). Then the engine canonicalizes each `statement` operand as a branch, in
 that scope (an assignment of a bound variable there writes the bound
 variable), and reads a bare `N` or `D` at a `value` operand of a lazy operator
 as a variable (`applyOperatorDefinition()`). Then the `canonical` handler runs.

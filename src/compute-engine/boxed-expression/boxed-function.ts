@@ -25484,7 +25484,7 @@ function capturedNames(
     if (!here.includes(name) || here.includes(key)) return false;
     const own = ownIndexClauseAt(node, i, view.binders);
     const op = ops[i];
-    if (own === undefined || own.name !== name || !isFunction(op))
+    if (own === undefined || !own.names.includes(name) || !isFunction(op))
       return freeIn(i).has(key);
     return op.ops.some(
       (o, j) => !own.outside(j) && freeNamesForSubs(o, false).has(key)

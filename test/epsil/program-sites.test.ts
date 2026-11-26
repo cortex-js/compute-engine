@@ -157,14 +157,28 @@ describe('EPSIL PROGRAM SITES — the sites of an external binding', () => {
     }
   });
 
-  test('the collection of a `for` clause is read in the scope of the loop', () => {
-    // The interpreter reads the loop variable there (CE-1827).
-    expect(external(sitesOf('for k in 1..k { k }'), 'k')).toEqual([]);
-    expect(external(sitesOf('[k for k in 1..k]'), 'k')).toEqual([]);
-    // The collection of an earlier clause reads the outer binding.
+  test('the collection of a `for` clause is read outside the loop', () => {
+    // The loop reads its collection once, before the first pass, so a name
+    // there is the binding around the loop, not the loop variable.
+    const loop = 'let s = 0\nfor k in 1..k { s += k }\ns';
+    expect(external(sitesOf(loop), 'k')).toEqual(['22 read']);
+    expect(run(loop).value).toBe(15);
+    const list = '[k for k in 1..k]';
+    expect(external(sitesOf(list), 'k')).toEqual(['15 read']);
+    expect(run(list).value).toEqual(['List', 1, 2, 3, 4, 5]);
+    // The names of a destructuring pattern follow the same rule.
+    const pattern = '[p + q for (p, q) in [(1, p), (q, 5)]]';
+    expect(external(sitesOf(pattern), 'p')).toEqual(['26 read']);
+    expect(external(sitesOf(pattern), 'q')).toEqual(['31 read']);
+    expect(run(pattern).value).toEqual(['List', 6, 12]);
+    // The collection of an earlier clause reads the outer binding, and the
+    // collection of a later clause reads the variable of an earlier one.
     const source = '[a + k for a in 1..k, k in 1..2]';
     expect(external(sitesOf(source), 'k')).toEqual(['19 read']);
     expect((run(source).value as unknown[]).length).toBe(11);
+    const later = '[k for k in 1..2, k in 1..k]';
+    expect(external(sitesOf(later), 'k')).toEqual([]);
+    expect(run(later).value).toEqual(['List', 1, 1, 2]);
   });
 
   test('a library spelling that the interpreter rewrites is `library`', () => {
