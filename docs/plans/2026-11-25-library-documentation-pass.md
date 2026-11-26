@@ -1,7 +1,10 @@
 # A documentation pass over the standard library
 
 Status: approved by the user 2026-11-25 (fresh session; parameter names are
-added where they help). Not started. Builds on CE-1812 and CE-1813
+added where they help). Steps 1 to 4 done 2026-11-25 (step 1 by
+`8995eb986`, steps 2-3 by `878e080c2`, step 4 by one commit per library,
+`6208b0c1d` to `e20d18bbd`); step 5 (CE-1836) done by another session in
+`860aa5c65`. Builds on CE-1812 and CE-1813
 (`bc755fa88f39eb6a4bccd9ee1241be945ade7467`, the positional form
 `e9e0810c3dbbe1cbce855d885b88d9c90a309655`). Issues it folds in: CE-1835,
 CE-1836. Issue to fix first: CE-1838.

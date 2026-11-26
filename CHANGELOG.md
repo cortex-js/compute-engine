@@ -68,21 +68,25 @@
   `join([1, 2], 3)` where it showed `Join([1, 2], 3)`, and so do `epsil doc`
   and the reference pages. Code that does not parse as Epsil is left as written.
 
-- **The functions of the collections library document their parameters,
-  and several of their parameters have names.** The signature help and the
-  completion of a call of `take`, `filter`, `insert` and the other 85
-  functions with an Epsil spelling show a description and a sample of each
-  parameter, and the reference page lists them. A call may pass a named
-  parameter by name, in any order:
-  `insert(xs: [1, 2, 4], index: 3, element: 3)` gives `[1, 2, 3, 4]`. The
-  names are `xs` (the collection, in `all`, `any`, `filter`, `find`,
-  `reduce` and others), `count` (`chunk`, `partition`), `index` and
-  `element` (`insert`, `replaceAt`, `deleteAt`, `indexOf`), `n`
-  (`rotateLeft`, `rotateRight`), `needle` (`rangeOf`, `containsSequence`),
-  `start` and `end` (`interval`), `f` (`iterate`), `step` (`partition`) and
-  `k` and `n` (`residueClass`). The type string of
-  these signatures shows the names: `Filter` is
+- **The functions of the standard library document their parameters, and
+  many of their parameters have names.** The signature help and the
+  completion of a call of the 572 library functions that have an Epsil
+  spelling show a description and a sample of each parameter, and the
+  reference pages list them. Functions that had no example have one. A call
+  may pass a named parameter by name, in any order:
+  `insert(xs: [1, 2, 4], index: 3, element: 3)` gives `[1, 2, 3, 4]`, and
+  `powerMod(base: 2, exponent: 10, modulus: 1000)` gives `24`. A name was
+  added where it tells which argument is which; the same role has the same
+  name across the library (`xs` for a collection, `count`, `index`,
+  `element`, `variable`, `tolerance`, `lower` and `upper`, `start` and
+  `end`). The type string of these signatures shows the names: `Filter` is
   `(xs: collection<T>, predicate: (T) any -> boolean) -> collection where T`.
+  A function of one parameter, a rest parameter and a symmetric function
+  are documented by position, with no name.
+
+- **`evaluateAt` takes its upper bound as optional in its signature**, as
+  its evaluation already did: `evaluateAt(f: x => x^2, lower: 2)` gives `4`,
+  where it gave `missing: no value for parameter upper`.
 
 - **`epsilProgramSites()` gives the sites of the names of an Epsil program,
   each with the binding it resolves to** (CE-1628, CE-1255.2). It is exported
