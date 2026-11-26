@@ -33,11 +33,13 @@ describe('EPSIL SIGNATURE HELP: CALLEE', () => {
           label: 'sin(complex | quantity) -> number',
           parameters: [{ type: 'complex | quantity', range: [4, 22] }],
           documentation: 'Sine of an angle.',
+          description: ['Sine of an angle.'],
           activeParameter: 0,
         },
       ],
       activeSignature: 0,
       activeParameter: 0,
+      examples: ['sin(pi / 6)', 'sin(1)', 'N(sin(1))'],
     });
     expect(help('Sin(▮)')?.callee).toBe('sin');
   });

@@ -22,6 +22,46 @@
 
 ### New Features
 
+- **The Epsil editor functions document each parameter, and the keys of an
+  options dictionary** (CE-1812). A parameter of `epsilSignatureHelp()` has
+  a `documentation`, a `sample` (one line of Epsil, which an editor can show
+  as faint text in an empty argument) and, for a parameter that takes a
+  dictionary of options, its `keys`, each with a `type`, a `documentation`,
+  a `sample` and a `default`. The result has `activeKey`, the key whose name
+  or value holds the offset (`plot(s, {grid -> ▮` gives `"grid"`), and each
+  signature has the `description` of the callee. In such a dictionary,
+  `epsilCompletions()` lists the documented keys that it does not write yet
+  (`grid -> `, with the sample in the field of the snippet), and in the value
+  of a key typed `"light" | "dark"`, those strings first. A named-argument
+  item (`count: `) has the `documentation` and the `sample` of its
+  parameter. The documentation comes from the new `parameters` property of
+  an operator definition, or from tag lines in the `///` comment of a
+  function:
+
+  ```epsil
+  /// Draws a plot.
+  /// @param series the function to plot
+  /// @sample series x => x^2
+  /// @key options.grid: boolean -- whether to draw a grid
+  /// @default options.grid false
+  /// @example plot(x => sin(x), {grid -> true})
+  function plot(series, options = {}) { series }
+  ```
+
+  The tag lines (`@param`, `@key`, `@sample`, `@default`, `@example`) are
+  left out of the `description` and `documentation` that hover, completion
+  and signature help give, and of `epsil doc`. The signature help of a
+  function of the source now has the first line of its `///` comment as
+  `documentation`, and its hover gives one paragraph per element of
+  `description`.
+
+- **The editor functions give the examples of a function in the Epsil
+  spelling** (CE-1813). `epsilHover()`, `epsilSignatureHelp()` and the
+  library items of `epsilCompletions()` have `examples`: the `examples` of
+  the definition, written with the Epsil names (`join([1, 2], [3, 4])`,
+  where the definition writes `Join([1, 2], [3, 4])`), and the `@example`
+  tags of a `///` comment.
+
 - **`epsilProgramSites()` gives the sites of the names of an Epsil program,
   each with the binding it resolves to** (CE-1628, CE-1255.2). It is exported
   from `@cortex-js/compute-engine/epsil` and reads the source without running

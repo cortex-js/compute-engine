@@ -185,4 +185,9 @@ Residue of a function at a point (the coefficient of (x-a)⁻¹ in its Laurent e
 
 MathJSON `Series` · `(expression, variable: symbol?, point: value?, order: number?) -> number`
 
-Taylor series expansion of an expression about a point (or an asymptotic expansion at ±∞), including Laurent, Puiseux (fractional-power), and log-aware expansions at poles and branch points. Only essential singularities, irrational exponents, and nested/reciprocal logarithms are left unevaluated. Example: Series(\sin x, x) → x - x^3/6 + x^5/120 + O(x^7)
+Taylor series expansion of an expression about a point (or an asymptotic expansion at ±∞), including Laurent, Puiseux (fractional-power), and log-aware expansions at poles and branch points. Only essential singularities, irrational exponents, and nested/reciprocal logarithms are left unevaluated.
+
+```epsil
+series(sin(x), x)
+// ➔ x - 1/6 * x^3 + 1/120 * x^5 + BigO(x^7)
+```

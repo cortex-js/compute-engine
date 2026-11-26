@@ -102,6 +102,7 @@ function isDefaultOperatorFlags(def: BoxedOperatorDefinition): boolean {
   const d = def as BoxedOperatorDefinition & {
     keywords?: unknown;
     examples?: unknown;
+    parameters?: unknown;
     url?: unknown;
     broadcastExemptions?: ReadonlyArray<unknown>;
     missingStrip?: unknown;
@@ -121,6 +122,7 @@ function isDefaultOperatorFlags(def: BoxedOperatorDefinition): boolean {
     d.description === undefined &&
     d.keywords === undefined &&
     d.examples === undefined &&
+    d.parameters === undefined &&
     d.url === undefined &&
     d.wikidata === undefined &&
     // Evaluation and binding flags

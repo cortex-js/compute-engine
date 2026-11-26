@@ -44,6 +44,42 @@ prints, what an editor hover shows. Markdown is the intended format.
 twice(x) = 2x
 ```
 
+### Documenting the parameters
+
+Tag lines in the documentation comment of a function document its
+parameters, the keys of a parameter that takes a dictionary of options, and
+give examples. A tag line starts with one of these tags and runs to the end of
+the line; a following line that starts with a space continues it:
+
+| Tag | Documents |
+| --- | --- |
+| `@param name text` | the parameter `name` (Markdown) |
+| `@key param.key: type -- text` | a key of the options parameter `param`; the `: type --` part is optional |
+| `@sample name source` | a sample value of a parameter, or of a key with `@sample param.key` |
+| `@default param.key source` | the value of a key that the dictionary leaves out |
+| `@example source` | one line of Epsil that uses the function |
+
+```epsil
+/// Draws a plot.
+/// @param series the function to plot
+/// @sample series x => x^2
+/// @param options the options of the plot
+/// @key options.grid: boolean -- whether to draw a grid
+/// @default options.grid false
+/// @key options.theme: "light" | "dark" -- the colors
+/// @example plot(x => sin(x), {grid -> true})
+function plot(series, options = {}) { series }
+```
+
+The tag lines are not part of the description: `about(f)` prints them with
+it, and an editor shows them in their own places. The signature help shows
+the documentation of the parameter at the cursor, or of the key whose name or
+value holds the cursor. An empty argument shows the sample as faint text, and
+the completion of a key inserts its sample. In the dictionary of the options,
+the completion lists the keys that the dictionary does not write yet. A
+sample, a default and an example are Epsil source, and a rest parameter
+(`...xs`) is documented by its name (`@param xs`).
+
 A documentation comment before a `protocol` statement documents the protocol,
 and one before a member of its body documents that member. The engine keeps
 them with the protocol, so an editor shows them in the hover of the protocol

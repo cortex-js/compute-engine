@@ -760,7 +760,36 @@ The VS Code extension serves the same items as its completions, and sends a
 `snippet` as a snippet to a client that supports snippets.
 
 Each library item also has a `description`: the paragraphs of the library
-description, which the hover of the name shows.
+description, which the hover of the name shows. A library item, and an item
+of a name that the engine defines, has `examples`: one line of Epsil each, in
+the Epsil spelling (`join([1, 2], [3, 4])`, where the definition writes
+`Join([1, 2], [3, 4])`), from the `examples` of the definition and the
+`@example` tags of its `///` comment.
+
+A named-argument item (`count: `) has the `documentation` of its parameter
+and its `sample`, from the `parameters` of a library definition or the
+`@param` and `@sample` tags of a `///` comment. In a dictionary literal
+written as an argument whose parameter documents its keys (`@key`), the items
+at a key are the keys that the literal does not write yet, and no other name:
+each inserts `key -> `, with a snippet whose field holds the sample of the
+key (an empty field when it has none). In the value of a key whose type is a
+union of string literals, those strings come first:
+
+```ts
+const source =
+  "/// @param options the options\n" +
+  "/// @key options.grid: boolean -- whether to draw a grid\n" +
+  '/// @key options.theme: "light" | "dark" -- the colors\n' +
+  "function plot(series, options = {}) { series }\n" +
+  "plot(sin, {";
+epsilCompletions(ce, source, source.length).items.map((i) => i.snippet);
+// ➔ ["grid -> ${1}${0}", "theme -> ${1}${0}"]
+const value = source + "theme -> ";
+epsilCompletions(ce, value, value.length).items.slice(0, 2).map((i) => i.label);
+// ➔ ['"light"', '"dark"']
+```
+
+A member call and a call after `|>` give no key items.
 
 ### Signature help
 
@@ -821,6 +850,20 @@ parameter 1 (`k`). A member that is not one function gives `null`, and so
 does a library function, which is not a member (`xs.take(` is the error
 `dot-call-not-a-protocol-function`).
 
+A signature has the first line of the description of the callee as its
+`documentation` and its paragraphs as its `description`: of a library
+function, or the `///` comment of a function of the source or of the engine,
+its tag lines left out. A parameter has its `documentation`, its `sample`,
+and for a parameter that takes a dictionary of options, its `keys`, each with
+a `name`, a `type`, a `documentation`, a `sample` and a `default`: from the
+`parameters` of a library definition or the tags of a `///` comment
+(see [Comments](/epsil/comments/)). A positional argument and a named
+argument resolve to the same parameter. The `examples` of the result are
+those of the callee. When the offset is in a dictionary literal written as
+the active argument, `activeKey` is the documented key whose name or value
+contains the offset (`plot(s, {grid -> ▮` gives `"grid"`); a key that is
+still being typed and documents no key gives none.
+
 ### Hover and definition
 
 `epsilHover(ce, source, offset)` says what the name at an offset is, and
@@ -843,6 +886,7 @@ epsilHover(ce, source, source.indexOf("sin(x)"));
 // ➔ { range: [54, 57], name: "sin", kind: "library-function",
 //     detail: "(complex | quantity) -> number",
 //     description: ["Sine of an angle."],
+//     examples: ["sin(pi / 6)", "sin(1)", "N(sin(1))"],
 //     reference: "https://epsil.dev/reference/trigonometry/#sin" }
 
 epsilDefinition(ce, source, source.indexOf("f(1)"));
@@ -859,7 +903,8 @@ source binds at that place is described from its declaration, also when it
 shadows a library name: the `kind` is `function`, `variable` or `type`, the
 `detail` is the detail of its completion item (a signature, a declared type,
 the body of a `type`), and the `description` is the doc comment of a
-`function`. The variable of a library call (the `k` of `sum(k^2, k, 1, 3)`)
+`function`, one element per paragraph, its tag lines left out, with its
+`@example` tags as `examples`. The variable of a library call (the `k` of `sum(k^2, k, 1, 3)`)
 is a `variable` of that call. Any other name is the definition of the engine
 under the written name (a name that an earlier program declared), a function
 member of a `protocol` of the source, a variant of a sum type, or the

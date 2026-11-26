@@ -23,7 +23,6 @@ import {
   firstLine,
   functionSignatureParts,
   insideLiteralOrComment,
-  isFunctionHeader,
   memberCallee,
   parseSourceType,
   parseWithHole,
@@ -38,13 +37,20 @@ import {
   type Declaration,
   type SourceType,
 } from './completion.js';
-import { describeName } from './describe-name.js';
+import { callAt } from './call-at.js';
+import { definitionSitesByOffset } from './definition-sites.js';
+import { definitionExamples, describeName } from './describe-name.js';
+import {
+  definitionDocs,
+  paragraphsOf,
+  splitDocComment,
+  type KeyDoc,
+  type ParameterDoc,
+} from './doc-tags.js';
 import { tokenize } from './lexer.js';
 import { canonicalLibraryName, epsilNameOf } from './library-names.js';
 import type { BindingGroup } from './occurrences.js';
-import { HARD_RESERVED_WORDS } from './reserved-words.js';
 import { escapeSymbol } from './serialize-epsil.js';
-import type { Token } from './tokens.js';
 
 //
 // Signature help at an offset of an Epsil source.
@@ -82,6 +88,34 @@ export type EpsilSignatureParameter = {
    * known; `'receiver'` for the value before the `.` of a member call
    * (`c.scale(` fills `self`). */
   implicit?: 'pipe' | 'receiver';
+  /** The documentation of the parameter, in Markdown: the `parameters`
+   * field of a library definition, or the `@param` tag of a `///`
+   * comment. */
+  documentation?: string;
+  /** A sample value of the parameter, one line of Epsil source in the
+   * Epsil spelling (`[1, 2, 3]`, `x => x^2`): the `sample` of a library
+   * definition, or the `@sample` tag of a `///` comment. An editor shows it
+   * as faint text in an empty argument; it is not part of the
+   * documentation. */
+  sample?: string;
+  /** The keys of a parameter that takes a dictionary of options, in the
+   * order of their documentation (the `keys` of a library definition, the
+   * `@key` tags of a `///` comment). */
+  keys?: EpsilSignatureKey[];
+};
+
+/** One documented key of a parameter that takes a dictionary of options. */
+export type EpsilSignatureKey = {
+  name: string;
+  /** The type of the value of the key, a type string. */
+  type?: string;
+  /** In Markdown. */
+  documentation?: string;
+  /** A sample value, one line of Epsil source. */
+  sample?: string;
+  /** The value of the key when the dictionary leaves it out, one line of
+   * Epsil source. */
+  default?: string;
 };
 
 /** One signature of the callee. */
@@ -89,8 +123,12 @@ export type EpsilSignature = {
   /** The callee and its parameters: `f(x: real, n: integer?) -> real`. */
   label: string;
   parameters: EpsilSignatureParameter[];
-  /** The first line of the library description, for a library function. */
+  /** The first line of the description: of a library function, or the
+   * `///` comment of a function of the source or of the engine. */
   documentation?: string;
+  /** The paragraphs of that description, its tag lines left out: what the
+   * hover of the callee shows. */
+  description?: string[];
   /** The index of the active parameter in this signature, or -1 when the
    * argument at the offset matches none of its parameters. The signatures
    * of an overload set can differ: in `slice(s, 1, ▮`, the signature
@@ -114,10 +152,21 @@ export type EpsilSignatureHelp = {
    * the argument at the offset matches none of its parameters: the
    * `activeParameter` of `signatures[activeSignature]`. */
   activeParameter: number;
+  /** When the offset is in a dictionary literal written as the active
+   * argument (`plot(s, {grid -> ▮})`), and the active parameter documents a
+   * key of that name: the key whose name or value contains the offset. */
+  activeKey?: string;
+  /** The examples of the callee, each one line of Epsil source in the
+   * Epsil spelling (`join([1, 2], [3, 4])`): the `examples` of a library
+   * definition, or the `@example` tags of a `///` comment. */
+  examples?: string[];
 };
 
 /** A signature with what selects its active parameter. */
 type Candidate = Omit<EpsilSignature, 'activeParameter'> & {
+  /** The examples of the definition, or the `@example` tags of the `///`
+   * comment of this clause. */
+  examples?: string[];
   /** Whether the last parameter takes all the remaining arguments. */
   rest: boolean;
   /** The parameter that the call fills with an implicit argument (the
@@ -182,7 +231,7 @@ export function epsilSignatureHelp(
 
   const call = callAt(tokens, start);
   if (call === undefined) return null;
-  const { head, headStart, std, member, index, label } = call;
+  const { head, headStart, std, member, index, label, dictionary } = call;
 
   const { text, placeholder, ast } = parseWithHole(source, start, end, options);
   // The names visible at the callee: a name bound between the callee and
@@ -203,7 +252,8 @@ export function epsilSignatureHelp(
         ast,
         text,
         context.typeNames,
-        context.sourceTypes
+        context.sourceTypes,
+        context.visible
       ));
   if (candidates === undefined || candidates.length === 0) return null;
   if (!member && !(std && context.visible.has(head)))
@@ -222,17 +272,82 @@ export function epsilSignatureHelp(
     0,
     active.findIndex((i) => i >= 0)
   );
+  const keys =
+    candidates[activeSignature]?.parameters[active[activeSignature]]?.keys;
+  const keyName =
+    dictionary === undefined
+      ? undefined
+      : dictionary.position === 'value'
+        ? dictionary.key
+        : source.slice(start, end);
+  const activeKey = keys?.some((k) => k.name === keyName) ? keyName : undefined;
+  // The examples of every signature: a function of the source documents
+  // each of its clauses with its own comment.
+  const examples = [...new Set(candidates.flatMap((c) => c.examples ?? []))];
   return {
     callee: candidates.callee,
     signatures: candidates.map(
-      ({ rest: _rest, implicit: _, ...signature }, i) => ({
+      ({ rest: _rest, implicit: _, examples: _e, ...signature }, i) => ({
         ...signature,
         activeParameter: active[i],
       })
     ),
     activeSignature,
     activeParameter: active[activeSignature],
+    ...(activeKey === undefined ? {} : { activeKey }),
+    ...(examples.length === 0 ? {} : { examples }),
   };
+}
+
+/** Set the documentation of the parameters of `candidates` that `docs`
+ * documents, by parameter name. */
+function attachDocs(
+  candidates: Candidate[],
+  docs: {
+    description?: readonly string[] | string;
+    parameters?:
+      ReadonlyMap<string, ParameterDoc> | Record<string, ParameterDoc>;
+    examples?: readonly string[];
+  }
+): void {
+  const parameters =
+    docs.parameters instanceof Map
+      ? docs.parameters
+      : new Map(Object.entries(docs.parameters ?? {}));
+  const description =
+    typeof docs.description === 'string'
+      ? docs.description
+      : docs.description?.[0];
+  const documentation =
+    description === undefined ? undefined : firstLine(description);
+  const paragraphs =
+    docs.description === undefined
+      ? undefined
+      : typeof docs.description === 'string'
+        ? paragraphsOf(docs.description)
+        : [...docs.description];
+  for (const candidate of candidates) {
+    if (documentation) candidate.documentation = documentation;
+    if (paragraphs !== undefined && paragraphs.length > 0)
+      candidate.description = paragraphs;
+    if (docs.examples !== undefined && docs.examples.length > 0)
+      candidate.examples = [...docs.examples];
+    candidate.parameters = candidate.parameters.map((parameter) => {
+      const doc =
+        parameter.name === undefined
+          ? undefined
+          : parameters.get(parameter.name);
+      if (doc === undefined) return parameter;
+      return {
+        ...parameter,
+        ...(doc.documentation ? { documentation: doc.documentation } : {}),
+        ...(doc.sample ? { sample: doc.sample } : {}),
+        ...(doc.keys === undefined || doc.keys.length === 0
+          ? {}
+          : { keys: doc.keys.map((k: KeyDoc) => ({ ...k })) }),
+      };
+    });
+  }
 }
 
 /** The parameter of the argument `index`, or of the named argument
@@ -339,19 +454,16 @@ function memberSignaturesOf(
   const callee = memberCallee(context, operand(found.node, 1), head);
   if (callee === undefined) return undefined;
   const name = escapeSymbol(head);
-  const documentation =
-    callee.description === undefined
-      ? undefined
-      : firstLine(callee.description);
+  const docs =
+    callee.description === undefined ? {} : splitDocComment(callee.description);
   if (callee.kind === 'field') {
     const fields = signaturesOfType(name, callee.type);
-    if (documentation)
-      for (const candidate of fields) candidate.documentation = documentation;
+    attachDocs(fields, docs);
     return Object.assign(fields, { callee: head });
   }
   const candidates = signaturesOfType(name, callee.signature);
+  attachDocs(candidates, docs);
   for (const candidate of candidates) {
-    if (documentation) candidate.documentation = documentation;
     if (candidate.parameters.length === 0) return undefined;
     candidate.implicit = 0;
     candidate.parameters[0] = {
@@ -402,8 +514,7 @@ function protocolMemberSignaturesOf(
   const candidates = signaturesOfType(escapeSymbol(head), type);
   if (candidates.length === 0) return undefined;
   if (declared.description !== undefined)
-    for (const candidate of candidates)
-      candidate.documentation = firstLine(declared.description);
+    attachDocs(candidates, splitDocComment(declared.description));
   return Object.assign(candidates, { callee: head });
 }
 
@@ -435,120 +546,6 @@ function innermostNode(
   return found;
 }
 
-/** The innermost call written `name(…)` whose arguments contain `start`:
- * its callee, the offset of the callee, whether it is qualified by `std::`,
- * the index of the argument at `start` (the commas at the depth of the call
- * before `start`) and the label of that argument when it is a named argument
- * (`f(n: ▮)`, also `f(n▮: 2)`). A member call (`xs.f(…)`) is such a call,
- * with `member` set. A bracket that is not such a call (a group, a list, a
- * block, `(f)(x)`, `g(1)(x)`, `f (x)`, the parameters of a `function`
- * header, a keyword) is skipped with its commas. */
-function callAt(
-  tokens: readonly Token[],
-  start: number
-):
-  | {
-      head: string;
-      headStart: number;
-      std: boolean;
-      member: boolean;
-      index: number;
-      label?: string;
-    }
-  | undefined {
-  let last = -1;
-  while (
-    last + 1 < tokens.length &&
-    tokens[last + 1].type !== 'EOF' &&
-    tokens[last + 1].end <= start
-  )
-    last += 1;
-  let depth = 0;
-  let commas = 0;
-  let lastComma = -1;
-  for (let j = last; j >= 0; j -= 1) {
-    const type = tokens[j].type;
-    if (
-      type === 'CLOSE_PAREN' ||
-      type === 'CLOSE_BRACKET' ||
-      type === 'CLOSE_BRACE'
-    )
-      depth += 1;
-    else if (
-      type === 'OPEN_PAREN' ||
-      type === 'OPEN_BRACKET' ||
-      type === 'OPEN_BRACE'
-    ) {
-      if (depth > 0) {
-        depth -= 1;
-        continue;
-      }
-      const callee = type === 'OPEN_PAREN' ? calleeOf(tokens, j) : undefined;
-      if (callee !== undefined) {
-        // The first tokens of the argument: `name :` is a named argument. As
-        // in the parser, the name may be verbatim, and the colon may start a
-        // merged operator token (`:-` in `f(n:-1)`) other than `:=` and `::`.
-        const first = tokens[(lastComma < 0 ? j : lastComma) + 1];
-        const colon = tokens[(lastComma < 0 ? j : lastComma) + 2];
-        const label =
-          (first?.type === 'SYMBOL' || first?.type === 'VERBATIM_SYMBOL') &&
-          colon?.type === 'OPERATOR' &&
-          colon.text.startsWith(':') &&
-          !colon.text.startsWith(':=') &&
-          !colon.text.startsWith('::')
-            ? first.type === 'VERBATIM_SYMBOL'
-              ? (first.value ?? '')
-              : first.text
-            : undefined;
-        return {
-          ...callee,
-          index: commas,
-          ...(label === undefined ? {} : { label }),
-        };
-      }
-      commas = 0;
-      lastComma = -1;
-    } else if (type === 'COMMA' && depth === 0) {
-      if (lastComma < 0) lastComma = j;
-      commas += 1;
-    }
-  }
-  return undefined;
-}
-
-/** The name written before the `(` at `paren`, its offset, whether it is
- * qualified by `std::` and whether it is the member of a member call
- * (`xs.f(`), when the bracket is the argument list of a call of that name.
- * As in the parser, the `(` of a call follows the name with no whitespace. */
-function calleeOf(
-  tokens: readonly Token[],
-  paren: number
-):
-  | { head: string; headStart: number; std: boolean; member: boolean }
-  | undefined {
-  const token = tokens[paren - 1];
-  if (
-    token === undefined ||
-    tokens[paren].precededByWhitespace ||
-    isFunctionHeader(tokens, paren)
-  )
-    return undefined;
-  const before = tokens[paren - 2];
-  let head: string | undefined;
-  if (token.type === 'VERBATIM_SYMBOL') head = token.value;
-  else if (token.type === 'SYMBOL' && !HARD_RESERVED_WORDS.has(token.text))
-    head = token.text;
-  if (head === undefined) return undefined;
-  const member = before?.type === 'OPERATOR' && before.text === '.';
-  if (before?.type !== 'OPERATOR' || before.text !== '::')
-    return { head, headStart: token.start, std: false, member };
-  // A qualified name: `std` is the only module.
-  const module = tokens[paren - 3];
-  return module?.type === 'SYMBOL' && module.text === 'std'
-    ? { head, headStart: token.start, std: true, member: false }
-    : undefined;
-}
-
 /** The signatures of the callee `head`: the function of the source that
  * `group` binds, or a library function when no name of the source is
  * visible. */
@@ -559,28 +556,44 @@ function signaturesOf(
   ast: MathJsonExpression | null,
   text: string,
   typeNames: ReadonlySet<string>,
-  sourceTypes: ReadonlyMap<string, SourceType>
+  sourceTypes: ReadonlyMap<string, SourceType>,
+  visible?: { has(name: string): boolean }
 ): (Candidate[] & { callee: string }) | undefined {
   const withCallee = (candidates: Candidate[], callee: string) =>
     Object.assign(candidates, { callee });
 
   if (group !== undefined) {
     const declarations = collectDeclarations(ast);
-    // A function with several clauses: one signature per clause.
+    // A function with several clauses: one signature per clause, each with
+    // the `///` comment of its own definition.
     const clauses = group.occurrences
       .filter((o) => o.role === 'definition')
-      .map((o) => declarations.get(o.start))
+      .map((o) => ({ start: o.start, declaration: declarations.get(o.start) }))
       .filter(
-        (d): d is Extract<Declaration, { kind: 'function' }> =>
-          d?.kind === 'function'
+        (
+          c
+        ): c is {
+          start: number;
+          declaration: Extract<Declaration, { kind: 'function' }>;
+        } => c.declaration?.kind === 'function'
       );
-    if (clauses.length > 0)
-      return withCallee(
-        clauses.map((declaration) =>
-          clauseSignature(ce, head, declaration, text, typeNames)
-        ),
-        head
-      );
+    if (clauses.length > 0) {
+      const sites = ast === null ? undefined : definitionSitesByOffset(ast);
+      const candidates = clauses.map(({ start, declaration }) => {
+        const candidate = clauseSignature(
+          ce,
+          head,
+          declaration,
+          text,
+          typeNames
+        );
+        const description = sites?.get(start)?.description;
+        if (description !== undefined)
+          attachDocs([candidate], definitionDocs({ description }));
+        return candidate;
+      });
+      return withCallee(candidates, head);
+    }
     // A variable whose declared type is a function type, or an alias of one.
     const declaration = declarationOf(group, declarations);
     if (declaration?.kind === 'value') {
@@ -607,12 +620,15 @@ function signaturesOf(
     spelling !== undefined && canonicalLibraryName(spelling) === name
       ? spelling
       : name;
-  const documentation = describeName(ce, name)
-    ?.description?.[0]?.split('\n')[0]
-    ?.trim();
+  const entry = describeName(ce, name);
   const candidates = signaturesOfType(callee, type);
-  if (documentation)
-    for (const candidate of candidates) candidate.documentation = documentation;
+  if (entry !== undefined)
+    attachDocs(candidates, {
+      ...entry,
+      // The names that the source declares at the call keep an example from
+      // reading them (`let pi = 3` above `sin(`).
+      examples: definitionExamples(ce, name, visible),
+    });
   return withCallee(candidates, callee);
 }
 

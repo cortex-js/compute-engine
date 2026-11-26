@@ -13,13 +13,16 @@ import {
 import { definitionSitesByOffset } from './definition-sites.js';
 import {
   describeLibraryName,
+  definitionExamples,
   describeName,
   type DocEntry,
 } from './describe-name.js';
+import { paragraphsOf, splitDocComment } from './doc-tags.js';
 import { tokenize } from './lexer.js';
 import { canonicalLibraryName } from './library-names.js';
 import {
   documentBindings,
+  isNameVisibleAt,
   protocolFunctionMembers,
   type BindingGroup,
   type ProtocolFunctionMember,
@@ -62,9 +65,15 @@ export type EpsilHover = {
   /** A signature (`(real, integer?) -> real`), a type, or the body of a
    * `type` declaration, as in a completion item. */
   detail?: string;
-  /** The paragraphs of the library description, or the doc comment of a
-   * `function` of the source as one paragraph. */
+  /** The paragraphs of the library description, or of the `///` comment of
+   * a `function` of the source (`paragraphsOf()`). The tag lines of a `///`
+   * comment (`@param`, `@key`, `@sample`, `@default`, `@example`) are not
+   * in it. */
   description?: string[];
+  /** The examples of the name, each one line of Epsil source in the Epsil
+   * spelling (`join([1, 2], [3, 4])`): the `examples` of a library
+   * definition, or the `@example` tags of a `///` comment. */
+  examples?: string[];
   /** The address of the entry of a standard-library name in the library
    * reference. */
   reference?: string;
@@ -123,6 +132,9 @@ type NameAt = {
    * occurrences. */
   group: BindingGroup | undefined;
   members: ReadonlyMap<string, ProtocolFunctionMember>;
+  /** The bindings of the source. */
+  groups: readonly BindingGroup[];
+  engine: ComputeEngine;
 };
 
 /**
@@ -198,7 +210,7 @@ export function epsilHover(
             ? 'type'
             : 'variable',
       ...(detail === undefined ? {} : { detail }),
-      ...(description === undefined ? {} : { description: [description] }),
+      ...docOf(description),
     };
   }
 
@@ -303,6 +315,8 @@ function nameAt(
     ast,
     group,
     members,
+    groups,
+    engine: ce,
   };
 }
 
@@ -433,7 +447,7 @@ function engineHover(
         name: written,
         kind: 'function',
         detail: member.declarations[0].signature,
-        ...(description === undefined ? {} : { description: [description] }),
+        ...docOf(description),
       };
     }
     id = canonicalLibraryName(name);
@@ -449,9 +463,7 @@ function engineHover(
         name: written,
         kind: 'function',
         detail: member.signature,
-        ...(member.description === undefined
-          ? {}
-          : { description: [member.description] }),
+        ...docOf(member.description),
       };
   }
 
@@ -470,9 +482,7 @@ function engineHover(
           (record.extends.length === 0
             ? ''
             : ` extends ${record.extends.join(', ')}`),
-        ...(record.description === undefined
-          ? {}
-          : { description: [record.description] }),
+        ...docOf(record.description),
       };
     // A constructor of a sum type of the source, as in its completion item.
     for (const [sum, declared] of collectSourceTypes(
@@ -528,7 +538,36 @@ function entryHover(
     ...(entry.description === undefined
       ? {}
       : { description: entry.description }),
+    ...(entry.examples === undefined
+      ? {}
+      : {
+          // A name that the source declares at the hover keeps an example
+          // from reading it (`let pi = 3` above `sin`).
+          // A name after `std::` is described by the library's definition;
+          // the names of its examples are still read in the source.
+          examples: definitionExamples(
+            at.engine,
+            entry.id,
+            { has: (name) => isNameVisibleAt(at.groups, name, at.range[0]) },
+            at.qualified
+          ),
+        }),
     ...(entry.reference === undefined ? {} : { reference: entry.reference }),
+  };
+}
+
+/** The description and the examples of the `///` comment `text`, its tag
+ * lines split off (`splitDocComment()`). */
+function docOf(
+  text: string | undefined
+): Pick<EpsilHover, 'description' | 'examples'> {
+  if (text === undefined) return {};
+  const { description, examples } = splitDocComment(text);
+  return {
+    ...(description === undefined
+      ? {}
+      : { description: paragraphsOf(description) }),
+    ...(examples.length === 0 ? {} : { examples }),
   };
 }
 

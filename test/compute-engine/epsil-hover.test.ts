@@ -56,6 +56,7 @@ describe('EPSIL HOVER: LIBRARY NAMES', () => {
       kind: 'library-function',
       detail: '(complex | quantity) -> number',
       description: ['Sine of an angle.'],
+      examples: ['sin(pi / 6)', 'sin(1)', 'N(sin(1))'],
       reference: 'https://epsil.dev/reference/trigonometry/#sin',
     });
   });

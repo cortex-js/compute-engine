@@ -71,6 +71,7 @@ import type {
   BroadcastExemption,
   OperandRole,
   TypeProvenanceEntry,
+  ParameterDocumentation,
 } from '../global-types.js';
 import { operandRoleSites, type BindingSiteSelector } from './binding-sites.js';
 
@@ -145,6 +146,7 @@ const OPERATOR_DEF_KEYS = new Set([
   'description',
   'keywords',
   'examples',
+  'parameters',
   'wikidata',
   'url',
 
@@ -438,6 +440,7 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
   /** The usage examples, each one line of Epsil source. A definition may
    * give a single string; it is stored as a one-element list. */
   examples?: string[];
+  parameters?: Readonly<Record<string, ParameterDocumentation>>;
   url?: string;
   wikidata?: string;
 
@@ -1383,6 +1386,7 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
     if (this.description) result.description = this.description;
     if (this.keywords) result.keywords = this.keywords;
     if (this.examples) result.examples = this.examples;
+    if (this.parameters) result.parameters = this.parameters;
     if (this.url) result.url = this.url;
     result.broadcastable = this.broadcastable;
     result.broadcastExemptions = this.broadcastExemptions;
@@ -2141,6 +2145,7 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
     if (def.examples !== undefined)
       this.examples =
         typeof def.examples === 'string' ? [def.examples] : [...def.examples];
+    this.parameters = def.parameters ?? this.parameters;
     this.collection = def.collection ?? this.collection;
     // An in-place update that does not mention `arithmetic` keeps it. A
     // redeclaration builds a new definition, so it carries `arithmetic` only

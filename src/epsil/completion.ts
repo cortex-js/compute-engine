@@ -47,7 +47,16 @@ import {
   isSubscript,
   isSuperscript,
 } from './characters.js';
-import { describeName } from './describe-name.js';
+import { callAt, isFunctionHeader } from './call-at.js';
+import { definitionSitesByOffset } from './definition-sites.js';
+import { definitionSourceExamples, describeName } from './describe-name.js';
+import { epsilExamples } from './example-spelling.js';
+import {
+  definitionDocs,
+  paragraphsOf,
+  splitDocComment,
+  type ParameterDoc,
+} from './doc-tags.js';
 import { tokenize } from './lexer.js';
 import {
   canonicalLibraryName,
@@ -124,6 +133,15 @@ export type EpsilCompletionItem = {
   /** The paragraphs of the description, for a library name or a name that
    * the engine defines: what the hover of the name shows. */
   description?: string[];
+  /** For a named argument (`count: `), the sample value of its parameter:
+   * one line of Epsil source that an editor may show as faint text in the
+   * empty argument (`EpsilSignatureParameter.sample`). */
+  sample?: string;
+  /** The examples of a library name or of a name that the engine defines,
+   * each one line of Epsil source in the Epsil spelling
+   * (`join([1, 2], [3, 4])`): the `examples` of its definition and the
+   * `@example` tags of its `///` comment. */
+  examples?: string[];
   /** Smaller first: 0 fix-its and the parameter names of a call
    * (`count: `), 1 likely values, 2 names of the source (or of the engine,
    * above the standard library) whose
@@ -294,6 +312,11 @@ type LibraryEntry = {
   detail?: string;
   documentation?: string;
   description?: string[];
+  examples?: string[];
+  /** The examples of a library name as its definition writes them, spelled
+   * when an item is made (`epsilExamples()`): the entries are cached per
+   * engine, and a binding of the engine made later can shadow a spelling. */
+  sourceExamples?: readonly string[];
   /** The type of a constant. */
   type?: Type;
   /** The signatures of a function: one, or the arms of an overload set. */
@@ -675,12 +698,7 @@ export function epsilCompletions(
             : { insertText: spelling }),
         ...(snippet === undefined ? {} : { snippet }),
         detail: member.detail,
-        ...(member.description === undefined
-          ? {}
-          : {
-              documentation: firstLine(member.description),
-              description: [member.description],
-            }),
+        ...descriptionItemFields(member.description),
         ...(fit === undefined ? {} : { fit }),
       });
     }
@@ -702,6 +720,57 @@ export function epsilCompletions(
       return { range, replaceEnd, items: finish(items, prefix) };
     }
   }
+
+  // In a dictionary literal written as an argument of a call whose parameter
+  // documents the keys of its options (`plot(s, {▮`): at a key, the keys not
+  // written yet, and no other name; in the value of a key whose type is a
+  // union of string literals, those strings first.
+  const option = optionKeysAt(context, tokens, start, end, source);
+  if (option?.position === 'key') {
+    const arrow = /^\s*->/.test(source.slice(end));
+    option.keys.forEach((key, i) => {
+      const spelling = escapeSymbol(key.name);
+      const field =
+        key.sample !== undefined && !SNIPPET_UNSAFE.test(key.sample)
+          ? `\${1:${key.sample}}`
+          : '${1}';
+      items.push({
+        label: key.name,
+        kind: 'variable',
+        rank: 2,
+        // In the order of the documentation.
+        tier: i,
+        ...(arrow
+          ? spelling === key.name
+            ? {}
+            : { insertText: spelling }
+          : {
+              insertText: `${spelling} -> `,
+              ...(SNIPPET_UNSAFE.test(spelling)
+                ? {}
+                : { snippet: `${spelling} -> ${field}\${0}` }),
+            }),
+        ...(key.type === undefined ? {} : { detail: key.type }),
+        ...(key.documentation === undefined
+          ? {}
+          : {
+              documentation: firstLine(key.documentation),
+              description: [key.documentation],
+            }),
+      });
+    });
+    return { range, replaceEnd, items: finish(items, prefix) };
+  }
+  if (option?.position === 'value')
+    option.values.forEach((value, i) =>
+      items.push({
+        label: value,
+        kind: 'value',
+        rank: 1,
+        tier: i,
+        ...(option.type === undefined ? {} : { detail: option.type }),
+      })
+    );
 
   // At a key of a record literal whose expected type is a record
   // (`const r: record{x: real} = {▮`), the fields not written yet, and no
@@ -740,7 +809,12 @@ export function epsilCompletions(
       ? namedArgumentsAt(context, path.nodes.length - 1)
       : undefined;
   if (named !== undefined) {
-    named.names.forEach(({ name, type }, i) =>
+    const docs = calleeParameterDocs(
+      context,
+      operator(path!.nodes[path!.nodes.length - 2])
+    );
+    named.names.forEach(({ name, type }, i) => {
+      const doc = docs.get(name);
       items.push({
         label: name,
         kind: 'variable',
@@ -749,8 +823,15 @@ export function epsilCompletions(
         tier: i,
         insertText: `${escapeSymbol(name)}: `,
         ...(type === undefined ? {} : { detail: type }),
-      })
-    );
+        ...(doc?.documentation === undefined
+          ? {}
+          : {
+              documentation: firstLine(doc.documentation),
+              description: [doc.documentation],
+            }),
+        ...(doc?.sample === undefined ? {} : { sample: doc.sample }),
+      });
+    });
     if (named.only) return { range, replaceEnd, items: finish(items, prefix) };
   }
 
@@ -899,6 +980,11 @@ export function epsilCompletions(
       ...(entry.description === undefined
         ? {}
         : { description: entry.description }),
+      ...(entry.sourceExamples !== undefined
+        ? { examples: epsilExamples(ce, entry.sourceExamples, context.visible) }
+        : entry.examples === undefined
+          ? {}
+          : { examples: entry.examples }),
     });
   }
 
@@ -1448,21 +1534,6 @@ function argumentCallee(before: readonly Token[]): string | undefined {
     return undefined;
   if (token.type === 'VERBATIM_SYMBOL') return token.value;
   return token.type === 'SYMBOL' ? token.text : undefined;
-}
-
-/** Whether the `(` at `paren` opens the parameters of `function name(`. As
- * in the parser, the name may be verbatim. */
-export function isFunctionHeader(
-  before: readonly Token[],
-  paren: number
-): boolean {
-  return (
-    paren >= 2 &&
-    (before[paren - 1].type === 'SYMBOL' ||
-      before[paren - 1].type === 'VERBATIM_SYMBOL') &&
-    before[paren - 2].type === 'SYMBOL' &&
-    before[paren - 2].text === 'function'
-  );
 }
 
 /** Whether the word `[start, end]` ends its line and is in the condition of
@@ -2960,6 +3031,114 @@ function namedCallee(
         broadcastable: isBroadcastable(ce, name),
         topic: true,
       };
+}
+
+/**
+ * The documentation of the parameters of the callee `head`, by parameter
+ * name: the `@param`, `@key` and `@sample` tags of the `///` comments of a
+ * `function` of the source (the first definition that documents a name
+ * wins), or the `parameters` of the definition of a function of the engine
+ * or of the library, with the tags of its `///` comment (`describeName()`).
+ * Empty for a variable of the source.
+ */
+function calleeParameterDocs(
+  context: Context,
+  head: string
+): Map<string, ParameterDoc> {
+  const { ce } = context;
+  const group = context.visible.get(head);
+  const result = new Map<string, ParameterDoc>();
+  if (group?.kind === 'function') {
+    if (context.ast === null) return result;
+    const sites = definitionSitesByOffset(context.ast);
+    for (const o of group.occurrences) {
+      if (o.role !== 'definition') continue;
+      const description = sites.get(o.start)?.description;
+      if (description === undefined) continue;
+      for (const [name, doc] of definitionDocs({ description }).parameters)
+        if (!result.has(name)) result.set(name, doc);
+    }
+    return result;
+  }
+  if (group !== undefined) return result;
+  const name =
+    ce.operatorInfo(head) !== undefined ? head : canonicalLibraryName(head);
+  const entry = name === undefined ? undefined : describeName(ce, name);
+  for (const [key, doc] of Object.entries(entry?.parameters ?? {}))
+    result.set(key, doc);
+  return result;
+}
+
+/**
+ * Where the word `[start, end]` is in a dictionary literal written as an
+ * argument of a call (`callAt()`), when the parameter of that argument
+ * documents keys (`calleeParameterDocs()`): at a key, the documented keys
+ * that the literal does not write yet (the word itself does not count); in
+ * the value of a documented key whose type is a union of string literals
+ * (`"red" | "blue"`), those strings. The parameter is the one of a named
+ * argument (`f(options: {▮`), or else the parameter at the position of the
+ * argument in the first signature of the callee that has it. A member call
+ * and a call after `|>` give `undefined`.
+ */
+function optionKeysAt(
+  context: Context,
+  tokens: readonly Token[],
+  start: number,
+  end: number,
+  source: string
+):
+  | {
+      position: 'key';
+      keys: {
+        name: string;
+        type?: string;
+        documentation?: string;
+        sample?: string;
+      }[];
+    }
+  | { position: 'value'; type?: string; values: string[] }
+  | undefined {
+  const call = callAt(tokens, start);
+  if (call?.dictionary === undefined || call.member) return undefined;
+  const before = tokens.filter((t) => t.end <= call.headStart);
+  const previous = before[before.length - 1];
+  if (previous?.type === 'OPERATOR' && previous.text === '|>') return undefined;
+  const docs = calleeParameterDocs(context, call.head);
+  if (docs.size === 0) return undefined;
+  let parameter = call.label;
+  if (parameter === undefined) {
+    const callee = namedCallee(context, call.head);
+    parameter = callee?.arms
+      .map((arm) => arm.params[call.index]?.name)
+      .find((name) => name !== undefined);
+  }
+  const keys = parameter === undefined ? undefined : docs.get(parameter)?.keys;
+  if (keys === undefined || keys.length === 0) return undefined;
+  const { dictionary } = call;
+  if (dictionary.position === 'key') {
+    const word = source.slice(start, end);
+    const written = new Set(dictionary.written.filter((k) => k !== word));
+    return {
+      position: 'key',
+      keys: keys.filter((k) => !written.has(k.name)),
+    };
+  }
+  const key = keys.find((k) => k.name === dictionary.key);
+  if (key?.type === undefined) return undefined;
+  const values = stringLiteralUnion(key.type);
+  return values === undefined
+    ? undefined
+    : { position: 'value', type: key.type, values };
+}
+
+/** The members of a type string that is a union of string literals
+ * (`"red" | "blue"`), as Epsil string literals; `undefined` for another
+ * type. */
+function stringLiteralUnion(type: string): string[] | undefined {
+  const members = type.split('|').map((m) => m.trim());
+  return members.every((m) => /^"(?:[^"\\]|\\.)*"$/.test(m))
+    ? members
+    : undefined;
 }
 
 /** A definition of a `function` of the source as a `CalleeArm`. */
@@ -5096,8 +5275,9 @@ function engineEntries(ce: ComputeEngine): LibraryEntry[] {
         : undefined;
       if (member !== undefined) {
         entry.signature = member.signature;
-        entry.description =
-          member.description === undefined ? undefined : [member.description];
+        const docs = descriptionItemFields(member.description);
+        entry.description = docs.description;
+        entry.examples = docs.examples;
       }
       const documentation = entry.description?.[0]?.split('\n')[0]?.trim();
       entries.push({
@@ -5110,6 +5290,7 @@ function engineEntries(ce: ComputeEngine): LibraryEntry[] {
         ...(entry.description === undefined
           ? {}
           : { description: entry.description }),
+        ...(entry.examples === undefined ? {} : { examples: entry.examples }),
         ...(type === undefined ? {} : { type }),
         ...(arms === undefined ? {} : { arms }),
         ...(union ? { union } : {}),
@@ -5194,6 +5375,25 @@ export function firstLine(text: string): string {
   return text.split('\n')[0].trim();
 }
 
+/** The `documentation`, `description` and `examples` of an item for the
+ * `///` comment `text` of a declaration of the source or of a protocol
+ * member, its tag lines split off (`splitDocComment()`). */
+export function descriptionItemFields(
+  text: string | undefined
+): Pick<EpsilCompletionItem, 'documentation' | 'description' | 'examples'> {
+  if (text === undefined) return {};
+  const { description, examples } = splitDocComment(text);
+  return {
+    ...(description === undefined
+      ? {}
+      : {
+          documentation: firstLine(description),
+          description: paragraphsOf(description),
+        }),
+    ...(examples.length === 0 ? {} : { examples }),
+  };
+}
+
 /**
  * The documentation of a `DeclareProtocol` statement: its fourth operand,
  * `["Dictionary", description: …, members: ["Dictionary", member: …]]`, the
@@ -5246,6 +5446,9 @@ function libraryEntries(ce: ComputeEngine): LibraryEntry[] {
       ...(entry.description === undefined
         ? {}
         : { description: entry.description }),
+      ...(entry.examples === undefined
+        ? {}
+        : { sourceExamples: definitionSourceExamples(ce, name) }),
       ...(type === undefined ? {} : { type }),
       ...(arms === undefined ? {} : { arms }),
       ...(union ? { union } : {}),

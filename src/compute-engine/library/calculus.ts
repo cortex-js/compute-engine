@@ -10519,8 +10519,8 @@ volumes
         'asymptotic expansion at ±∞), including Laurent, Puiseux ' +
         '(fractional-power), and log-aware expansions at poles and branch ' +
         'points. Only essential singularities, irrational exponents, and ' +
-        'nested/reciprocal logarithms are left unevaluated. ' +
-        'Example: Series(\\sin x, x) → x - x^3/6 + x^5/120 + O(x^7)',
+        'nested/reciprocal logarithms are left unevaluated.',
+      examples: ['Series(Sin(x), x)'],
       broadcastable: false,
       lazy: true,
       // The expansion variable is this operator's BOUND variable: operand 1.

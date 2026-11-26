@@ -58,6 +58,8 @@ export type {
   BoxedBaseDefinition,
   BoxedValueDefinition,
   OperatorDefinitionFlags,
+  ParameterDocumentation,
+  OptionKeyDocumentation,
   BroadcastExemption,
   OperandRole,
   BoxedOperatorDefinition,

@@ -2,6 +2,8 @@ import type { ComputeEngine } from '../compute-engine.js';
 import type { BoxedDefinition } from '../compute-engine/global-types.js';
 import { STANDARD_LIBRARIES } from '../compute-engine/library/library.js';
 
+import { definitionDocs, type ParameterDoc } from './doc-tags.js';
+import { epsilExamples } from './example-spelling.js';
 import { canonicalLibraryName, epsilNameOf } from './library-names.js';
 
 //
@@ -24,7 +26,18 @@ export interface DocEntry {
   signature?: string;
   type?: string;
   value?: string;
+  /** The paragraphs of the description. The tag lines of a `///` comment
+   * (`@param`, `@key`, `@sample`, `@default`, `@example`) are not in it:
+   * they are `parameters` and `examples`. */
   description?: string[];
+  /** The documentation of the parameters of a function, keyed by parameter
+   * name: the `parameters` field of its definition and the tags of its
+   * `///` comment. */
+  parameters?: Record<string, ParameterDoc>;
+  /** The examples, each one line of Epsil source in the Epsil spelling
+   * (`join([1, 2], [3, 4])`, which the definition writes
+   * `Join([1, 2], [3, 4])`). */
+  examples?: string[];
   keywords?: string[];
   url?: string;
   wikidata?: string;
@@ -114,7 +127,47 @@ export function describeName(
   // a shared engine) is described as what it is, with neither.
   const isLibraryBinding =
     engine.contextStack[0]?.lexicalScope.bindings.get(name) === def;
-  return describeDefinition(name, def, isLibraryBinding);
+  return describeDefinition(engine, name, def, isLibraryBinding);
+}
+
+/**
+ * The examples of the definition of `name` that `describeName()` describes
+ * (the visible one), or with `library` of the standard library's definition
+ * (`describeLibraryName()`), as the definition and its `///` comment write
+ * them. Empty when there is no definition.
+ */
+export function definitionSourceExamples(
+  engine: ComputeEngine,
+  name: string,
+  library = false
+): readonly string[] {
+  const system = engine.contextStack[0]?.lexicalScope.bindings.get(name);
+  const def = library ? system : engine.lookupDefinition(name);
+  if (def === undefined) {
+    const canonical = library ? undefined : canonicalLibraryName(name);
+    return canonical === undefined
+      ? []
+      : definitionSourceExamples(engine, canonical);
+  }
+  const base = 'operator' in def ? def.operator : def.value;
+  return definitionDocs(base, def === system).examples;
+}
+
+/**
+ * The examples of `definitionSourceExamples()` in the Epsil spelling
+ * (`epsilExamples()`). A spelling that the source declares at the place of
+ * the editor (`sourceNames`) is not written.
+ */
+export function definitionExamples(
+  engine: ComputeEngine,
+  name: string,
+  sourceNames?: { has(name: string): boolean },
+  library = false
+): string[] {
+  const examples = definitionSourceExamples(engine, name, library);
+  return examples.length === 0
+    ? []
+    : epsilExamples(engine, examples, sourceNames);
 }
 
 /**
@@ -129,12 +182,15 @@ export function describeLibraryName(
   name: string
 ): DocEntry | undefined {
   const def = engine.contextStack[0]?.lexicalScope.bindings.get(name);
-  return def === undefined ? undefined : describeDefinition(name, def, true);
+  return def === undefined
+    ? undefined
+    : describeDefinition(engine, name, def, true);
 }
 
 /** The documentation entry of the definition `def` of `name`.
  * `isLibraryBinding` says that it is the standard library's definition. */
 function describeDefinition(
+  engine: ComputeEngine,
   name: string,
   def: BoxedDefinition,
   isLibraryBinding: boolean
@@ -153,10 +209,19 @@ function describeDefinition(
   }
 
   const base = 'operator' in def ? def.operator : def.value;
-  if (base.description !== undefined)
-    entry.description = Array.isArray(base.description)
-      ? base.description
-      : [base.description];
+  const docs = definitionDocs(
+    {
+      description: base.description,
+      examples: base.examples,
+      parameters: 'operator' in def ? def.operator.parameters : undefined,
+    },
+    isLibraryBinding
+  );
+  if (docs.description !== undefined) entry.description = docs.description;
+  if (docs.parameters.size > 0)
+    entry.parameters = Object.fromEntries(docs.parameters);
+  if (docs.examples.length > 0)
+    entry.examples = epsilExamples(engine, docs.examples);
   if (base.keywords && base.keywords.length > 0) entry.keywords = base.keywords;
   if (base.url) entry.url = base.url;
   if (base.wikidata) entry.wikidata = base.wikidata;

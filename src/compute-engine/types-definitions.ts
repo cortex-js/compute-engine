@@ -837,6 +837,44 @@ export type OperatorDerivativeHandler = (
 export type OperatorDerivative =
   ReadonlyArray<ExpressionInput | Expression> | OperatorDerivativeHandler;
 
+/**
+ * The documentation of one parameter of an operator
+ * (`OperatorDefinition.parameters`): a description in Markdown, a sample
+ * value, and for a parameter that takes a dictionary of options, the
+ * documentation of each key. A string is the description alone.
+ *
+ * A sample is one line of Epsil source in the Epsil spelling (`[1, 2, 3]`,
+ * `x => x^2`, `"crimson"`), of the type of its parameter. An editor shows
+ * it as faint text in an empty argument; it is not part of the
+ * description.
+ *
+ * @category Definitions
+ */
+export type ParameterDocumentation =
+  | string
+  | {
+      description?: string;
+      sample?: string;
+      keys?: Readonly<Record<string, OptionKeyDocumentation>>;
+    };
+
+/**
+ * The documentation of one key of a parameter that takes a dictionary of
+ * options (`ParameterDocumentation.keys`). A string is the description
+ * alone. `type` is a type string (`tuple<real, real>`); `sample` and
+ * `default` are Epsil source.
+ *
+ * @category Definitions
+ */
+export type OptionKeyDocumentation =
+  | string
+  | {
+      type?: string;
+      description?: string;
+      sample?: string;
+      default?: string;
+    };
+
 export type OperatorDefinition = Partial<BaseDefinition> &
   Partial<OperatorDefinitionFlags> & {
     /**
@@ -888,6 +926,25 @@ export type OperatorDefinition = Partial<BaseDefinition> &
      *
      */
     signature?: Type | TypeString | BoxedType;
+
+    /**
+     * The documentation of the parameters, keyed by the parameter names of
+     * the `signature`, so that the arms of an overload set share it. A
+     * string is the description of the parameter alone. The editor
+     * services show it in the signature help and in the completion of a
+     * named argument (`epsilSignatureHelp()`, `epsilCompletions()`).
+     *
+     * ```js
+     * parameters: {
+     *   count: { description: 'The number of elements to keep.', sample: '2' },
+     *   options: {
+     *     description: 'The options of the plot.',
+     *     keys: { x: { type: 'tuple<real, real>', description: 'The x range.', sample: '(-5, 5)' } },
+     *   },
+     * }
+     * ```
+     */
+    parameters?: Readonly<Record<string, ParameterDocumentation>>;
 
     /**
      * If `true`, the `signature` is a starting point to be refined, not a
@@ -3419,6 +3476,10 @@ export type LambdaDefinition = {
  */
 export interface BoxedOperatorDefinition
   extends BoxedBaseDefinition, OperatorDefinitionFlags {
+  /** The documentation of the parameters, keyed by parameter name
+   * (`OperatorDefinition.parameters`). */
+  parameters?: Readonly<Record<string, ParameterDocumentation>>;
+
   /** `true` when the operator creates a lexical scope: it was declared
    * `scoped: true`, or it is a binder, whose `operands` handler gives a
    * `bound` or a `clause` role. */

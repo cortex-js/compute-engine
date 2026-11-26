@@ -468,6 +468,26 @@ interface PureEngineViewMirror {
     | undefined;
 }
 
+/** Mirror of `ParameterDocumentation` (types-definitions.ts). */
+type ParameterDocumentation =
+  | string
+  | {
+      description?: string;
+      sample?: string;
+      keys?: Readonly<
+        Record<
+          string,
+          | string
+          | {
+              type?: string;
+              description?: string;
+              sample?: string;
+              default?: string;
+            }
+        >
+      >;
+    };
+
 /** Mirror of the exported `BoxedOperatorDefinition` (types-definitions.ts).
  * A field is declared in four places that must change together: the input
  * `OperatorDefinition` and the runtime `BoxedOperatorDefinition` in
@@ -475,6 +495,8 @@ interface PureEngineViewMirror {
  * `boxed-expression/boxed-operator-definition.ts`. */
 interface BoxedOperatorDefinition
   extends BoxedBaseDefinition, OperatorDefinitionFlags {
+  /** The documentation of the parameters, keyed by parameter name. */
+  parameters?: Readonly<Record<string, ParameterDocumentation>>;
   complexity: number;
   inferredSignature: boolean;
   /** History of writes to this definition's signature — see the mirror note
