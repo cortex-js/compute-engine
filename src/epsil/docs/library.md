@@ -56,19 +56,19 @@ The [Core reference](/epsil/reference/core/) has the full description and the ex
 | `arbitraryConstant` | `ArbitraryConstant` | `(integer) -> number` | ArbitraryConstant(k): an arbitrary number, the k-th of a result: a |
 | `arbitraryInteger` | `ArbitraryInteger` | `(integer) -> integer` | ArbitraryInteger(k): an arbitrary integer, the k-th of a result: the |
 | `arc` | `Arc` | `(any+) -> number` | Arc / wide-hat accent measure (`\widehat{ABC}`) — opaque typed head; not evaluated. |
-| — | `AssertPresent` | `(any) -> unknown` | Assert that a value is present: return it unchanged, or an `expected-present` error when it is ABSENT (`Missing`, `NaN`, or a point whose coordinates are all `NaN`). |
+| — | `AssertPresent` | `(any) -> unknown` | Assert that a value is present: return it unchanged, or an `expected-present` error when it is ABSENT (`missing`, `NaN`, or a point whose coordinates are all `NaN`). |
 | — | `Assign` | `(expression \| symbol, any) scope -> any` | Assign a value to a symbol or define a sequence. |
 | `assume` | `Assume` | `(any) scope -> string` | Record an assumption about a symbol. |
-| `baseForm` | `BaseForm` | `(T, (number \| string)?) -> T where T: number` | `BaseForm(expr, base=10)` |
+| `baseForm` | `BaseForm` | `(T, (number \| string)?) -> T where T: number` | `baseForm(expr, base=10)` |
 | — | `Block` | `(unknown*) -> unknown` | Evaluate a sequence of expressions in a local scope, **sequentially**. |
 | — | `BuiltinFunction` | `(string \| symbol) -> symbol` | Return a built-in function symbol by name. |
 | `canonicalForm` | `CanonicalForm` | `(any, symbol*) -> any` | Return the canonical form of an expression |
-| `caseFold` | `CaseFold` | `(character \| string) -> string` | CaseFold(s): a case-folded form of `s`, for case-insensitive comparison — `CaseFold(a) == CaseFold(b)` tests equality ignoring case. |
+| `caseFold` | `CaseFold` | `(character \| string) -> string` | CaseFold(s): a case-folded form of `s`, for case-insensitive comparison — `caseFold(a) == caseFold(b)` tests equality ignoring case. |
 | `characterFrom` | `CharacterFrom` | `(character \| string) -> character` | CharacterFrom(s): the character `s` denotes. |
 | `characters` | `Characters` | `(character \| string) -> list<character>` | Characters(s): split a string into a list of user-perceived characters (grapheme clusters). |
-| — | `Coalesce` | `(any+) -> unknown` | Return the first operand that is not ABSENT (`Missing`, `NaN`, or a point whose coordinates are all `NaN`), evaluated left-to-right. |
+| — | `Coalesce` | `(any+) -> unknown` | Return the first operand that is not ABSENT (`missing`, `NaN`, or a point whose coordinates are all `NaN`), evaluated left-to-right. |
 | — | `Colon` | `(any, any) -> expression` | Type annotation (`a : b`) — opaque typed head. |
-| `composition` | `Composition` | `(function*) -> function` | The composition of functions, applied right to left: `Composition(f, g, h)(x)` is `f(g(h(x)))` |
+| `composition` | `Composition` | `(function*) -> function` | The composition of functions, applied right to left: `composition(f, g, h)(x)` is `f(g(h(x)))` |
 | `conforms` | `Conforms` | `(subject: any, protocols: string+) -> boolean` | True iff the subject conforms to EVERY named protocol. |
 | — | `Declare` | `(symbol, type: (string \| symbol)?, value: any?, attributes: dictionary<any>?) scope -> any` | Declare a symbol in the current scope, optionally assigning a type and an initial value. |
 | — | `DeclareConformance` | `(target: string \| symbol, protocols: any, whereClauseOrImplementation: any?, implementation: dictionary<any>?) scope -> nothing` | Declare that a type CONFORMS to one or more protocols — the lowering of the Epsil `type string is Hashable & Comparable` statement. |
@@ -93,10 +93,10 @@ The [Core reference](/epsil/reference/core/) has the full description and the ex
 | `identity` | `Identity` | `(T) -> T where T` | Return the argument unchanged |
 | — | `IndexedSequence` | `(any, symbol, any, any?) -> expression` | Indexed sequence `\{a_n\}_{n=1}^{\infty}` — inert head `IndexedSequence(term, index, lower, upper?)`; not evaluated. |
 | `input` | `Input` | `(prompt: string?) console -> nothing \| string` | Read one line of text from the host: the terminal in a command-line host, the `prompt()` dialog in a browser. |
-| `integerString` | `IntegerString` | `(integer, integer?, integer?) -> string` | `IntegerString(n, base=10, length)` return a string representation of the integer `n` in base `base`. |
+| `integerString` | `IntegerString` | `(integer, integer?, integer?) -> string` | `integerString(n, base=10, length)` return a string representation of the integer `n` in base `base`. |
 | — | `InvisibleOperator` | `function` | Implicit operator used for juxtapositions such as function application or multiplication. |
-| `isError` | `IsError` | `(any) -> boolean` | True if the expression is an `Error` value, or a frozen expression embedding one (`"a" + 1`). |
-| `isMissing` | `IsMissing` | `(any) -> boolean` | True for `Missing`, `NaN`, or a point whose coordinates are all `NaN`, regardless of provenance. |
+| `isError` | `IsError` | `(any) -> boolean` | True if the expression is an `error` value, or a frozen expression embedding one (`"a" + 1`). |
+| `isMissing` | `IsMissing` | `(any) -> boolean` | True for `missing`, `NaN`, or a point whose coordinates are all `NaN`, regardless of provenance. |
 | — | `Latex` | `(any+) -> string` | Serialize an expression to LaTeX |
 | — | `LatexString` | `(string) -> string` | Value preserving type conversion/tag indicating the string is a LaTeX string |
 | — | `MatchesType` | `(subject: any, type: string \| type) -> boolean` | True iff the first operand, EVALUATED, is a value of the given type — the engine form of the Epsil `x is T` test and of `match` type patterns, which both lower here. |
@@ -122,7 +122,7 @@ The [Core reference](/epsil/reference/core/) has the full description and the ex
 | `print` | `Print` | `(any*) console -> nothing` | Print the operands to the host console, separated by spaces and followed by a newline. |
 | `program` | `Program` | `(unknown*) -> unknown` | Evaluate a program in the caller scope, continuing after statement errors. |
 | — | `ProtocolDefault` | constant `unknown` | Stands for the default value of a parameter in a call of a protocol member: the call receives the default that the selected requirement declares for that parameter. |
-| — | `ProtocolMember` | `(protocol: string, member: string, arguments: any*) -> unknown` | Invoke a protocol member on a value — the lowering of a QUALIFIED protocol call (`Comparable.compare(x, y)` in Epsil, whose parse, a `MemberCall` on the protocol name, canonicalizes to `Apply(Field(Comparable, "compare"), x, y)`). |
+| — | `ProtocolMember` | `(protocol: string, member: string, arguments: any*) -> unknown` | Invoke a protocol member on a value — the lowering of a QUALIFIED protocol call (`Comparable.compare(x, y)` in Epsil, whose parse, a `MemberCall` on the protocol name, canonicalizes to `apply(field(Comparable, "compare"), x, y)`). |
 | — | `ProtocolProperty` | `(protocol: string, property: string, receiver: any, value: any?) -> unknown` | Read (or write) a protocol PROPERTY through a NAMED protocol — the lowering of the qualified field form `person.(Nameable.name)` (protocols design P6, amending the D16 field grammar). |
 | `quadrilateral` | `Quadrilateral` | `(any+) -> expression` | Quadrilateral mark (`\square ABCD`) — opaque typed head; not evaluated. |
 | `random` | `Random` | `((collection<any> \| set<real>)?) random -> any` | Random(): non-deterministic real in [0, 1) |
@@ -151,7 +151,7 @@ The [Core reference](/epsil/reference/core/) has the full description and the ex
 | `symbol` | `Symbol` | `function` | Construct a new symbol with a name formed by concatenating the arguments |
 | `tail` | `Tail` | `(any) -> collection` | Return the tail of an expression, the operands of the expression |
 | — | `Text` | `(any*) -> string` | A sequence of strings, annotated expressions and other Text expressions |
-| `timing` | `Timing` | `(value, repeat: integer?) -> tuple<number, value>` | `Timing(expr)` evaluates `expr` and returns a pair: the time the evaluation took, in microseconds, then the value; read them as `Timing(expr)[1]` and `Timing(expr)[2]`. |
+| `timing` | `Timing` | `(value, repeat: integer?) -> tuple<number, value>` | `timing(expr)` evaluates `expr` and returns a pair: the time the evaluation took, in microseconds, then the value; read them as `timing(expr)[1]` and `timing(expr)[2]`. |
 | `to` | `To` | `(any, any) -> nothing` | Action arrow / mapping (`a \to b`) — opaque typed head. |
 | `toLowerCase` | `ToLowerCase` | `(character \| string) -> string` | ToLowerCase(s): the string `s` mapped to lower case using the Unicode default (locale-independent) mappings. |
 | `toUpperCase` | `ToUpperCase` | `(character \| string) -> string` | ToUpperCase(s): the string `s` mapped to upper case using the Unicode default (locale-independent) mappings. |
@@ -159,7 +159,7 @@ The [Core reference](/epsil/reference/core/) has the full description and the ex
 | `trim` | `Trim` | `(character \| string, chars: (character \| collection<character \| string> \| string)?) -> string` | Trim(s): remove leading and trailing whitespace (the Unicode White_Space characters). |
 | `trimEnd` | `TrimEnd` | `(character \| string, chars: (character \| collection<character \| string> \| string)?) -> string` | TrimEnd(s): remove trailing whitespace (the Unicode White_Space characters). |
 | `trimStart` | `TrimStart` | `(character \| string, chars: (character \| collection<character \| string> \| string)?) -> string` | TrimStart(s): remove leading whitespace (the Unicode White_Space characters). |
-| `type` | `Type` | `(any) -> type` | The STATIC type of an expression, as a type value: `Type(3)` is `TypeFrom("integer")`. |
+| `type` | `Type` | `(any) -> type` | The STATIC type of an expression, as a type value: `type(3)` is `TypeFrom("integer")`. |
 | `typeFrom` | `TypeFrom` | `(text: string) -> type` | A type expression as a first-class value, constructed from its text: `TypeFrom("list<integer>")`. |
 | — | `Typed` | `(any, string \| symbol) -> unknown` | Ascribe a type to an expression. |
 | — | `Unevaluated` | `(any) -> unknown` | Prevent an expression from being evaluated |
@@ -183,8 +183,8 @@ The [Control structures reference](/epsil/reference/control-structures/) has the
 | — | `Comprehension` | `(body: expression, iterators: expression+) -> list` | Value-producing comprehension: evaluate `body` in nested iteration over one or more `Element` clauses and collect the results into a list. |
 | — | `Condition` | `(expression, symbol?) -> boolean` | Test whether a value satisfies one or more conditions. |
 | — | `Continue` | `() -> nothing` | Skip to the next iteration of the enclosing loop. |
-| `fixedPoint` | `FixedPoint` | `(function, initial: any, maxIterations: integer?) -> unknown` | Apply a function repeatedly, starting from an initial value, until two successive values are the same: `FixedPoint(f, x)` is the first of `f(x)`, `f(f(x))`, … that `f` maps to itself. |
-| — | `If` | `(expression, expression, expression?) -> any` | `If(c, e1, e2)` evaluates to `e1` when `c` is `True` and to `e2` otherwise; without `e2` it is the absent value of the domain of `e1` when `c` is `False`: `NaN` for a number, `Missing` otherwise, as for a restriction `e1\{c\}`, which… |
+| `fixedPoint` | `FixedPoint` | `(function, initial: any, maxIterations: integer?) -> unknown` | Apply a function repeatedly, starting from an initial value, until two successive values are the same: `fixedPoint(f, x)` is the first of `f(x)`, `f(f(x))`, … that `f` maps to itself. |
+| — | `If` | `(expression, expression, expression?) -> any` | `If(c, e1, e2)` evaluates to `e1` when `c` is `True` and to `e2` otherwise; without `e2` it is the absent value of the domain of `e1` when `c` is `False`: `NaN` for a number, `missing` otherwise, as for a restriction `e1\{c\}`, which… |
 | — | `Loop` | `(body: expression, iterators: expression*) -> any` | Imperative loop, evaluated **for effect**. |
 | — | `Match` | `(expression, expression+) -> unknown` | Structural pattern match. |
 | — | `MatchCase` | `(expression, expression, expression?) -> nothing` | A case of a `Match`: `MatchCase(pattern, body)` or `MatchCase(pattern, guard, body)`. |
@@ -192,7 +192,7 @@ The [Control structures reference](/epsil/reference/control-structures/) has the
 | `parallelDomain` | `ParallelDomain` | `(collection: any) random -> any` | The domain of the passes of a parallel loop (engine-internal). |
 | — | `ParallelLoop` | `(body: expression, iterators: expression+) random -> any` | Parallel loop, evaluated **for effect**: `ParallelLoop(body, Element(x, coll))` evaluates `body` once for each element of `coll` (a pass), and the passes can run in any order. |
 | — | `Pin` | `(expression) -> nothing` | Inside a `Match` pattern, `Pin(expr)` matches the value of `expr` (evaluated at match time) rather than its structure. |
-| — | `Which` | `(expression+) -> unknown` | `Which(c1, e1, c2, e2, …)` evaluates to the value of the first `e` whose condition `c` is `True`, and to `Missing` when no condition is `True`. |
+| — | `Which` | `(expression+) -> unknown` | `Which(c1, e1, c2, e2, …)` evaluates to the value of the first `e` whose condition `c` is `True`, and to `missing` when no condition is `True`. |
 
 ## Logic
 
@@ -248,7 +248,7 @@ The [Collections reference](/epsil/reference/collections/) has the full descript
 | `complexNumbers` | `ComplexNumbers` | constant `set<complex>` | The set of all finite complex numbers. |
 | `contains` | `Contains` | `(xs: collection<any>, element: any) -> boolean` | Return True if the collection contains the given element (structural identity, like `===`), False otherwise. |
 | `containsSequence` | `ContainsSequence` | `(xs: indexed_collection<T>, needle: indexed_collection<T>) -> boolean where T` | Return `True` when `needle` occurs as a contiguous subsequence of the indexed collection. |
-| `count` | `Count` | `(xs: collection<any>, element: any?, levels: any?) -> infinity \| integer` | `Count(xs)`: the number of elements in the collection. |
+| `count` | `Count` | `(xs: collection<any>, element: any?, levels: any?) -> infinity \| integer` | `count(xs)`: the number of elements in the collection. |
 | `countIf` | `CountIf` | `(xs: collection<T>, predicate: (T) any -> boolean) -> integer where T` | Return the number of elements in the collection satisfying the predicate. |
 | `cycle` | `Cycle` | `(list<any>) -> list` | Produce an infinite sequence by cycling through the elements of a finite collection. |
 | `dedup` | `Dedup` | `(collection<any>) -> collection` | Return the collection with consecutive duplicate elements collapsed to a single element. |
@@ -321,7 +321,7 @@ The [Collections reference](/epsil/reference/collections/) has the full descript
 | `quotientRing` | `QuotientRing` | `(set<any>, any) -> set` | The quotient of a ring by the ideal generated by the second argument. |
 | `randomShuffle` | `RandomShuffle` | `((T) random -> T where T: string) & ((indexed_collection<T>) random -> list<T> where T: any)` | Randomize the order of the elements in the collection. |
 | — | `Range` | `(number, number?, step: number?) -> list<number>` | A sequence of numbers from a start to an end value with an optional step. |
-| `rangeOf` | `RangeOf` | `(xs: indexed_collection<T>, needle: indexed_collection<T>, from: integer?) -> missing \| range where T` | Return the 1-based inclusive index span of the first occurrence of `needle` as a contiguous subsequence of the indexed collection, or `Missing` when it does not occur. |
+| `rangeOf` | `RangeOf` | `(xs: indexed_collection<T>, needle: indexed_collection<T>, from: integer?) -> missing \| range where T` | Return the 1-based inclusive index span of the first occurrence of `needle` as a contiguous subsequence of the indexed collection, or `missing` when it does not occur. |
 | `rationalNumbers` | `RationalNumbers` | constant `set<rational>` | The set of all finite rational numbers. |
 | `realNumbers` | `RealNumbers` | constant `set<real>` | The set of all finite real numbers. |
 | `reduce` | `Reduce` | `(xs: collection<T>, reducer: (unknown, T) any -> unknown, initial: value?) -> value where T` | Reduce (fold) a collection to a single value by repeatedly applying a binary function, with an optional initial value. |
@@ -346,7 +346,7 @@ The [Collections reference](/epsil/reference/collections/) has the full descript
 | `superset` | `Superset` | `(any, any*) -> boolean` | Test whether the first collection is a strict superset of the second. |
 | `supersetEqual` | `SupersetEqual` | `(any, any*) -> boolean` | Test whether the first collection is a superset (possibly equal) of the second. |
 | `symmetricDifference` | `SymmetricDifference` | `(set<any>, set<any>) -> set` | Return the symmetric difference of two sets (elements in either set but not both). |
-| `table` | `Table` | `(function, integer+) -> collection` | Return the list of the values of a function at each index of the given dimensions, as `Tabulate` (the preferred name) does. |
+| `table` | `Table` | `(function, integer+) -> collection` | Return the list of the values of a function at each index of the given dimensions, as `tabulate` (the preferred name) does. |
 | `tabulate` | `Tabulate` | `(generator: function, integer+) -> list` | Create a collection by applying a function to each index in the specified dimensions. |
 | `take` | `Take` | `((xs: T, count: number) -> T where T: string) & ((xs: indexed_collection<T>, count: number) -> list<T> where T: any)` | Return the first `n` elements of an indexed collection. |
 | `takeWhile` | `TakeWhile` | `(xs: indexed_collection<T>, predicate: (T) any -> boolean) -> indexed_collection where T` | Return the leading elements of the collection for which the predicate returns True, stopping at the first element that does not. |
@@ -448,7 +448,7 @@ The [Arithmetic reference](/epsil/reference/arithmetic/) has the full descriptio
 | `airyAiPrime` | `AiryAiPrime` | `(complex \| infinity) -> number` | Derivative of the Airy function of the first kind |
 | `airyBi` | `AiryBi` | `(complex \| infinity) -> number` | Airy function of the second kind |
 | `airyBiPrime` | `AiryBiPrime` | `(complex \| infinity) -> number` | Derivative of the Airy function of the second kind |
-| `arg` | `Arg` | `(complex \| infinity) -> number` | `Arg` is an alias for `Argument`, which is the preferred name. |
+| `arg` | `Arg` | `(complex \| infinity) -> number` | `arg` is an alias for `argument`, which is the preferred name. |
 | `argument` | `Argument` | `(complex \| infinity) -> number` | Complex argument (phase angle) of a number, in the engine's angular unit. |
 | `besselI` | `BesselI` | `(order: complex, complex \| infinity) -> number` | Modified Bessel function of the first kind |
 | `besselJ` | `BesselJ` | `(order: complex, complex \| infinity) -> number` | Bessel function of the first kind |
@@ -489,16 +489,16 @@ The [Arithmetic reference](/epsil/reference/arithmetic/) has the full descriptio
 | `harmonicNumber` | `HarmonicNumber` | `(complex \| infinity, (complex \| infinity)?) -> number` | Harmonic number H_n = Σ_&#123;k=1&#125;^n 1/k, exact at a non-negative integer and continued by ψ(n+1) + γ; with a second argument r, the generalized H_n^(r) = Σ_&#123;k=1&#125;^n 1/k^r = ζ(r) − ζ(r, n+1). |
 | `heaviside` | `Heaviside` | `(real \| signed_infinity) -> rational<0..1>` | Heaviside step function. |
 | `hurwitzZeta` | `HurwitzZeta` | `(complex \| infinity, complex \| infinity, integer?) -> number` | Hurwitz zeta function ζ(s,a) = Σ_&#123;n=0&#125;^∞ (n+a)^&#123;-s&#125; |
-| `im` | `Im` | `(complex \| infinity) -> number` | `Im` is an alias for `Imaginary`, which is the preferred name. |
+| `im` | `Im` | `(complex \| infinity) -> number` | `im` is an alias for `imaginary`, which is the preferred name. |
 | `imaginary` | `Imaginary` | `(complex \| infinity) -> number` | Imaginary part of a complex number. |
 | `imaginaryUnit` | `ImaginaryUnit` | constant `imaginary` = `i` | The imaginary unit, whose square is −1. |
 | — | `Indeterminate` | constant `number` = `NaN` | An input spelling of NaN. |
 | `infimum` | `Infimum` | `(value*) -> number` | Like Min, but defined for open sets. |
 | `interpret` | `Interpret` | `(any) -> any` | Interpret a notational expression as its mathematical meaning. |
-| `isComposite` | `IsComposite` | `(number) -> boolean` | `IsComposite(n)` returns `True` if `n` is a composite number |
-| `isEven` | `IsEven` | `(number) -> boolean` | `IsEven(n)` returns `True` if `n` is an even number |
-| `isOdd` | `IsOdd` | `(number) -> boolean` | `IsOdd(n)` returns `True` if `n` is an odd number |
-| `isPrime` | `IsPrime` | `(number) -> boolean` | `IsPrime(n)` returns `True` if `n` is a prime number |
+| `isComposite` | `IsComposite` | `(number) -> boolean` | `isComposite(n)` returns `True` if `n` is a composite number |
+| `isEven` | `IsEven` | `(number) -> boolean` | `isEven(n)` returns `True` if `n` is an even number |
+| `isOdd` | `IsOdd` | `(number) -> boolean` | `isOdd(n)` returns `True` if `n` is an odd number |
+| `isPrime` | `IsPrime` | `(number) -> boolean` | `isPrime(n)` returns `True` if `n` is a prime number |
 | `lcm` | `LCM` | `(any*) -> number` | Least Common Multiple |
 | `lambertW` | `LambertW` | `(z: complex \| infinity, branch: integer?) -> number` | Lambert W function (product logarithm) |
 | `lb` | `Lb` | `(number) -> number` | Base-2 Logarithm |
@@ -525,10 +525,10 @@ The [Arithmetic reference](/epsil/reference/arithmetic/) has the full descriptio
 | — | `Power` | `(complex \| infinity, complex \| signed_infinity) -> number` | Exponentiation: raise a base to a power. |
 | — | `PreDecrement` | `(number) -> number` | Decrement a number by one. |
 | — | `PreIncrement` | `(number) -> number` | Increment a number by one. |
-| `product` | `Product` | `(any, tuple*) -> number` | `Product(f, a, b)` computes the product of `f` from `a` to `b`. |
+| `product` | `Product` | `(any, tuple*) -> number` | `product(f, a, b)` computes the product of `f` from `a` to `b`. |
 | `rational` | `Rational` | `((integer, integer) -> rational) \| ((real) -> rational)` | Construct a rational number from a numerator and denominator. |
 | `rationalize` | `Rationalize` | `(real, real<0..>?) -> rational` | Approximate a real number by a rational. |
-| `re` | `Re` | `(complex \| infinity) -> number` | `Re` is an alias for `Real`, which is the preferred name. |
+| `re` | `Re` | `(complex \| infinity) -> number` | `re` is an alias for `real`, which is the preferred name. |
 | `real` | `Real` | `(complex \| infinity) -> number` | Real part of a complex number. |
 | `remainder` | `Remainder` | `(T, T) -> T where T: number` | IEEE remainder: the signed remainder after dividing x by y, with the quotient rounded to the nearest integer (ties round toward +Infinity, matching JavaScript `Math.round`) |
 | `root` | `Root` | `(complex \| infinity, complex \| infinity) -> number` | n-th root of a value. |
@@ -538,7 +538,7 @@ The [Arithmetic reference](/epsil/reference/arithmetic/) has the full descriptio
 | `sqrt` | `Sqrt` | `(complex \| infinity) -> complex \| infinity` | Square Root |
 | — | `Square` | `(number) -> number` | Square of a number: x^2. |
 | — | `Subtract` | `(number+) -> number` | Difference between two or more values. |
-| `sum` | `Sum` | `(any, tuple*) -> number` | `Sum(f, [a, b])` computes the sum of `f` from `a` to `b`; `Sum(L)` sums the elements of a collection `L`. |
+| `sum` | `Sum` | `(any, tuple*) -> number` | `sum(f, [a, b])` computes the sum of `f` from `a` to `b`; `sum(L)` sums the elements of a collection `L`. |
 | `supremum` | `Supremum` | `(value*) -> number` | Like Max, but defined for open sets. |
 | `trigamma` | `Trigamma` | `(complex \| infinity) -> number` | Trigamma function, the derivative of the digamma function |
 | `truncate` | `Truncate` | `(x: real \| signed_infinity \| ~oo, step: real?) -> real \| signed_infinity \| ~oo` | Rounds a number towards zero (removes the fractional part), or with a step to the multiple of the step nearest to the number in the direction of zero. |
@@ -613,18 +613,18 @@ The [Calculus reference](/epsil/reference/calculus/) has the full description an
 | `bigO` | `BigO` | `(value) -> number` | Landau big-O remainder term. |
 | `circleContour` | `CircleContour` | `(center: complex, radius: real, orientation: integer?) -> expression` | Closed circle: center, positive radius, optional orientation (+1 or -1). |
 | `circularIntegrate` | `CircularIntegrate` | `(function, limits+) -> number` | Closed-path integral. |
-| `contourIntegrate` | `ContourIntegrate` | `(expression, variable: symbol, contour: expression) -> number` | Symbolic integral over an explicit closed contour or the real line (`RealLineContour`), using the residue theorem. |
+| `contourIntegrate` | `ContourIntegrate` | `(expression, variable: symbol, contour: expression) -> number` | Symbolic integral over an explicit closed contour or the real line (`realLineContour`), using the residue theorem. |
 | — | `D` | `(expression, variables: symbol*) -> expression` | Symbolic partial derivative with respect to one or more variables. |
 | `dSolve` | `DSolve` | `(expression, symbol, symbol) -> expression` | Symbolic differential equation solver. |
 | `derivative` | `Derivative` | `(function, order: number*) -> function` | Derivative operator that returns a derivative function. |
 | `integrate` | `Integrate` | `(function, limits+) -> list<tuple> \| number \| tensor \| tuple` | Symbolic integral with optional bounds. |
-| `interpolatingFunction` | `InterpolatingFunction` | `(list<any>, number?) -> number` | Piecewise-quartic dense-output interpolant of a numeric ODE solution (produced by `NDSolveFunction`). |
+| `interpolatingFunction` | `InterpolatingFunction` | `(list<any>, number?) -> number` | Piecewise-quartic dense-output interpolant of a numeric ODE solution (produced by `ndSolveFunction`). |
 | `jacobianMatrix` | `JacobianMatrix` | `(any, any?) -> value` | JacobianMatrix(fs, vars): the matrix of partial derivatives |
 | `limit` | `Limit` | `(function, point: number, direction: number?) -> number` | Limit of a function. |
 | — | `Limits` | `(index: symbol, lower: value, upper: value, step: value?) -> tuple` | Limits of a function |
 | `nd` | `ND` | `(function, at: number) -> list<number> \| number \| tuple` | Numerical derivative evaluated at a point. |
 | `ndSolve` | `NDSolve` | `(expression, symbol, limits: symbol \| tuple, number, number?) -> list` | Numerical differential equation solver. |
-| `ndSolveFunction` | `NDSolveFunction` | `(expression, symbol, limits: symbol \| tuple, number) -> function` | Numerically solve an ordinary differential equation and return the solution as an applicable function (a `Function` literal wrapping an `InterpolatingFunction`), usable at any point of the integration interval. |
+| `ndSolveFunction` | `NDSolveFunction` | `(expression, symbol, limits: symbol \| tuple, number) -> function` | Numerically solve an ordinary differential equation and return the solution as an applicable function (a `Function` literal wrapping an `interpolatingFunction`), usable at any point of the integration interval. |
 | `nIntegrate` | `NIntegrate` | `(function, lower: number, upper: number) -> number` | Numerical approximation of a definite integral. |
 | `nLimit` | `NLimit` | `(function, point: number, direction: number?) -> number` | Numerical approximation of the limit of a function. |
 | `normal` | `Normal` | `(value) -> value` | Strip Big-O remainder terms from a series, yielding the truncated polynomial. |
@@ -651,7 +651,7 @@ The [Polynomials reference](/epsil/reference/polynomials/) has the full descript
 | `expandAll` | `ExpandAll` | `(value) -> value` | Recursively expand out products and positive integer powers |
 | `factor` | `Factor` | `(value, symbol?, value?) -> value` | Factor a polynomial expression into a product of irreducible factors. |
 | `partialFraction` | `PartialFraction` | `(value, symbol?) -> value` | Decompose a rational expression into partial fractions. |
-| `piecewiseExpand` | `PiecewiseExpand` | `(value) -> value` | `PiecewiseExpand(expr)` rewrites `Abs`, `Sign`, `Min`, `Max` and `Heaviside`, wherever they occur in `expr`, into a conditional value `Which(c1, v1, …, True, vd)`. |
+| `piecewiseExpand` | `PiecewiseExpand` | `(value) -> value` | `piecewiseExpand(expr)` rewrites `abs`, `sign`, `min`, `max` and `heaviside`, wherever they occur in `expr`, into a conditional value `Which(c1, v1, …, True, vd)`. |
 | `polynomial` | `Polynomial` | `(list<value>, symbol) -> value` | Construct a polynomial from a list of coefficients (highest to lowest degree) and a variable. |
 | `polynomialDegree` | `PolynomialDegree` | `(value, symbol?) -> integer` | Return the degree of a polynomial with respect to a variable. |
 | `polynomialGCD` | `PolynomialGCD` | `(a: value, b: value, variable: symbol?) -> value` | Return the greatest common divisor of two polynomials. |
@@ -696,12 +696,12 @@ The [Number theory reference](/epsil/reference/number-theory/) has the full desc
 | `digitCount` | `DigitCount` | `(integer, integer?, integer?, integer?) -> integer \| list<integer>` | Count digits of `n` in the given `base` (default 10); the sign of `n` is ignored. |
 | `digitSum` | `DigitSum` | `(integer, integer?, integer?) -> integer` | Return the sum of the digits of `n` in the given `base` (default 10). |
 | `dirichletCharacter` | `DirichletCharacter` | `(integer, integer, integer) -> number` | The Dirichlet character χ_j(n) modulo `k`, the `j`-th of the φ(k) characters (Wolfram's indexing, `j = 1` the principal character). |
-| `dirichletL` | `DirichletL` | `(integer, integer, number) -> number` | The Dirichlet L-function L(s, χ) = Σ χ(n)/nˢ (n ≥ 1) of the character χ_j modulo `k` (`DirichletCharacter(k, j, ·)`): `k^(−s) Σ_{r=1}^{k} χ(r) ζ(s, r/k)`. |
-| `divides` | `Divides` | `(integer, integer) -> boolean` | `Divides(a, b)` returns `True` if `a` divides `b` (i.e. |
+| `dirichletL` | `DirichletL` | `(integer, integer, number) -> number` | The Dirichlet L-function L(s, χ) = Σ χ(n)/nˢ (n ≥ 1) of the character χ_j modulo `k` (`dirichletCharacter(k, j, ·)`): `k^(−s) Σ_{r=1}^{k} χ(r) ζ(s, r/k)`. |
+| `divides` | `Divides` | `(integer, integer) -> boolean` | `divides(a, b)` returns `True` if `a` divides `b` (i.e. |
 | `divisorSigma` | `DivisorSigma` | `(integer, integer) -> rational` | The divisor function σ_k(n) = Σ_&#123;d \| n&#125; dᵏ over the positive divisors of `n`. σ₀ counts divisors, σ₁ sums them. |
 | `divisors` | `Divisors` | `(integer) -> list<integer>` | Return the sorted list of positive divisors of an integer `n`. |
-| `eulerE` | `EulerE` | `(integer, number?) -> number` | Return the nth Euler number Eₙ (1, 0, -1, 0, 5, 0, -61, …) for `EulerE(n)`, or the Euler polynomial Eₙ(x) for `EulerE(n, x)`. |
-| `eulerPhi` | `EulerPhi` | `(integer) -> integer` | `EulerPhi` is an alias for `Totient`, which is the preferred name. |
+| `eulerE` | `EulerE` | `(integer, number?) -> number` | Return the nth Euler number Eₙ (1, 0, -1, 0, 5, 0, -61, …) for `eulerE(n)`, or the Euler polynomial Eₙ(x) for `eulerE(n, x)`. |
+| `eulerPhi` | `EulerPhi` | `(integer) -> integer` | `eulerPhi` is an alias for `totient`, which is the preferred name. |
 | `eulerian` | `Eulerian` | `(integer, integer) -> integer` | Eulerian number A(n, m): number of permutations of &#123;1..n&#125; with exactly m ascents. |
 | `extendedGCD` | `ExtendedGCD` | `(integer, integer, integer*) -> tuple` | Return the extended GCD of `a` and `b` as a tuple `(g, x, y)` where `g = gcd(a, b)` is non-negative and `a·x + b·y = g` (Bézout coefficients). |
 | `factorInteger` | `FactorInteger` | `(rational) -> list<tuple<integer, integer>>` | Return the prime factorization of an integer `n` as a list of `[prime, exponent]` tuples, ordered by ascending prime. |
@@ -721,20 +721,20 @@ The [Number theory reference](/epsil/reference/number-theory/) has the full desc
 | `isTriangular` | `IsTriangular` | `(integer) -> boolean` | True if n is a triangular number. |
 | `jacobiSymbol` | `JacobiSymbol` | `(integer, integer) -> integer` | The Jacobi symbol (a/n) for an odd `n > 0`. |
 | `legendreSymbol` | `LegendreSymbol` | `(integer, integer) -> integer` | The Legendre symbol (a/p) for an odd prime `p`. |
-| `lucas` | `Lucas` | `(integer) -> integer` | `Lucas` is an alias for `LucasL`, which is the preferred name. |
-| `lucasL` | `LucasL` | `(integer) -> integer` | Return the nth Lucas number: `LucasL(0)` is 2, `LucasL(1)` is 1, and `LucasL(n) = LucasL(n-1) + LucasL(n-2)`. |
+| `lucas` | `Lucas` | `(integer) -> integer` | `lucas` is an alias for `lucasL`, which is the preferred name. |
+| `lucasL` | `LucasL` | `(integer) -> integer` | Return the nth Lucas number: `lucasL(0)` is 2, `lucasL(1)` is 1, and `LucasL(n) = LucasL(n-1) + LucasL(n-2)`. |
 | `minimalPolynomial` | `MinimalPolynomial` | `(number, any) -> expression` | The minimal polynomial of the algebraic number a in x: primitive over ℤ, positive leading coefficient. |
 | `modularInverse` | `ModularInverse` | `(integer, integer) -> integer` | Return the modular multiplicative inverse of `a` modulo `m`: the integer `x` with `a·x ≡ 1 (mod m)`. |
 | `moebiusMu` | `MoebiusMu` | `(integer) -> integer` | Return the Möbius function μ(n): 0 if `n` is divisible by a perfect square &gt; 1, otherwise (-1) raised to the number of distinct prime factors. |
 | `multiplicativeOrder` | `MultiplicativeOrder` | `(integer, integer, list<integer>?) -> integer` | The multiplicative order of `a` modulo `n`: the smallest `k > 0` such that `a^k ≡ 1 (mod n)`. |
 | `nPartition` | `NPartition` | `(integer) -> integer` | Number of integer partitions of n, for n ≥ 0; it is 0 for n &lt; 0. |
 | `nextPrime` | `NextPrime` | `(real, integer?) -> integer` | Return the smallest prime greater than `n`. |
-| `notDivides` | `NotDivides` | `(integer, integer) -> boolean` | `NotDivides(a, b)` returns `True` if `a` does not divide `b`, corresponding to the notation `a ∤ b`. |
-| `nthPrime` | `NthPrime` | `(integer) -> integer` | Return the nth prime number (1-based): `NthPrime(1)` is 2, `NthPrime(2)` is 3, … |
+| `notDivides` | `NotDivides` | `(integer, integer) -> boolean` | `notDivides(a, b)` returns `True` if `a` does not divide `b`, corresponding to the notation `a ∤ b`. |
+| `nthPrime` | `NthPrime` | `(integer) -> integer` | Return the nth prime number (1-based): `nthPrime(1)` is 2, `nthPrime(2)` is 3, … |
 | `numberFieldDiscriminant` | `NumberFieldDiscriminant` | `(number) -> integer` | The discriminant of the field ℚ(a): of its ring of integers. |
 | `numberFieldIntegralBasis` | `NumberFieldIntegralBasis` | `(number) -> list<number>` | A ℤ-basis of the ring of integers of ℚ(a), written on the powers of the generator read (the radical or root a is written in), as Wolfram writes it. |
 | `numberFieldSignature` | `NumberFieldSignature` | `(number) -> list<integer>` | The signature (r₁, r₂) of ℚ(a): its real embeddings and its pairs of complex ones. |
-| `partitionsP` | `PartitionsP` | `(integer) -> integer` | `PartitionsP` is an alias for `NPartition`, which is the preferred name. |
+| `partitionsP` | `PartitionsP` | `(integer) -> integer` | `partitionsP` is an alias for `nPartition`, which is the preferred name. |
 | `partitionsQ` | `PartitionsQ` | `(integer) -> integer` | Number of partitions of n into distinct parts (equivalently, into odd parts), q(n); it is 0 for n &lt; 0. |
 | `polynomialRoot` | `PolynomialRoot` | `(any, any, integer?) -> number` | The root of the polynomial p in the variable x (bound, as in Wolfram's Root[Function[x, p], k]). |
 | `powerMod` | `PowerMod` | `(list<rational> \| rational, list<rational> \| rational, integer \| list<integer>) -> integer \| list<integer>` | Return `a^b mod m` (modular exponentiation). |
@@ -754,7 +754,7 @@ The [Number theory reference](/epsil/reference/number-theory/) has the full desc
 | `sigmaMinus1` | `SigmaMinus1` | `(integer) -> rational` | Sum of reciprocals of positive divisors of n. |
 | `stirling` | `Stirling` | `(integer, integer) -> integer` | Stirling number of the second kind S(n, m): ways to partition n elements into m non-empty subsets. |
 | `stirlingS1` | `StirlingS1` | `(integer, integer) -> integer` | Signed Stirling number of the first kind s(n, m): the coefficient of x^m in the falling factorial x(x−1)…(x−n+1). |
-| `stirlingS2` | `StirlingS2` | `(integer, integer) -> integer` | `StirlingS2` is an alias for `Stirling`, which is the preferred name. |
+| `stirlingS2` | `StirlingS2` | `(integer, integer) -> integer` | `stirlingS2` is an alias for `stirling`, which is the preferred name. |
 | `totient` | `Totient` | `(integer) -> integer` | Euler's totient function φ(n): count of positive integers ≤ n that are coprime to n, for n ≥ 1; φ(0) = 0 and φ(−n) = φ(n). |
 
 ## Special functions
@@ -782,8 +782,8 @@ The [Special functions reference](/epsil/reference/special-functions/) has the f
 | `jacobiTheta` | `JacobiTheta` | `(number, complex \| infinity, complex \| infinity, number?) -> number` | Jacobi theta function θⱼ(z, τ), j ∈ &#123;1,2,3,4&#125;, nome q = e^&#123;iπτ&#125; (Fungrim convention). |
 | `laguerreL` | `LaguerreL` | `(degree: integer, complex) -> number` | Laguerre polynomial Lₙ(x) = Σₖ (−1)ᵏ C(n, k) xᵏ/k!. |
 | `legendreP` | `LegendreP` | `(degree: integer, complex) -> number` | Legendre polynomial Pₙ(x), with P₀ = 1, P₁ = x and (n+1)Pₙ₊₁ = (2n+1)x Pₙ − n Pₙ₋₁. |
-| `logBarnesG` | `LogBarnesG` | `(complex \| infinity) -> number` | The logarithm of the Barnes G-function, continued analytically with `LogGamma`: its imaginary part is not principal on the negative axis. −∞ at the zeros of G, the non-positive integers. |
-| `logGamma` | `LogGamma` | `(complex \| infinity) -> number` | The analytic continuation of ln Γ(z), with its branch cut on (−∞, 0]; not `GammaLn`, the principal logarithm of Γ(z), which jumps by 2πi across the zeros of Im Γ. |
+| `logBarnesG` | `LogBarnesG` | `(complex \| infinity) -> number` | The logarithm of the Barnes G-function, continued analytically with `logGamma`: its imaginary part is not principal on the negative axis. −∞ at the zeros of G, the non-positive integers. |
+| `logGamma` | `LogGamma` | `(complex \| infinity) -> number` | The analytic continuation of ln Γ(z), with its branch cut on (−∞, 0]; not `gammaLn`, the principal logarithm of Γ(z), which jumps by 2πi across the zeros of Im Γ. |
 | `logIntegral` | `LogIntegral` | `(complex \| infinity) -> number` | Logarithmic integral li(x) = PV ∫₀ˣ dt/ln t = Ei(ln x). |
 | `polyLog` | `PolyLog` | `(complex \| infinity, complex \| infinity) -> number` | Polylogarithm Liₛ(z) = Σ_&#123;k≥1&#125; zᵏ/kˢ, at any real or complex order s. |
 | `stieltjesGamma` | `StieltjesGamma` | `(integer, number?) -> number` | Generalized Stieltjes constants γₙ(a), the Laurent coefficients of ζ(s, a) at s = 1: ζ(s, a) = 1/(s−1) + Σₙ (−1)ⁿ γₙ(a)(s−1)ⁿ/n!. |
@@ -800,7 +800,7 @@ The [Linear algebra reference](/epsil/reference/linear-algebra/) has the full de
 | `conjugateTranspose` | `ConjugateTranspose` | `(value, axis1: integer?, axis2: integer?) -> value` | Conjugate transpose (Hermitian adjoint) of a matrix or tensor. |
 | `cross` | `Cross` | `(tuple \| vector, tuple \| vector) -> tuple \| vector` | Cross product of two 3-vectors. |
 | `degree` | `Degree` | `(value) -> integer` | Degree of an object |
-| `det` | `Det` | `(matrix) -> number` | `Det` is an alias for `Determinant`, which is the preferred name. |
+| `det` | `Det` | `(matrix) -> number` | `det` is an alias for `determinant`, which is the preferred name. |
 | `determinant` | `Determinant` | `(matrix) -> number` | Determinant of a square matrix. |
 | `diagonal` | `Diagonal` | `(value) -> value` | Extract a matrix diagonal or build a diagonal matrix. |
 | `dimension` | `Dimension` | `(value) -> integer` | Dimension of an object |

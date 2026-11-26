@@ -3,7 +3,7 @@ import type { BoxedDefinition } from '../compute-engine/global-types.js';
 import { STANDARD_LIBRARIES } from '../compute-engine/library/library.js';
 
 import { definitionDocs, type ParameterDoc } from './doc-tags.js';
-import { epsilExamples } from './example-spelling.js';
+import { epsilDescription, epsilExamples } from './example-spelling.js';
 import { canonicalLibraryName, epsilNameOf } from './library-names.js';
 
 //
@@ -222,7 +222,10 @@ function describeDefinition(
     },
     isLibraryBinding
   );
-  if (docs.description !== undefined) entry.description = docs.description;
+  // The description writes its code with the MathJSON names, as the
+  // examples do: its code spans are shown in the Epsil spelling too.
+  if (docs.description !== undefined)
+    entry.description = epsilDescription(engine, docs.description);
   if (docs.parameters.size > 0)
     entry.parameters = Object.fromEntries(docs.parameters);
   if (docs.positional.some((doc) => doc !== undefined))

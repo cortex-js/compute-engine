@@ -85,7 +85,7 @@ Decompose a rational expression into partial fractions. Example: PartialFraction
 
 MathJSON `PiecewiseExpand` · `(value) -> value`
 
-`PiecewiseExpand(expr)` rewrites `Abs`, `Sign`, `Min`, `Max` and `Heaviside`, wherever they occur in `expr`, into a conditional value `Which(c1, v1, …, True, vd)`. `Abs` and `Sign` split only for an argument known to be real. Nested occurrences combine their conditions, and the assumptions set by `ce.assume()` decide what they can: with `x > 0` assumed, `Abs(x)` is `x`. An expression with none of these functions is returned unchanged.
+`piecewiseExpand(expr)` rewrites `abs`, `sign`, `min`, `max` and `heaviside`, wherever they occur in `expr`, into a conditional value `Which(c1, v1, …, True, vd)`. `abs` and `sign` split only for an argument known to be real. Nested occurrences combine their conditions, and the assumptions set by `ce.assume()` decide what they can: with `x > 0` assumed, `abs(x)` is `x`. An expression with none of these functions is returned unchanged.
 
 ```epsil
 piecewiseExpand(max(x, y))

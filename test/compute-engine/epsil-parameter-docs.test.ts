@@ -7,7 +7,8 @@ import {
 } from '../../src/common/type/instantiate';
 import { epsilCompletions } from '../../src/epsil/completion';
 import { describeName } from '../../src/epsil/describe-name';
-import { splitDocComment } from '../../src/epsil/doc-tags';
+import { definitionDocs, splitDocComment } from '../../src/epsil/doc-tags';
+import { epsilDescription } from '../../src/epsil/example-spelling';
 import { epsilLibraryNames } from '../../src/epsil/library-names';
 import { executeEpsil } from '../../src/epsil/execute-epsil';
 import { epsilHover } from '../../src/epsil/hover';
@@ -688,4 +689,77 @@ describe('DOCUMENTATION BY POSITION: THE ARM OF A NAMED CALL', () => {
     );
     expect(item?.documentation).toBe('At position 0.');
   });
+});
+
+// CE-1836: the code spans of a description, in the Epsil spelling.
+describe('THE CODE OF A DESCRIPTION', () => {
+  const SPAN = /(?<!`)(`+)(?!`)([\s\S]*?[^`])\1(?!`)/g;
+
+  test('a span that parses is spelled, a bare library name too', () => {
+    const text = describeName(ce, 'Join')?.description?.join('\n') ?? '';
+    expect(text).toContain('`join([1, 2], 3)` is `[1, 2, 3]`');
+    expect(text).toContain('`join` is the variadic string concatenation');
+  });
+
+  test('a span that does not parse, a verbatim name and a binding are kept', () => {
+    const engine = new ComputeEngine();
+    engine.declare('Twice', {
+      signature: '(real) -> real',
+      evaluate: ([x]) => x.mul(2),
+      description: [
+        '`Twice(Sin(Pi))` is `0`; `Sin(` and `` `Sin` `` are kept,',
+        'and so is `let Cos = 2; Cos`, over a line break: `Sin(',
+        'Pi)`.',
+      ],
+    });
+    expect(describeName(engine, 'Twice')?.description).toEqual([
+      '`Twice(sin(pi))` is `0`; `Sin(` and `` `Sin` `` are kept,',
+      'and so is `let Cos = 2; Cos`, over a line break: `sin(',
+      'pi)`.',
+    ]);
+    expect(
+      epsilDescription(engine, ['`Sin(1)` is\nnear `1`.', 'And `Pi`.'])
+    ).toEqual(['`sin(1)` is\nnear `1`.', 'And `pi`.']);
+    executeEpsil(engine, 'let pi = 3');
+    expect(describeName(engine, 'Twice')?.description?.[0]).toBe(
+      '`Twice(sin(Pi))` is `0`; `Sin(` and `` `Sin` `` are kept,'
+    );
+  });
+
+  test('every span of the library that parses still parses', () => {
+    const broken: string[] = [];
+    let changed = 0;
+    for (const name of names()) {
+      const def = ce.lookupDefinition(name)!;
+      const base = 'operator' in def ? def.operator : def.value;
+      const written =
+        definitionDocs(
+          {
+            description: base.description,
+            examples: [],
+            parameters: undefined,
+          },
+          true
+        ).description ?? [];
+      const spelled = describeName(ce, name)?.description ?? [];
+      const before = [...written.join('\n').matchAll(SPAN)].map((m) => m[2]);
+      const after = [...spelled.join('\n').matchAll(SPAN)].map((m) => m[2]);
+      expect(after.length).toBe(before.length);
+      before.forEach((code, i) => {
+        if (code === after[i]) return;
+        changed += 1;
+        const [, diagnostics] = parseEpsil(after[i]);
+        if (diagnostics.some((d) => d.severity === 'error'))
+          broken.push(`${name}: ${code} → ${after[i]}`);
+      });
+    }
+    expect(changed).toBeGreaterThan(150);
+    expect(broken).toEqual([]);
+  });
+
+  function names(): string[] {
+    return [...new Set(epsilLibraryNames().values())].filter(
+      (name) => ce.lookupDefinition(name) !== undefined
+    );
+  }
 });

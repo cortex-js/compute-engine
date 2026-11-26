@@ -59,7 +59,7 @@ carmichaelLambda(15)
 
 MathJSON `CatalanNumber` · `(real) -> number`
 
-Return the nth Catalan number `C(n) = (2n)! / ((n+1)! · n!)`: 1, 1, 2, 5, 14, 42, … Defined for `n ≥ 0`. A positive rational `n` is taken through the Gamma function, `C(n) = Γ(2n+1) / (Γ(n+1) Γ(n+2))`: `CatalanNumber(1/2)` is `8/(3π)`.
+Return the nth Catalan number `C(n) = (2n)! / ((n+1)! · n!)`: 1, 1, 2, 5, 14, 42, … Defined for `n ≥ 0`. A positive rational `n` is taken through the Gamma function, `C(n) = Γ(2n+1) / (Γ(n+1) Γ(n+2))`: `catalanNumber(1/2)` is `8/(3π)`.
 
 ```epsil
 catalanNumber(5)
@@ -91,7 +91,7 @@ chineseRemainder([2, 3, 2], [3, 5, 7], 100)
 
 MathJSON `ContinuedFraction` · `(real, integer?) -> list<integer | list<integer>>`
 
-Return the continued-fraction expansion of `x` as a list of integer terms `[a0, a1, …]`. An exact rational is expanded fully. An exact quadratic irrational (`Sqrt(2)`) is expanded to its periodic form `[a0, …, [period]]` (`[1, [2]]`), or to the optional `n` terms. Another exact real (`ExponentialE`) is expanded to `n` terms (default 20), each computed at a precision that vouches for it. An inexact value is expanded as its best rational approximation at working precision (see `Rationalize`), truncated to `n` terms (default 20).
+Return the continued-fraction expansion of `x` as a list of integer terms `[a0, a1, …]`. An exact rational is expanded fully. An exact quadratic irrational (`sqrt(2)`) is expanded to its periodic form `[a0, …, [period]]` (`[1, [2]]`), or to the optional `n` terms. Another exact real (`exponentialE`) is expanded to `n` terms (default 20), each computed at a precision that vouches for it. An inexact value is expanded as its best rational approximation at working precision (see `rationalize`), truncated to `n` terms (default 20).
 
 ```epsil
 continuedFraction(43/19)
@@ -107,7 +107,7 @@ continuedFraction(sqrt(2))
 
 MathJSON `DigitCount` · `(integer, integer?, integer?, integer?) -> integer | list<integer>`
 
-Count digits of `n` in the given `base` (default 10); the sign of `n` is ignored. With a third argument `digit`, return how many times that digit occurs. Otherwise return a list `[count of 1, count of 2, …, count of base-1, count of 0]`. With a fourth argument `length`, the digits are first zero-padded on the left (or cut to their last `length`), so `DigitCount(5, 2, 0, 8)` is 6.
+Count digits of `n` in the given `base` (default 10); the sign of `n` is ignored. With a third argument `digit`, return how many times that digit occurs. Otherwise return a list `[count of 1, count of 2, …, count of base-1, count of 0]`. With a fourth argument `length`, the digits are first zero-padded on the left (or cut to their last `length`), so `digitCount(5, 2, 0, 8)` is 6.
 
 ```epsil
 digitCount(122, 10, 2)
@@ -155,7 +155,7 @@ dirichletCharacter(7, 3, 3)
 
 MathJSON `DirichletL` · `(integer, integer, number) -> number`
 
-The Dirichlet L-function L(s, χ) = Σ χ(n)/nˢ (n ≥ 1) of the character χ_j modulo `k` (`DirichletCharacter(k, j, ·)`): `k^(−s) Σ_{r=1}^{k} χ(r) ζ(s, r/k)`. Entire for a non-principal character; the principal one is `ζ(s) Π_{p|k} (1 − p^(−s))`.
+The Dirichlet L-function L(s, χ) = Σ χ(n)/nˢ (n ≥ 1) of the character χ_j modulo `k` (`dirichletCharacter(k, j, ·)`): `k^(−s) Σ_{r=1}^{k} χ(r) ζ(s, r/k)`. Entire for a non-principal character; the principal one is `ζ(s) Π_{p|k} (1 − p^(−s))`.
 
 ```epsil
 dirichletL(1, 1, 2)
@@ -176,7 +176,7 @@ dirichletL(5, 2, 0)
 
 MathJSON `Divides` · `(integer, integer) -> boolean`
 
-`Divides(a, b)` returns `True` if `a` divides `b` (i.e. `b` is an integer multiple of `a`), corresponding to the notation `a ∣ b`. Both operands are integers; a symbolic operand keeps the relation unevaluated.
+`divides(a, b)` returns `True` if `a` divides `b` (i.e. `b` is an integer multiple of `a`), corresponding to the notation `a ∣ b`. Both operands are integers; a symbolic operand keeps the relation unevaluated.
 
 ```epsil
 divides(3, 12)
@@ -187,7 +187,7 @@ divides(3, 12)
 
 MathJSON `DivisorSigma` · `(integer, integer) -> rational`
 
-The divisor function σ_k(n) = Σ_&#123;d | n&#125; dᵏ over the positive divisors of `n`. σ₀ counts divisors, σ₁ sums them. A negative `k` sums reciprocal powers, a rational: `DivisorSigma(-1, 12)` is 7/3. The sign of `n` is ignored, as for `Divisors` and `PrimeOmega`; `DivisorSigma(k, 0)` is undefined.
+The divisor function σ_k(n) = Σ_&#123;d | n&#125; dᵏ over the positive divisors of `n`. σ₀ counts divisors, σ₁ sums them. A negative `k` sums reciprocal powers, a rational: `divisorSigma(-1, 12)` is 7/3. The sign of `n` is ignored, as for `divisors` and `primeOmega`; `divisorSigma(k, 0)` is undefined.
 
 ```epsil
 divisorSigma(2, 6)
@@ -214,7 +214,7 @@ divisors(12)
 
 MathJSON `EulerE` · `(integer, number?) -> number`
 
-Return the nth Euler number Eₙ (1, 0, -1, 0, 5, 0, -61, …) for `EulerE(n)`, or the Euler polynomial Eₙ(x) for `EulerE(n, x)`. Odd-index Euler numbers are 0. Eₙ = 2ⁿ·Eₙ(1/2). A negative or non-integer `n` stays symbolic.
+Return the nth Euler number Eₙ (1, 0, -1, 0, 5, 0, -61, …) for `eulerE(n)`, or the Euler polynomial Eₙ(x) for `eulerE(n, x)`. Odd-index Euler numbers are 0. Eₙ = 2ⁿ·Eₙ(1/2). A negative or non-integer `n` stays symbolic.
 
 ```epsil
 eulerE(4)
@@ -230,7 +230,7 @@ eulerE(2, x)
 
 MathJSON `EulerPhi` · `(integer) -> integer`
 
-`EulerPhi` is an alias for `Totient`, which is the preferred name. Euler's totient function φ(n): count of positive integers ≤ n that are coprime to n, for n ≥ 1; φ(0) = 0 and φ(−n) = φ(n).
+`eulerPhi` is an alias for `totient`, which is the preferred name. Euler's totient function φ(n): count of positive integers ≤ n that are coprime to n, for n ≥ 1; φ(0) = 0 and φ(−n) = φ(n).
 
 ```epsil
 eulerPhi(12)
@@ -279,7 +279,7 @@ factorInteger(12/35)
 
 MathJSON `FromContinuedFraction` · `(collection<any>) -> number`
 
-Reconstruct the value of a continued fraction given its list of integer terms `[a0, a1, …]`. A last element that is a list is the repeating period, `[1, [2]]`: the quadratic irrational `Sqrt(2)`.
+Reconstruct the value of a continued fraction given its list of integer terms `[a0, a1, …]`. A last element that is a list is the repeating period, `[1, [2]]`: the quadratic irrational `sqrt(2)`.
 
 ```epsil
 fromContinuedFraction([2, 3, 1, 4])
@@ -295,7 +295,7 @@ fromContinuedFraction([1, [2]])
 
 MathJSON `FromDigits` · `(collection<any>, number?) -> number`
 
-Reconstruct a number from its digits (most-significant first) in the given `base` (default 10). The inverse of `IntegerDigits`. Digits outside `[0, base)` are combined positionally, and the base may be any number or symbol: `FromDigits([1, 1, 0], -2)` is 2 and `FromDigits([a, b, c], x)` is `a x^2 + b x + c`.
+Reconstruct a number from its digits (most-significant first) in the given `base` (default 10). The inverse of `integerDigits`. Digits outside `[0, base)` are combined positionally, and the base may be any number or symbol: `fromDigits([1, 1, 0], -2)` is 2 and `fromDigits([a, b, c], x)` is `a x^2 + b x + c`.
 
 ```epsil
 fromDigits([1, 2, 3, 4])
@@ -435,13 +435,13 @@ legendreSymbol(3, 7)
 
 MathJSON `Lucas` · `(integer) -> integer`
 
-`Lucas` is an alias for `LucasL`, which is the preferred name. Returns the nth Lucas number.
+`lucas` is an alias for `lucasL`, which is the preferred name. Returns the nth Lucas number.
 
 ### lucasL
 
 MathJSON `LucasL` · `(integer) -> integer`
 
-Return the nth Lucas number: `LucasL(0)` is 2, `LucasL(1)` is 1, and `LucasL(n) = LucasL(n-1) + LucasL(n-2)`. Negative indices follow `LucasL(-n) = (-1)^n · LucasL(n)`.
+Return the nth Lucas number: `lucasL(0)` is 2, `lucasL(1)` is 1, and `LucasL(n) = LucasL(n-1) + LucasL(n-2)`. Negative indices follow `LucasL(-n) = (-1)^n · LucasL(n)`.
 
 ```epsil
 lucasL(10)
@@ -507,7 +507,7 @@ Number of integer partitions of n, for n ≥ 0; it is 0 for n &lt; 0.
 
 MathJSON `NextPrime` · `(real, integer?) -> integer`
 
-Return the smallest prime greater than `n`. With a second argument `k`, return the kth prime after `n` (`k < 0` returns the |k|th prime before `n`). A non-integer real or rational `n` is allowed: `NextPrime(7/2)` is 5.
+Return the smallest prime greater than `n`. With a second argument `k`, return the kth prime after `n` (`k < 0` returns the |k|th prime before `n`). A non-integer real or rational `n` is allowed: `nextPrime(7/2)` is 5.
 
 ```epsil
 nextPrime(10)
@@ -528,13 +528,13 @@ nextPrime(7/2)
 
 MathJSON `NotDivides` · `(integer, integer) -> boolean`
 
-`NotDivides(a, b)` returns `True` if `a` does not divide `b`, corresponding to the notation `a ∤ b`.
+`notDivides(a, b)` returns `True` if `a` does not divide `b`, corresponding to the notation `a ∤ b`.
 
 ### nthPrime
 
 MathJSON `NthPrime` · `(integer) -> integer`
 
-Return the nth prime number (1-based): `NthPrime(1)` is 2, `NthPrime(2)` is 3, …
+Return the nth prime number (1-based): `nthPrime(1)` is 2, `nthPrime(2)` is 3, …
 
 ```epsil
 nthPrime(10)
@@ -563,7 +563,7 @@ The signature (r₁, r₂) of ℚ(a): its real embeddings and its pairs of compl
 
 MathJSON `PartitionsP` · `(integer) -> integer`
 
-`PartitionsP` is an alias for `NPartition`, which is the preferred name. Number of integer partitions of n, for n ≥ 0; it is 0 for n &lt; 0.
+`partitionsP` is an alias for `nPartition`, which is the preferred name. Number of integer partitions of n, for n ≥ 0; it is 0 for n &lt; 0.
 
 ```epsil
 partitionsP(5)
@@ -574,7 +574,7 @@ partitionsP(5)
 
 MathJSON `PartitionsQ` · `(integer) -> integer`
 
-Number of partitions of n into distinct parts (equivalently, into odd parts), q(n); it is 0 for n &lt; 0. The Wolfram Language `PartitionsQ`.
+Number of partitions of n into distinct parts (equivalently, into odd parts), q(n); it is 0 for n &lt; 0. The Wolfram Language `partitionsQ`.
 
 ```epsil
 partitionsQ(10)
@@ -585,13 +585,13 @@ partitionsQ(10)
 
 MathJSON `PolynomialRoot` · `(any, any, integer?) -> number`
 
-The root of the polynomial p in the variable x (bound, as in Wolfram's Root[Function[x, p], k]). With an index, `PolynomialRoot(p, x, k)` is the k-th root: real roots first in increasing order, then complex roots by increasing real part, each conjugate pair together with the lower one first, and the pairs that share a real part by increasing |imaginary part|, as Mathematica does. It is a numbered embedding, a particular complex number, the one `N()` gives, and its other roots are other numbers; a root that cannot be numbered with certainty stays unevaluated. The root of a polynomial of degree 1 or 2 is a rational or a radical; past that it stays `PolynomialRoot` until `N()`. Without an index, `PolynomialRoot(p, x)` is the abstract root of the irreducible polynomial p, with no complex embedding selected: it has no numeric value, and its other roots are indistinguishable from it. Example: PolynomialRoot(x² + x + 1, x, 1) → (−1 − i√3)/2
+The root of the polynomial p in the variable x (bound, as in Wolfram's Root[Function[x, p], k]). With an index, `polynomialRoot(p, x, k)` is the k-th root: real roots first in increasing order, then complex roots by increasing real part, each conjugate pair together with the lower one first, and the pairs that share a real part by increasing |imaginary part|, as Mathematica does. It is a numbered embedding, a particular complex number, the one `N()` gives, and its other roots are other numbers; a root that cannot be numbered with certainty stays unevaluated. The root of a polynomial of degree 1 or 2 is a rational or a radical; past that it stays `polynomialRoot` until `N()`. Without an index, `polynomialRoot(p, x)` is the abstract root of the irreducible polynomial p, with no complex embedding selected: it has no numeric value, and its other roots are indistinguishable from it. Example: PolynomialRoot(x² + x + 1, x, 1) → (−1 − i√3)/2
 
 ### powerMod
 
 MathJSON `PowerMod` · `(list<rational> | rational, list<rational> | rational, integer | list<integer>) -> integer | list<integer>`
 
-Return `a^b mod m` (modular exponentiation). A negative `b` uses the modular inverse of `a`; the result is undefined when that inverse does not exist (i.e. when `a` and `m` are not coprime). The result is in the range [0, m). A rational base `p/q` is `p` times the modular inverse of `q`, so `PowerMod(1/2, 2, 7)` is 2. A rational exponent `s/r` gives the least `x` with `x^r ≡ a^s (mod m)`, the first entry of `PowerModList(a, s/r, m)`. It is undefined when there is none, when `m` cannot be factored, or when there are too many roots to list and none of them is less than 100000. A list operand threads: `PowerMod([2, 3], 2, 7)` is `[4, 2]`.
+Return `a^b mod m` (modular exponentiation). A negative `b` uses the modular inverse of `a`; the result is undefined when that inverse does not exist (i.e. when `a` and `m` are not coprime). The result is in the range [0, m). A rational base `p/q` is `p` times the modular inverse of `q`, so `powerMod(1/2, 2, 7)` is 2. A rational exponent `s/r` gives the least `x` with `x^r ≡ a^s (mod m)`, the first entry of `powerModList(a, s/r, m)`. It is undefined when there is none, when `m` cannot be factored, or when there are too many roots to list and none of them is less than 100000. A list operand threads: `powerMod([2, 3], 2, 7)` is `[4, 2]`.
 
 ```epsil
 powerMod(2, 10, 1000)
@@ -612,7 +612,7 @@ powerMod(1/2, 2, 7)
 
 MathJSON `PowerModList` · `(list<rational> | rational, list<rational> | rational, integer | list<integer>) -> list<integer> | list<list<integer>>`
 
-Return the sorted list of every `x` in [0, m) with `x^r ≡ a^s (mod m)`, for the exponent `s/r`. An integer exponent gives the single value `a^s mod m`, a negative one using the modular inverse of `a`. A rational base is read as `p` times the inverse of `q`. A list operand threads: `PowerModList([2, 3], 2, 7)` is `[[4], [2]]`. The list is empty when `a^s` is not an `r`-th power mod `m`. Undefined for a modulus `m < 1`, when the inverse of `a` does not exist, or when `m` cannot be factored or there are too many roots to list.
+Return the sorted list of every `x` in [0, m) with `x^r ≡ a^s (mod m)`, for the exponent `s/r`. An integer exponent gives the single value `a^s mod m`, a negative one using the modular inverse of `a`. A rational base is read as `p` times the inverse of `q`. A list operand threads: `powerModList([2, 3], 2, 7)` is `[[4], [2]]`. The list is empty when `a^s` is not an `r`-th power mod `m`. Undefined for a modulus `m < 1`, when the inverse of `a` does not exist, or when `m` cannot be factored or there are too many roots to list.
 
 ```epsil
 powerModList(3, 1/2, 11)
@@ -628,7 +628,7 @@ powerModList(1, 1/3, 7)
 
 MathJSON `PrimeFactors` · `(integer) -> list<integer>`
 
-Return the sorted list of distinct prime factors of an integer `n`. The sign of `n` is ignored; `PrimeFactors(1)` is the empty list.
+Return the sorted list of distinct prime factors of an integer `n`. The sign of `n` is ignored; `primeFactors(1)` is the empty list.
 
 ```epsil
 primeFactors(360)
@@ -639,7 +639,7 @@ primeFactors(360)
 
 MathJSON `PrimeNu` · `(integer) -> integer`
 
-Return ω(n), the number of distinct prime factors of `n`. The sign of `n` is ignored; `PrimeNu(1)` is 0.
+Return ω(n), the number of distinct prime factors of `n`. The sign of `n` is ignored; `primeNu(1)` is 0.
 
 ```epsil
 primeNu(360)
@@ -650,13 +650,13 @@ primeNu(360)
 
 MathJSON `PrimeNumber` · `(integer) -> integer`
 
-The nth prime number. `PrimeNumber` is an alias for `NthPrime`, which is the preferred name.
+The nth prime number. `primeNumber` is an alias for `nthPrime`, which is the preferred name.
 
 ### primeOmega
 
 MathJSON `PrimeOmega` · `(integer) -> integer`
 
-Return Ω(n), the number of prime factors of `n` counted with multiplicity. The sign of `n` is ignored; `PrimeOmega(1)` is 0.
+Return Ω(n), the number of prime factors of `n` counted with multiplicity. The sign of `n` is ignored; `primeOmega(1)` is 0.
 
 ```epsil
 primeOmega(360)
@@ -678,7 +678,7 @@ primePi(10)
 
 MathJSON `PrimitiveRoot` · `(integer) -> integer`
 
-The smallest primitive root modulo `n` (a generator of the multiplicative group of integers mod `n`), or undefined if none exists (which happens unless `n` is 1, 2, 4, pᵏ, or 2pᵏ for an odd prime p). The sign of `n` is ignored, and `PrimitiveRoot(1)` is 0. Undefined for `n = 0`.
+The smallest primitive root modulo `n` (a generator of the multiplicative group of integers mod `n`), or undefined if none exists (which happens unless `n` is 1, 2, 4, pᵏ, or 2pᵏ for an odd prime p). The sign of `n` is ignored, and `primitiveRoot(1)` is 0. Undefined for `n = 0`.
 
 ```epsil
 primitiveRoot(7)
@@ -689,7 +689,7 @@ primitiveRoot(7)
 
 MathJSON `PrimitiveRootList` · `(integer) -> list<integer>`
 
-The sorted list of all primitive roots modulo `n`: the generators of the multiplicative group of integers mod `n`. The list is empty when there is none (unless `n` is 1, 2, 4, pᵏ, or 2pᵏ for an odd prime p), and for `n = 0`. `PrimitiveRootList(1)` is `[0]`, as `PrimitiveRoot(1)` is 0. The sign of `n` is ignored. Undefined when `n` cannot be factored or there are too many roots to list.
+The sorted list of all primitive roots modulo `n`: the generators of the multiplicative group of integers mod `n`. The list is empty when there is none (unless `n` is 1, 2, 4, pᵏ, or 2pᵏ for an odd prime p), and for `n = 0`. `primitiveRootList(1)` is `[0]`, as `primitiveRoot(1)` is 0. The sign of `n` is ignored. Undefined when `n` cannot be factored or there are too many roots to list.
 
 ```epsil
 primitiveRootList(7)
@@ -705,7 +705,7 @@ primitiveRootList(8)
 
 MathJSON `Radical` · `(integer) -> integer`
 
-Return the radical of `n` (its square-free kernel): the product of its distinct prime factors. The sign of `n` is ignored; `Radical(1)` is 1.
+Return the radical of `n` (its square-free kernel): the product of its distinct prime factors. The sign of `n` is ignored; `radical(1)` is 1.
 
 ```epsil
 radical(360)
@@ -716,7 +716,7 @@ radical(360)
 
 MathJSON `RandomPrime` · `(integer, integer?) random -> integer`
 
-Return a random prime. `RandomPrime(n)` draws a prime in [2, n]; `RandomPrime(m, n)` draws a prime in [m, n]. Undefined if the range contains no prime.
+Return a random prime. `randomPrime(n)` draws a prime in [2, n]; `randomPrime(m, n)` draws a prime in [m, n]. Undefined if the range contains no prime.
 
 ```epsil
 randomPrime(100)
@@ -772,7 +772,7 @@ stirlingS1(5, 2)
 
 MathJSON `StirlingS2` · `(integer, integer) -> integer`
 
-`StirlingS2` is an alias for `Stirling`, which is the preferred name. Returns the Stirling number of the second kind S(n, k).
+`stirlingS2` is an alias for `stirling`, which is the preferred name. Returns the Stirling number of the second kind S(n, k).
 
 ```epsil
 stirlingS2(6, 3)

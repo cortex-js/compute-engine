@@ -306,7 +306,7 @@ Student's t distribution with ν degrees of freedom (ν &gt; 0, not necessarily 
 
 MathJSON `UniformDistribution` · `(real, real) -> expression<UniformDistribution>`
 
-Continuous uniform distribution on the interval [a, b]. `UniformDistribution([a, b])` is the same, and `UniformDistribution()` is on [0, 1].
+Continuous uniform distribution on the interval [a, b]. `uniformDistribution([a, b])` is the same, and `uniformDistribution()` is on [0, 1].
 
 ### variance
 

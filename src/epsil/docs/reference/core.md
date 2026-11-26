@@ -411,7 +411,7 @@ arc(A, B, C)
 
 `(any) -> unknown`
 
-Assert that a value is present: return it unchanged, or an `expected-present` error when it is ABSENT (`Missing`, `NaN`, or a point whose coordinates are all `NaN`). `Nothing` is the value of an empty block, not an absent datum, and passes through; an error operand propagates. Epsil spells it `x?!`. Only the value itself is checked, never the cells of a collection.
+Assert that a value is present: return it unchanged, or an `expected-present` error when it is ABSENT (`missing`, `NaN`, or a point whose coordinates are all `NaN`). `nothing` is the value of an empty block, not an absent datum, and passes through; an error operand propagates. Epsil spells it `x?!`. Only the value itself is checked, never the cells of a collection.
 
 ```epsil
 [1, 2][1]?!
@@ -444,7 +444,7 @@ assume(x > 0)
 
 MathJSON `BaseForm` · `(T, (number | string)?) -> T where T: number`
 
-`BaseForm(expr, base=10)`
+`baseForm(expr, base=10)`
 
 ### Block
 
@@ -482,7 +482,7 @@ canonicalForm(Hold(1 + x), "Order")
 
 MathJSON `CaseFold` · `(character | string) -> string`
 
-CaseFold(s): a case-folded form of `s`, for case-insensitive comparison — `CaseFold(a) == CaseFold(b)` tests equality ignoring case. An approximation of Unicode full case folding.
+CaseFold(s): a case-folded form of `s`, for case-insensitive comparison — `caseFold(a) == caseFold(b)` tests equality ignoring case. An approximation of Unicode full case folding.
 
 ```epsil
 caseFold("Straße")
@@ -520,7 +520,7 @@ characters("héllo")
 
 `(any+) -> unknown`
 
-Return the first operand that is not ABSENT (`Missing`, `NaN`, or a point whose coordinates are all `NaN`), evaluated left-to-right. If every operand is absent, the last operand’s value is returned verbatim (still absent). `Nothing` passes through without selecting a fallback.
+Return the first operand that is not ABSENT (`missing`, `NaN`, or a point whose coordinates are all `NaN`), evaluated left-to-right. If every operand is absent, the last operand’s value is returned verbatim (still absent). `nothing` passes through without selecting a fallback.
 
 ```epsil
 Coalesce(missing, NaN, 3, 4)
@@ -537,7 +537,7 @@ Type annotation (`a : b`) — opaque typed head.
 
 MathJSON `Composition` · `(function*) -> function`
 
-The composition of functions, applied right to left: `Composition(f, g, h)(x)` is `f(g(h(x)))`
+The composition of functions, applied right to left: `composition(f, g, h)(x)` is `f(g(h(x)))`
 
 ```epsil
 composition(sin, exp)(0)
@@ -565,7 +565,7 @@ conforms("abc", "Copyable")
 
 `(symbol, type: (string | symbol)?, value: any?, attributes: dictionary<any>?) scope -> any`
 
-Declare a symbol in the current scope, optionally assigning a type and an initial value. An optional trailing attributes dictionary (with keys `type`, `value`, `constant` and `holdUntil`) can further describe the definition, e.g. to declare a constant. Another key in that dictionary is the error `invalid-declaration-attribute`: a dictionary given as the initial value is the `value` attribute, or is followed by an attributes dictionary. With a value, evaluates to that value; otherwise evaluates to `Nothing`.
+Declare a symbol in the current scope, optionally assigning a type and an initial value. An optional trailing attributes dictionary (with keys `type`, `value`, `constant` and `holdUntil`) can further describe the definition, e.g. to declare a constant. Another key in that dictionary is the error `invalid-declaration-attribute`: a dictionary given as the initial value is the `value` attribute, or is followed by an attributes dictionary. With a value, evaluates to that value; otherwise evaluates to `nothing`.
 
 ```epsil
 let x: integer = 5
@@ -576,7 +576,7 @@ x + 1
 
 `(target: string | symbol, protocols: any, whereClauseOrImplementation: any?, implementation: dictionary<any>?) scope -> nothing`
 
-Declare that a type CONFORMS to one or more protocols — the lowering of the Epsil `type string is Hashable & Comparable` statement. The target rides as a type-expression string and must be named and ground (not a union, an anonymous structural type or a `type alias` name); the protocols ride as a `List` of names. An optional trailing dictionary carries the implementation block, member name -&gt; function literal (property handlers under the mangled keys `__get__x` / `__set__x`); it may only accompany a SINGLE protocol. A CONDITIONAL conformance carries, ahead of that block, the source text of its trailing `where` clause as a string: the target is then a head pattern naming the variables the clause binds (`list<T>` with `"where T is Comparable"`). Conformance is monotone — it can be added but never removed — and a re-declaration is a no-op. Evaluates to `Nothing`.
+Declare that a type CONFORMS to one or more protocols — the lowering of the Epsil `type string is Hashable & Comparable` statement. The target rides as a type-expression string and must be named and ground (not a union, an anonymous structural type or a `type alias` name); the protocols ride as a `List` of names. An optional trailing dictionary carries the implementation block, member name -&gt; function literal (property handlers under the mangled keys `__get__x` / `__set__x`); it may only accompany a SINGLE protocol. A CONDITIONAL conformance carries, ahead of that block, the source text of its trailing `where` clause as a string: the target is then a head pattern naming the variables the clause binds (`list<T>` with `"where T is Comparable"`). Conformance is monotone — it can be added but never removed — and a re-declaration is a no-op. Evaluates to `nothing`.
 
 ```epsil
 protocol Copyable {}
@@ -588,7 +588,7 @@ type string is Copyable
 
 `(string | symbol, members: dictionary<any>?, parents: any?, attributes: dictionary<any>?) scope -> nothing`
 
-Declare a PROTOCOL: a set of function and property requirements a type may declare itself to satisfy. Protocols are engine-global (not lexically scoped) and are NOT types, so this is only valid at the top level of a program. The name is a symbol (or a string); the optional members ride as a dictionary of `member -> ["Pair", "function"|"readonly"|"readwrite", signature]`, with the signature as a type-expression string. A `function` member's first parameter must be typed `Self`, the substitution token standing for the conforming type. A protocol with no members is a SEMANTIC protocol (a marker). An optional third operand `["List", parent, …]` names the protocols this one EXTENDS: a type that conforms to it conforms to each of them, and its implementation block may implement their members. The members operand is then required (`["Dictionary"]` when there are none). An optional fourth operand documents the protocol: `["Dictionary", description: string, members: ["Dictionary", member: string]]` (the `///` comments of an Epsil `protocol` statement); the two operands before it are then required. Evaluates to `Nothing`.
+Declare a PROTOCOL: a set of function and property requirements a type may declare itself to satisfy. Protocols are engine-global (not lexically scoped) and are NOT types, so this is only valid at the top level of a program. The name is a symbol (or a string); the optional members ride as a dictionary of `member -> ["Pair", "function"|"readonly"|"readwrite", signature]`, with the signature as a type-expression string. A `function` member's first parameter must be typed `Self`, the substitution token standing for the conforming type. A protocol with no members is a SEMANTIC protocol (a marker). An optional third operand `["List", parent, …]` names the protocols this one EXTENDS: a type that conforms to it conforms to each of them, and its implementation block may implement their members. The members operand is then required (`["Dictionary"]` when there are none). An optional fourth operand documents the protocol: `["Dictionary", description: string, members: ["Dictionary", member: string]]` (the `///` comments of an Epsil `protocol` statement); the two operands before it are then required. Evaluates to `nothing`.
 
 ```epsil
 protocol Area { function area(self: Self) -> number }
@@ -602,7 +602,7 @@ area(square(3))
 
 `(string | symbol, any*) scope -> nothing`
 
-Declare a SUM TYPE: N nominal variants plus the transparent union that names them, in one statement — the lowering of the Epsil sugar `type node = lit(num: number) | plus(op1: node, op2: node)`. The name is a symbol (or a string); each variant is a `["Tuple", name, payload]` pair whose payload is a type string (`"nothing"` for a nullary variant). An optional attributes dictionary at operand 1 — ahead of the variants — carries `typeParams -> "T"` for a generic sum, whose parameters are distributed to each variant by usage. The sum name is forward-registered before the variants are declared, so a payload may name it bare. A variant name that already names a type, is reserved, or is a builtin is rejected and NOTHING is declared. Types are engine-global, so this is only valid at the top level of a program. Evaluates to `Nothing`.
+Declare a SUM TYPE: N nominal variants plus the transparent union that names them, in one statement — the lowering of the Epsil sugar `type node = lit(num: number) | plus(op1: node, op2: node)`. The name is a symbol (or a string); each variant is a `["Tuple", name, payload]` pair whose payload is a type string (`"nothing"` for a nullary variant). An optional attributes dictionary at operand 1 — ahead of the variants — carries `typeParams -> "T"` for a generic sum, whose parameters are distributed to each variant by usage. The sum name is forward-registered before the variants are declared, so a payload may name it bare. A variant name that already names a type, is reserved, or is a builtin is rejected and NOTHING is declared. Types are engine-global, so this is only valid at the top level of a program. Evaluates to `nothing`.
 
 ```epsil
 type shape = circle(r: number) | square(s: number)
@@ -616,7 +616,7 @@ match square(3) {
 
 `(string | symbol, type: string | symbol | type, attributes: dictionary<any>?) scope -> nothing`
 
-Declare a type. Types are engine-global (not lexically scoped), so this is only valid at the top level of a program — inside a block or function body it is an error. The name is a symbol (or a string) and the type a string holding a type expression, e.g. `"tuple<x: integer, y: integer>"`. The type is nominal by default; an optional trailing attributes dictionary with `alias -> True` makes it a structural alias instead, and an additional `typeParams -> "T, U: number"` entry makes it a GENERIC alias whose uses must be applied (`Pair<integer>`). The declaration also mints a value constructor of the same name — `["point", 1, 2]`, an inert tagged value for a nominal type, a checked identity for an alias — except for a `record` body, which mints none. Evaluates to `Nothing`.
+Declare a type. Types are engine-global (not lexically scoped), so this is only valid at the top level of a program — inside a block or function body it is an error. The name is a symbol (or a string) and the type a string holding a type expression, e.g. `"tuple<x: integer, y: integer>"`. The type is nominal by default; an optional trailing attributes dictionary with `alias -> True` makes it a structural alias instead, and an additional `typeParams -> "T, U: number"` entry makes it a GENERIC alias whose uses must be applied (`Pair<integer>`). The declaration also mints a value constructor of the same name — `["point", 1, 2]`, an inert tagged value for a nominal type, a checked identity for an alias — except for a `record` body, which mints none. Evaluates to `nothing`.
 
 ```epsil
 type point = tuple<x: number, y: number>
@@ -710,13 +710,13 @@ evaluateAt(x => x^2, 1, 3)
 
 MathJSON `FindRoot` · `(any, any, dictionary?) -> dictionary`
 
-FindRoot(equations, params): numerically find parameter values that zero the residuals. `equations` is an equation (`lhs == rhs`), a bare residual expression (read as `= 0`), or a list of either. `params` is a list of specs (a bare symbol, `(a, a0)`, or `(a, a0, lo, hi)` with box constraints), matching `FindFit`. Returns a record &#123;parameters, converged, stationary, residualNorm, iterations&#125;.
+FindRoot(equations, params): numerically find parameter values that zero the residuals. `equations` is an equation (`lhs == rhs`), a bare residual expression (read as `= 0`), or a list of either. `params` is a list of specs (a bare symbol, `(a, a0)`, or `(a, a0, lo, hi)` with box constraints), matching `findFit`. Returns a record &#123;parameters, converged, stationary, residualNorm, iterations&#125;.
 
 `converged` is true only at a root: every residual is within the engine's tolerance scaled by its own equation, `|r_i| ≤ tolerance · (1 + Σ_j |J_ij| · max(1, |θ_j|))`, with `J` the Jacobian and `θ` the parameters, so a minimum of the sum of squared residuals that is not a root (`a^2 + 1 = 0`) is `converged: False`.
 
 When the residual is above `tolerance`, the residual itself must confirm the Jacobian term: with each parameter moved by `±2 · tolerance · max(1, |θ_j|)` toward and away from the zero, the change of the residual is the change the Jacobian predicts to within half, and the residual reaches `tolerance`, changes sign, or touches 0 to within the rounding of the parameters. So a steep equation with no root (`2 - sin(10^18 a) = 0`) is not `converged` either.
 
-`stationary` is the solver's own stop test, true at such a minimum too; a stacked system of data rows next to an equation reads it as `FindFit` reads `converged`. An optional third argument is the options dictionary of `FindFit`: `{global: {b: [lo, hi]}}` searches the named parameters (at most two) over the range for the lowest sum of squared residuals of the whole system; the constant phase coefficients of the equations (`3.22` in `cos(3.22 b + c)`) space the grid as the span of a variable does for a fit. With a kernel pool on the engine (`ce.workers`), `evaluateAsync()` scans the grid on the workers.
+`stationary` is the solver's own stop test, true at such a minimum too; a stacked system of data rows next to an equation reads it as `findFit` reads `converged`. An optional third argument is the options dictionary of `findFit`: `{global: {b: [lo, hi]}}` searches the named parameters (at most two) over the range for the lowest sum of squared residuals of the whole system; the constant phase coefficients of the equations (`3.22` in `cos(3.22 b + c)`) space the grid as the span of a variable does for a fit. With a kernel pool on the engine (`ce.workers`), `evaluateAsync()` scans the grid on the workers.
 
 ```epsil
 findRoot(x^2 - 2, [(x, 1)])
@@ -745,7 +745,7 @@ A parameter is a symbol, `Typed(symbol, type)`, a rest parameter `Spread(symbol)
 
 MathJSON `GeometricVector` · `(any, any) -> expression`
 
-Geometric vector (directed segment between two points) — opaque typed head. Distinct from the column-vector `Vector` operator.
+Geometric vector (directed segment between two points) — opaque typed head. Distinct from the column-vector `vector` operator.
 
 ```epsil
 geometricVector(A, B)
@@ -793,7 +793,7 @@ HoldValues(body): evaluate `body` with its assigned free symbols shielded — ea
 
 HoldValues(body, [x, y]): shield only the listed symbols (a List, Set, Tuple, or a single symbol); every other symbol resolves normally.
 
-Constants (`Pi`, `ExponentialE`, …) are never shielded, assumptions survive the shield, and the global values are intact afterwards.
+Constants (`pi`, `exponentialE`, …) are never shielded, assumptions survive the shield, and the global values are intact afterwards.
 
 ```epsil
 let x = 5
@@ -833,13 +833,13 @@ IndexedSequence(1/n, n, 1, oo)
 
 MathJSON `Input` · `(prompt: string?) console -> nothing | string`
 
-Read one line of text from the host: the terminal in a command-line host, the `prompt()` dialog in a browser. The optional operand is a prompt string, displayed before reading. Evaluates to the line read, without the trailing newline; to `Nothing` at end-of-input (or a canceled dialog). On a host with no interactive input, stays unevaluated. When the host denies console access, evaluates to a `capability-denied` error.
+Read one line of text from the host: the terminal in a command-line host, the `prompt()` dialog in a browser. The optional operand is a prompt string, displayed before reading. Evaluates to the line read, without the trailing newline; to `nothing` at end-of-input (or a canceled dialog). On a host with no interactive input, stays unevaluated. When the host denies console access, evaluates to a `capability-denied` error.
 
 ### integerString
 
 MathJSON `IntegerString` · `(integer, integer?, integer?) -> string`
 
-`IntegerString(n, base=10, length)`       return a string representation of the integer `n` in base `base`.       With `length`, the digits of |n| are padded on the left with zeros,       or cut to the last `length` digits.
+`integerString(n, base=10, length)`       return a string representation of the integer `n` in base `base`.       With `length`, the digits of |n| are padded on the left with zeros,       or cut to the last `length` digits.
 
 ```epsil
 integerString(255, 16)
@@ -871,7 +871,7 @@ InvisibleOperator(2, x)
 
 MathJSON `IsError` · `(any) -> boolean`
 
-True if the expression is an `Error` value, or a frozen expression embedding one (`"a" + 1`). False otherwise. Total.
+True if the expression is an `error` value, or a frozen expression embedding one (`"a" + 1`). False otherwise. Total.
 
 ```epsil
 isError(ln("a"))
@@ -887,7 +887,7 @@ isError(1 + 1)
 
 MathJSON `IsMissing` · `(any) -> boolean`
 
-True for `Missing`, `NaN`, or a point whose coordinates are all `NaN`, regardless of provenance. `Nothing` is not an absent datum.
+True for `missing`, `NaN`, or a point whose coordinates are all `NaN`, regardless of provenance. `nothing` is not an absent datum.
 
 ```epsil
 [isMissing(missing), isMissing(NaN), isMissing(0)]
@@ -980,9 +980,9 @@ MathJSON `NSolve` · `(any, any*) -> list`
 
 NSolve(equation, unknown): the solutions of an equation as floats.
 
-It is Mathematica `NSolve`: it takes the same operands as `Solve`, including domain specs and systems of equations, and gives the `N` of each solution of `Solve`:
+It is Mathematica `nSolve`: it takes the same operands as `solve`, including domain specs and systems of equations, and gives the `N` of each solution of `solve`:
 
-`NSolve(x^2 == 2, x)` → `[1.414…, -1.414…]`. When `Solve` finds no solution set, `NSolve` stays unevaluated: for a polynomial `Solve` already gives numeric roots when there is no closed form, and `FindRoot` gives one local root from a start value.
+`nSolve(x^2 == 2, x)` → `[1.414…, -1.414…]`. When `solve` finds no solution set, `nSolve` stays unevaluated: for a polynomial `solve` already gives numeric roots when there is no closed form, and `findRoot` gives one local root from a start value.
 
 ```epsil
 nSolve(x^2 == 2, x)
@@ -1169,7 +1169,7 @@ prime(f)
 
 MathJSON `Print` · `(any*) console -> nothing`
 
-Print the operands to the host console, separated by spaces and followed by a newline. String operands print their content (without quotes); other expressions print their text form. Evaluates to `Nothing`. On a host without a console, prints nothing. When the host denies console access, evaluates to a `capability-denied` error.
+Print the operands to the host console, separated by spaces and followed by a newline. String operands print their content (without quotes); other expressions print their text form. Evaluates to `nothing`. On a host without a console, prints nothing. When the host denies console access, evaluates to a `capability-denied` error.
 
 ```epsil
 print("Hello", 42)
@@ -1197,7 +1197,7 @@ scale(5, shift: 1)
 
 `(protocol: string, member: string, arguments: any*) -> unknown`
 
-Invoke a protocol member on a value — the lowering of a QUALIFIED protocol call (`Comparable.compare(x, y)` in Epsil, whose parse, a `MemberCall` on the protocol name, canonicalizes to `Apply(Field(Comparable, "compare"), x, y)`). The first two operands name the protocol and the member; the rest are the call arguments. Dispatch is dynamic and restricted to the named protocol: the most specific conformance implementation for the runtime type of the first argument is invoked. Several equally specific implementations are `protocol-call-ambiguous`; none is `protocol-implementation-missing`; an argument whose type cannot decide the question leaves the call symbolic.
+Invoke a protocol member on a value — the lowering of a QUALIFIED protocol call (`Comparable.compare(x, y)` in Epsil, whose parse, a `MemberCall` on the protocol name, canonicalizes to `apply(field(Comparable, "compare"), x, y)`). The first two operands name the protocol and the member; the rest are the call arguments. Dispatch is dynamic and restricted to the named protocol: the most specific conformance implementation for the runtime type of the first argument is invoked. Several equally specific implementations are `protocol-call-ambiguous`; none is `protocol-implementation-missing`; an argument whose type cannot decide the question leaves the call symbolic.
 
 ```epsil
 protocol Negatable { function negated(self: Self) -> Self }
@@ -1286,7 +1286,7 @@ MathJSON `ReplaceAll` · `(any, any+) -> any`
 
 ReplaceAll(expr, rules): apply one or more replacement rules to `expr`, then evaluate the result (Mathematica `expr /. rules`).
 
-A rule is `Rule(lhs, rhs)`, or `lhs -> rhs` in LaTeX (parsed as `To`; in Epsil `->` builds a dictionary entry, which is not a rule). Several rules may be given as extra arguments or as a `List`/`Set` of rules; they are applied simultaneously in a single pass.
+A rule is `Rule(lhs, rhs)`, or `lhs -> rhs` in LaTeX (parsed as `to`; in Epsil `->` builds a dictionary entry, which is not a rule). Several rules may be given as extra arguments or as a `List`/`Set` of rules; they are applied simultaneously in a single pass.
 
 ```epsil
 replaceAll(x^2 + x, Rule(x, 3))
@@ -1308,7 +1308,7 @@ replaceAll(x + y, Rule(x, 2))
 
 `(expression<ErrorCode> | string) -> never`
 
-Construct an error value when evaluated: the runtime counterpart of a written `Error(…)`, which is a static diagnostic node. Evaluates to `Error(code)`.
+Construct an error value when evaluated: the runtime counterpart of a written `Error(…)`, which is a static diagnostic node. Evaluates to `error(code)`.
 
 ```epsil
 isError(RuntimeError("oops"))
@@ -1370,7 +1370,7 @@ simplify(sqrt(x^2), x > 0)
 
 MathJSON `Solve` · `(any, any*) -> list`
 
-Solve(equation, unknown): the list of solutions of an equation for the unknown. The equation may be an `Equal` expression or a bare expression (read as `= 0`), e.g. `Solve(x^2 - 1 == 0, x)` or `Solve(x^2 - 1, x)`.
+Solve(equation, unknown): the list of solutions of an equation for the unknown. The equation may be an `Equal` expression or a bare expression (read as `= 0`), e.g. `solve(x^2 - 1 == 0, x)` or `solve(x^2 - 1, x)`.
 
 The unknown may be omitted: it defaults to the equation's single free variable, or to `x` when there are several and one of them is `x`.
 
@@ -1438,7 +1438,7 @@ stringCompare("apple", "banana")
 
 MathJSON `StringFrom` · `(any, format: string?) -> string`
 
-StringFrom(value, format?): create a string from `value`. With no format, a number or a list of numbers is read as Unicode scalar values (`StringFrom(65)` is `"A"`), and any other value is printed (`StringFrom(True)` is `"True"`). The formats are `"default"` (print the value), `"unicode-scalars"`, `"utf-8"` and `"utf-16"`.
+StringFrom(value, format?): create a string from `value`. With no format, a number or a list of numbers is read as Unicode scalar values (`stringFrom(65)` is `"A"`), and any other value is printed (`stringFrom(True)` is `"True"`). The formats are `"default"` (print the value), `"unicode-scalars"`, `"utf-8"` and `"utf-16"`.
 
 ```epsil
 stringFrom(65)
@@ -1575,7 +1575,7 @@ Text("Total: ", 42)
 
 MathJSON `Timing` · `(value, repeat: integer?) -> tuple<number, value>`
 
-`Timing(expr)` evaluates `expr` and returns a pair: the time the evaluation took, in microseconds, then the value; read them as `Timing(expr)[1]` and `Timing(expr)[2]`. `Timing(expr, n)` evaluates `expr` n times (at least 3), drops the fastest and the slowest run, and returns the mean time of the others
+`timing(expr)` evaluates `expr` and returns a pair: the time the evaluation took, in microseconds, then the value; read them as `timing(expr)[1]` and `timing(expr)[2]`. `timing(expr, n)` evaluates `expr` n times (at least 3), drops the fastest and the slowest run, and returns the mean time of the others
 
 ```epsil
 timing(2 + 2)[2]
@@ -1674,7 +1674,7 @@ trimStart("007", "0")
 
 MathJSON `Type` · `(any) -> type`
 
-The STATIC type of an expression, as a type value: `Type(3)` is `TypeFrom("integer")`. The observer does not evaluate its operand, except a name with no declared type, which gives the widened type of the value it holds. Recover the text with `StringFrom(Type(x))`; in a string interpolation a type value renders as its text directly. BREAKING (2026-08-19, ruling R3 of `docs/TYPE-SYSTEM.md`): the result used to be a STRING, and `Type(x) == "some text"` is now always `False` — use `x is T`, `Subtype(Type(x), u)`, or compare `StringFrom` text.
+The STATIC type of an expression, as a type value: `type(3)` is `TypeFrom("integer")`. The observer does not evaluate its operand, except a name with no declared type, which gives the widened type of the value it holds. Recover the text with `stringFrom(type(x))`; in a string interpolation a type value renders as its text directly. BREAKING (2026-08-19, ruling R3 of `docs/TYPE-SYSTEM.md`): the result used to be a STRING, and `type(x) == "some text"` is now always `False` — use `x is T`, `Subtype(type(x), u)`, or compare `stringFrom` text.
 
 ```epsil
 type("hi")

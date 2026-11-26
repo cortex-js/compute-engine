@@ -37,7 +37,7 @@ Inside a `Match` pattern, `Alternatives(p1, p2, …)` matches if any alternative
 
 `(value: any?) -> nothing`
 
-Exit the enclosing loop immediately, optionally with a value (`Break(v)`) that becomes the loop value. A `Break` that reaches the end of a function body or a statement of a `Program` is the error `control-outside-loop`: it does not end a loop of the caller.
+Exit the enclosing loop immediately, optionally with a value (`Break(v)`) that becomes the loop value. A `Break` that reaches the end of a function body or a statement of a `program` is the error `control-outside-loop`: it does not end a loop of the caller.
 
 ### Comprehension
 
@@ -55,17 +55,17 @@ Test whether a value satisfies one or more conditions.
 
 `() -> nothing`
 
-Skip to the next iteration of the enclosing loop. A `Continue` that reaches the end of a function body or a statement of a `Program` is the error `control-outside-loop`.
+Skip to the next iteration of the enclosing loop. A `Continue` that reaches the end of a function body or a statement of a `program` is the error `control-outside-loop`.
 
 ### fixedPoint
 
 MathJSON `FixedPoint` · `(function, initial: any, maxIterations: integer?) -> unknown`
 
-Apply a function repeatedly, starting from an initial value, until two successive values are the same: `FixedPoint(f, x)` is the first of `f(x)`, `f(f(x))`, … that `f` maps to itself.
+Apply a function repeatedly, starting from an initial value, until two successive values are the same: `fixedPoint(f, x)` is the first of `f(x)`, `f(f(x))`, … that `f` maps to itself.
 
 Two values are the same when they are structurally identical, or when they are numbers, one of them a float, that agree to the working precision (their difference is at most a few units of the last digit, relative to their size), or when they are lists or tuples of the same length whose elements are the same. A sequence of exact values stops only when two of them are identical.
 
-Without a maximum, the call stays unevaluated when the iteration cannot converge: when a value contains the previous one (`FixedPoint(Cos, 1)`: `Cos(1)` is exact, and `Cos(Cos(1))` nests it), or when an exact number gains digits at each step. Start from a float (`FixedPoint(Cos, 1.0)`), or evaluate with `N`, for a numeric fixed point.
+Without a maximum, the call stays unevaluated when the iteration cannot converge: when a value contains the previous one (`fixedPoint(cos, 1)`: `cos(1)` is exact, and `cos(cos(1))` nests it), or when an exact number gains digits at each step. Start from a float (`fixedPoint(cos, 1.0)`), or evaluate with `N`, for a numeric fixed point.
 
 The optional third argument is the maximum number of applications, a positive integer. It defaults to the engine iteration limit, and then the call stays unevaluated if the iteration has not converged by that limit (raise `ce.iterationLimit` for a slower one). An Epsil program has no iteration limit unless the host sets one, so there an iteration that does not converge stops only at a maximum or at a time limit. When an explicit maximum is reached, the last value is returned.
 
@@ -83,20 +83,20 @@ fixedPoint(cos, 1.0)
 
 `(expression, expression, expression?) -> any`
 
-`If(c, e1, e2)` evaluates to `e1` when `c` is `True` and to `e2` otherwise; without `e2` it is the absent value of the domain of `e1` when `c` is `False`: `NaN` for a number, `Missing` otherwise, as for a restriction `e1\{c\}`, which parses to `If(c, e1)`. Only the selected expression is evaluated.
+`If(c, e1, e2)` evaluates to `e1` when `c` is `True` and to `e2` otherwise; without `e2` it is the absent value of the domain of `e1` when `c` is `False`: `NaN` for a number, `missing` otherwise, as for a restriction `e1\{c\}`, which parses to `If(c, e1)`. Only the selected expression is evaluated.
 When `c` is a flat list of booleans (`L < 3` with `L` a list), the selection is made at each position and the value is a list: `If([True, False, True], 1, 0)` is `[1, 0, 1]`, and with `L = [1, 3, 5]`, `If(L < 3, L, 0)` is `[1, 0, 0]`. `If(c, e1, e2)` is `Which(c, e1, True, e2)`: see `Which` for the rules of element-wise selection. A condition that is a scalar selects an arm whole, also when the arm is a list.
 
 ### Loop
 
 `(body: expression, iterators: expression*) -> any`
 
-Imperative loop, evaluated **for effect**. `Loop(body)` repeatedly evaluates `body` until it yields a `Break` or `Return`. `Loop(body, Element(x, coll), …)` iterates `body` in nested iteration over the Element clauses (later clauses see earlier bindings; independent clauses produce a Cartesian product). The loop value is `Nothing`, or the value carried by a `Break`/`Return`. For a value-producing comprehension use `Comprehension` or `Map`.
+Imperative loop, evaluated **for effect**. `Loop(body)` repeatedly evaluates `body` until it yields a `Break` or `Return`. `Loop(body, Element(x, coll), …)` iterates `body` in nested iteration over the Element clauses (later clauses see earlier bindings; independent clauses produce a Cartesian product). The loop value is `nothing`, or the value carried by a `Break`/`Return`. For a value-producing comprehension use `Comprehension` or `map`.
 
 ### Match
 
 `(expression, expression+) -> unknown`
 
-Structural pattern match. `Match(subject, MatchCase(pattern, body), …)` evaluates `subject` once, then selects the first case whose pattern matches (structurally, `isSame`-like) and whose guard holds, applying its body to the captured values. Unlike `Which`, `Match` always decides: a symbolic subject that is not structurally a case still falls through to a wildcard case. No matching case yields `Error("match-no-case", subject)`.
+Structural pattern match. `Match(subject, MatchCase(pattern, body), …)` evaluates `subject` once, then selects the first case whose pattern matches (structurally, `isSame`-like) and whose guard holds, applying its body to the captured values. Unlike `Which`, `Match` always decides: a symbolic subject that is not structurally a case still falls through to a wildcard case. No matching case yields `error("match-no-case", subject)`.
 
 ### MatchCase
 
@@ -108,7 +108,7 @@ A case of a `Match`: `MatchCase(pattern, body)` or `MatchCase(pattern, guard, bo
 
 `(body: expression, iterators: expression+) random -> list`
 
-Parallel comprehension: `ParallelComprehension(body, Element(x, xs), …)` is the list that `Comprehension` with the same operands gives, but the passes of the first clause can run in any order. The other clauses run in order inside each pass. The body changes no variable declared outside it. Inside a `WithRandomSeed` frame, the comprehension consumes one draw index and each pass draws from its own frame (`docs/RANDOMNESS-MODEL.md`). Unlike `Comprehension`, it is evaluated at once to a `List`.
+Parallel comprehension: `ParallelComprehension(body, Element(x, xs), …)` is the list that `Comprehension` with the same operands gives, but the passes of the first clause can run in any order. The other clauses run in order inside each pass. The body changes no variable declared outside it. Inside a `withRandomSeed` frame, the comprehension consumes one draw index and each pass draws from its own frame (`docs/RANDOMNESS-MODEL.md`). Unlike `Comprehension`, it is evaluated at once to a `List`.
 
 ### parallelDomain
 
@@ -120,7 +120,7 @@ The domain of the passes of a parallel loop (engine-internal).
 
 `(body: expression, iterators: expression+) random -> any`
 
-Parallel loop, evaluated **for effect**: `ParallelLoop(body, Element(x, coll))` evaluates `body` once for each element of `coll` (a pass), and the passes can run in any order. The body can change a variable declared outside the loop only with `AddTo` (an accumulator). A read of an accumulator in a pass gives an unspecified value. Inside a `WithRandomSeed` frame, the loop consumes one draw index and each pass draws from its own frame (`docs/RANDOMNESS-MODEL.md`). The value is `Nothing`.
+Parallel loop, evaluated **for effect**: `ParallelLoop(body, Element(x, coll))` evaluates `body` once for each element of `coll` (a pass), and the passes can run in any order. The body can change a variable declared outside the loop only with `AddTo` (an accumulator). A read of an accumulator in a pass gives an unspecified value. Inside a `withRandomSeed` frame, the loop consumes one draw index and each pass draws from its own frame (`docs/RANDOMNESS-MODEL.md`). The value is `nothing`.
 
 ### Pin
 
@@ -132,8 +132,8 @@ Inside a `Match` pattern, `Pin(expr)` matches the value of `expr` (evaluated at 
 
 `(expression+) -> unknown`
 
-`Which(c1, e1, c2, e2, …)` evaluates to the value of the first `e` whose condition `c` is `True`, and to `Missing` when no condition is `True`. A last clause with the condition `True` is the default. Only the selected expression is evaluated.
+`Which(c1, e1, c2, e2, …)` evaluates to the value of the first `e` whose condition `c` is `True`, and to `missing` when no condition is `True`. A last clause with the condition `True` is the default. Only the selected expression is evaluated.
 Element-wise selection: when a condition is a flat list of booleans (`L < 3` with `L` a list), the selection is made at each position, as `numpy.select` does, and the value is a list. At each position, the first clause whose condition is `True` there gives the value: an expression that is a list gives its element at that position, any other expression gives its own value. With `L = [1, 3, 5]`, `Which(L < 2, 10, L < 4, L, True, 0)` is `[10, 3, 0]`. A selected expression whose type is a list and whose elements cannot be read yet (`foo(L)` with `foo` undeclared) keeps the `Which` symbolic.
   - A condition that is not a list applies to every position.
-  - Every expression is a number, a point, or a flat list of numbers or of points with the length of the condition, and all have one kind. A nested list, a list of another length, a string and a list of strings are static errors, as is a condition that is a nested list or holds a `Missing` cell. A relation (a boolean) is accepted.
-  - A position that no clause selects holds `NaN` for a number, a point whose coordinates are `NaN` for a point, and `Missing` for a boolean.
+  - Every expression is a number, a point, or a flat list of numbers or of points with the length of the condition, and all have one kind. A nested list, a list of another length, a string and a list of strings are static errors, as is a condition that is a nested list or holds a `missing` cell. A relation (a boolean) is accepted.
+  - A position that no clause selects holds `NaN` for a number, a point whose coordinates are `NaN` for a point, and `missing` for a boolean.

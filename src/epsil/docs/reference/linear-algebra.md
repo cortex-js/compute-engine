@@ -364,7 +364,7 @@ degree(x^3 + 2 * x + 1)
 
 MathJSON `Det` · `(matrix) -> number`
 
-`Det` is an alias for `Determinant`, which is the preferred name. Determinant of a square matrix.
+`det` is an alias for `determinant`, which is the preferred name. Determinant of a square matrix.
 
 ```epsil
 det([[1, 2], [3, 4]])
@@ -747,7 +747,7 @@ N(svd([[3, 0], [0, 4]]))
 
 MathJSON `Shape` · `(value) -> tuple`
 
-Return the shape tuple of an expression. A ragged list has the axes that its items have in common: `Shape([[1, 2], [3]])` is `(2)`.
+Return the shape tuple of an expression. A ragged list has the axes that its items have in common: `shape([[1, 2], [3]])` is `(2)`.
 
 ```epsil
 shape([[1, 2, 3], [4, 5, 6]])

@@ -33,7 +33,7 @@ MathJSON `RegExp` · `(pattern: string, flags: string?) -> regexp`
 
 A compiled regular expression, using the host JavaScript dialect.
 
-The pattern is written most readably as a raw string literal: `RegExp(#"[0-9]+"#)`.
+The pattern is written most readably as a raw string literal: `regExp(#"[0-9]+"#)`.
 
 Two regular expressions are equal when their patterns are the same and their sets of flags are the same; the order of the flags does not count, and no `u` or `v` flag reads as `u`.
 
@@ -43,7 +43,7 @@ MathJSON `StringMatch` · `(subject: character | string, pattern: regexp) -> not
 
 The first match of a regular expression in a string, as a record.
 
-The record holds `match`, `range`, `groups` and `names`; the result is `Nothing` when there is no match.
+The record holds `match`, `range`, `groups` and `names`; the result is `nothing` when there is no match.
 
 ### stringMatchAll
 
@@ -51,4 +51,4 @@ MathJSON `StringMatchAll` · `(subject: character | string, pattern: regexp) -> 
 
 Every non-overlapping match of a regular expression in a string, as a list of records.
 
-Each record has the same shape as `StringMatch`.
+Each record has the same shape as `stringMatch`.

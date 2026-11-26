@@ -43,7 +43,7 @@ Closed-path integral. Evaluates supported explicit contours by the residue theor
 
 MathJSON `ContourIntegrate` · `(expression, variable: symbol, contour: expression) -> number`
 
-Symbolic integral over an explicit closed contour or the real line (`RealLineContour`), using the residue theorem.
+Symbolic integral over an explicit closed contour or the real line (`realLineContour`), using the residue theorem.
 
 ### D
 
@@ -73,7 +73,7 @@ Symbolic integral with optional bounds.
 
 MathJSON `InterpolatingFunction` · `(list<any>, number?) -> number`
 
-Piecewise-quartic dense-output interpolant of a numeric ODE solution (produced by `NDSolveFunction`). The first operand is the per-step coefficient table; applied to a number, it evaluates the solution there (clamping to the covered interval outside it). Stays symbolic for a non-numeric argument.
+Piecewise-quartic dense-output interpolant of a numeric ODE solution (produced by `ndSolveFunction`). The first operand is the per-step coefficient table; applied to a number, it evaluates the solution there (clamping to the covered interval outside it). Stays symbolic for a non-numeric argument.
 
 ### jacobianMatrix
 
@@ -127,7 +127,7 @@ Numerical differential equation solver.
 
 MathJSON `NDSolveFunction` · `(expression, symbol, limits: symbol | tuple, number) -> function`
 
-Numerically solve an ordinary differential equation and return the solution as an applicable function (a `Function` literal wrapping an `InterpolatingFunction`), usable at any point of the integration interval. Same arguments as `NDSolve`, without the sample count.
+Numerically solve an ordinary differential equation and return the solution as an applicable function (a `Function` literal wrapping an `interpolatingFunction`), usable at any point of the integration interval. Same arguments as `ndSolve`, without the sample count.
 
 ### nIntegrate
 

@@ -115,3 +115,49 @@ export function epsilExamples(
       : entry.text;
   });
 }
+
+/** An inline code span of Markdown: a run of backticks, the code, and a run
+ * of the same length that no other backtick follows. */
+const CODE_SPAN = /(?<!`)(`+)(?!`)([\s\S]*?[^`])\1(?!`)/g;
+
+/**
+ * The lines of a description with each inline code span in the Epsil
+ * spelling: the code of a span goes through `epsilExamples()`, so it is
+ * spelled by the rules of the examples, with the same shadowing: the span
+ * `Join([1, 2], 3)` becomes `join([1, 2], 3)`, and the span `Pi` becomes
+ * `pi`. A span that does not parse as Epsil is left as written. A span may run
+ * over two lines: the lines are joined to find the spans. A line may hold
+ * line breaks of its own (a paragraph of several lines): the result has one
+ * line for each line of `lines`, with the same line breaks.
+ */
+export function epsilDescription(
+  engine: ComputeEngine,
+  lines: readonly string[]
+): string[] {
+  const text = lines.join('\n');
+  if (!text.includes('`')) return [...lines];
+  const converted = text.replace(
+    CODE_SPAN,
+    (span, fence: string, code: string) => {
+      // A double-backtick span (``` `` `Sin` `` ```) pads its code with one
+      // space on each side: the padding is not part of the code.
+      const padded =
+        code.length > 2 && code.startsWith(' ') && code.endsWith(' ');
+      const inner = padded ? code.slice(1, -1) : code;
+      const spelled = epsilExamples(engine, [inner])[0];
+      if (spelled === inner) return span;
+      return padded
+        ? `${fence} ${spelled} ${fence}`
+        : `${fence}${spelled}${fence}`;
+    }
+  );
+  // The spelling rewrites names only, so the text keeps every line break:
+  // the pieces are grouped back into the lines they came from.
+  const pieces = converted.split('\n');
+  let next = 0;
+  return lines.map((line) => {
+    const count = line.split('\n').length;
+    next += count;
+    return pieces.slice(next - count, next).join('\n');
+  });
+}

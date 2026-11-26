@@ -63,7 +63,10 @@
   library items of `epsilCompletions()` have `examples`: the `examples` of
   the definition, written with the Epsil names (`join([1, 2], [3, 4])`,
   where the definition writes `Join([1, 2], [3, 4])`), and the `@example`
-  tags of a `///` comment.
+  tags of a `///` comment. The code in the text of a description is spelled
+  the same way (CE-1836): the description in the hover of `join` shows
+  `join([1, 2], 3)` where it showed `Join([1, 2], 3)`, and so do `epsil doc`
+  and the reference pages. Code that does not parse as Epsil is left as written.
 
 - **The functions of the collections library document their parameters,
   and several of their parameters have names.** The signature help and the

@@ -25,7 +25,7 @@ category.
 
 MathJSON `BellNumber` · `(integer, number?) -> number`
 
-Compute the Bell number B(n), the number of partitions of a set of n elements. With a second operand, `BellNumber(n, x)` is the Bell (Touchard) polynomial `B_n(x)`, with `B_n(1) = BellNumber(n)`.
+Compute the Bell number B(n), the number of partitions of a set of n elements. With a second operand, `bellNumber(n, x)` is the Bell (Touchard) polynomial `B_n(x)`, with `B_n(1) = bellNumber(n)`.
 
 ### binomial
 
@@ -55,13 +55,13 @@ Return all k-element combinations of a collection.
 
 MathJSON `Fibonacci` · `(integer, number?) -> number`
 
-Compute the nth Fibonacci number. With a second operand, `Fibonacci(n, x)` is the Fibonacci polynomial `F_n(x)`, with `F_n(1) = Fibonacci(n)`.
+Compute the nth Fibonacci number. With a second operand, `fibonacci(n, x)` is the Fibonacci polynomial `F_n(x)`, with `F_n(1) = fibonacci(n)`.
 
 ### integerPartitions
 
 MathJSON `IntegerPartitions` · `(integer, any?, list<integer>?, integer?) -> list<list<integer>>`
 
-Return the partitions of n, each a list of its positive parts in non-increasing order, in reverse lexicographic order. The second operand limits the number of parts: `IntegerPartitions(n, k)` keeps those of at most k parts, a list `[k]` exactly k parts, and `[kmin, kmax]` or `[kmin, kmax, step]` a range of numbers of parts (kmax may be `Infinity`, and `All` is no limit). `IntegerPartitions(n, kspec, [s1, s2, ...])` draws the parts from the given positive integers, and a fourth operand m keeps the first m partitions. There is no partition of a negative n, and the only one of 0 is the empty list.
+Return the partitions of n, each a list of its positive parts in non-increasing order, in reverse lexicographic order. The second operand limits the number of parts: `integerPartitions(n, k)` keeps those of at most k parts, a list `[k]` exactly k parts, and `[kmin, kmax]` or `[kmin, kmax, step]` a range of numbers of parts (kmax may be `Infinity`, and `all` is no limit). `IntegerPartitions(n, kspec, [s1, s2, ...])` draws the parts from the given positive integers, and a fourth operand m keeps the first m partitions. There is no partition of a negative n, and the only one of 0 is the empty list.
 
 ```epsil
 integerPartitions(4)
@@ -88,7 +88,7 @@ Compute the multinomial coefficient for multiple integers.
 
 MathJSON `Permutations` · `((S, integer?) -> list<string> where S: string) & ((integer<0..>, integer?) -> list<list<integer>>) & ((collection, integer?) -> list<list>)`
 
-Return all permutations of length k (default full length) of a collection. `Permutations(n)` for a non-negative integer n is the permutations of `Range(1, n)`, as lists, and `Permutations(n, k)` its arrangements of length k.
+Return all permutations of length k (default full length) of a collection. `permutations(n)` for a non-negative integer n is the permutations of `Range(1, n)`, as lists, and `permutations(n, k)` its arrangements of length k.
 
 ### pochhammer
 

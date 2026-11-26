@@ -154,7 +154,7 @@ Legendre polynomial Pₙ(x), with P₀ = 1, P₁ = x and (n+1)Pₙ₊₁ = (2n+1
 
 MathJSON `LogBarnesG` · `(complex | infinity) -> number`
 
-The logarithm of the Barnes G-function, continued analytically with `LogGamma`: its imaginary part is not principal on the negative axis. −∞ at the zeros of G, the non-positive integers.
+The logarithm of the Barnes G-function, continued analytically with `logGamma`: its imaginary part is not principal on the negative axis. −∞ at the zeros of G, the non-positive integers.
 
 ```epsil
 logBarnesG(5)
@@ -170,7 +170,7 @@ N(logBarnesG(-1/2))
 
 MathJSON `LogGamma` · `(complex | infinity) -> number`
 
-The analytic continuation of ln Γ(z), with its branch cut on (−∞, 0]; not `GammaLn`, the principal logarithm of Γ(z), which jumps by 2πi across the zeros of Im Γ.
+The analytic continuation of ln Γ(z), with its branch cut on (−∞, 0]; not `gammaLn`, the principal logarithm of Γ(z), which jumps by 2πi across the zeros of Im Γ.
 
 ```epsil
 logGamma(5)

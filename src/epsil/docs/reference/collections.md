@@ -315,7 +315,7 @@ MathJSON `Adjoin` · `(set<any>, any+) -> set`
 
 The ring obtained by adjoining one or more elements to a base ring.
 
-`Adjoin(Integers, Sqrt(2))` is ℤ[√2]; `Adjoin(Integers, ["Complex", 0, 1])` is the Gaussian integers ℤ[i]; `Adjoin(Integers, "x")` is the polynomial ring ℤ[x].
+`adjoin(integers, sqrt(2))` is ℤ[√2]; `adjoin(integers, ["Complex", 0, 1])` is the Gaussian integers ℤ[i]; `adjoin(integers, "x")` is the polynomial ring ℤ[x].
 
 Inert: the adjunction is not expanded, and membership in it is not decided.
 
@@ -347,7 +347,7 @@ MathJSON `Any` · `(xs: collection<T>, predicate: ((T) any -> boolean)?) -> bool
 
 Return True if the predicate holds for at least one element of the collection (or if any element is True when no predicate is given).
 
-To test membership of a specific value, use `Contains(xs, v)` — the structural-identity specialization `Any(xs, (e) => e === v)`.
+To test membership of a specific value, use `contains(xs, v)` — the structural-identity specialization `any(xs, (e) => e === v)`.
 
 ```epsil
 any([1, 3, 4], x => x % 2 == 0)
@@ -406,11 +406,11 @@ If the index is negative, it is counted from the end.
 
 Multiple indices can be provided to access nested collections (e.g., matrices).
 
-If the index is a finite collection of booleans, returns the elements where the mask is True (a mask is a filter over the positions up to the shorter of the mask and the collection; a `Missing` or `NaN` member keeps nothing).
+If the index is a finite collection of booleans, returns the elements where the mask is True (a mask is a filter over the positions up to the shorter of the mask and the collection; a `missing` or `NaN` member keeps nothing).
 
 If the index is a finite collection of integers, returns the elements at those indices, preserving position: an out-of-range index yields the absence marker, it is not dropped.
 
-Out-of-band access (an out-of-range index, or a dictionary key that is not present) yields a POSITION-PRESERVING marker: `NaN` when the collection’s elements are numeric, `Missing` otherwise. It never yields `Nothing`, which would erase the position.
+Out-of-band access (an out-of-range index, or a dictionary key that is not present) yields a POSITION-PRESERVING marker: `NaN` when the collection’s elements are numeric, `missing` otherwise. It never yields `nothing`, which would erase the position.
 
 An index that is provably not an integer (`2.5`, `3/2`, `5 + √17`), as a scalar or as an entry of an index list, selects no element and yields the same marker. An index that cannot be decided (an unknown, an exact constant within rounding of an integer) leaves `At` unevaluated.
 
@@ -431,7 +431,7 @@ MathJSON `Chunk` · `((xs: S, count: integer) -> list<string> where S: string) &
 - `xs` — The list or string to split. Sample: `[1, 2, 3, 4, 5, 6]`.
 - `count` — The number of groups, at least 1; each group has ⌈length / count⌉ elements except the last ones, which can be shorter or empty. Sample: `3`.
 
-Return the collection split into `count` groups of consecutive elements. See `Partition` for splitting into fixed-size chunks.
+Return the collection split into `count` groups of consecutive elements. See `partition` for splitting into fixed-size chunks.
 
 ```epsil
 chunk([1, 2, 3, 4, 5, 6], 3)
@@ -447,7 +447,7 @@ MathJSON `ChunkBy` · `((xs: S, key: (character) any -> unknown) -> list<string>
 
 Split the collection into maximal runs of consecutive elements over which the key function yields the same value.
 
-Returns a list of lists. Unlike `GroupBy`, only adjacent elements are grouped, so a key value that recurs after a different run starts a new chunk.
+Returns a list of lists. Unlike `groupBy`, only adjacent elements are grouped, so a key value that recurs after a different run starts a new chunk.
 
 ```epsil
 chunkBy([1, 3, 2, 4, 5], x => x % 2)
@@ -498,9 +498,9 @@ MathJSON `Contains` · `(xs: collection<any>, element: any) -> boolean`
 - `xs` — The collection to search; the elements of a string are its characters. Sample: `[1, 2, 3]`.
 - `element` — The value to find, compared structurally. Sample: `2`.
 
-Return True if the collection contains the given element (structural identity, like `===`), False otherwise. An absent element is found where the same marker sits: `Contains([1, NaN], NaN)` is True.
+Return True if the collection contains the given element (structural identity, like `===`), False otherwise. An absent element is found where the same marker sits: `contains([1, NaN], NaN)` is True.
 
-Equivalent to `Any(xs, (e) => e === v)`; use `Any` to test an arbitrary predicate instead of a specific value.
+Equivalent to `any(xs, (e) => e === v)`; use `any` to test an arbitrary predicate instead of a specific value.
 
 ```epsil
 contains([1, 2, 3], 2)
@@ -516,7 +516,7 @@ MathJSON `ContainsSequence` · `(xs: indexed_collection<T>, needle: indexed_coll
 
 Return `True` when `needle` occurs as a contiguous subsequence of the indexed collection.
 
-Unlike `Contains`, which tests membership of a single element, the needle is read as a sequence: `ContainsSequence("abc", "ab")` is `True` while `Contains("abc", "ab")` is `False`.
+Unlike `contains`, which tests membership of a single element, the needle is read as a sequence: `containsSequence("abc", "ab")` is `True` while `contains("abc", "ab")` is `False`.
 
 ```epsil
 containsSequence([1, 2, 3, 4], [2, 3])
@@ -531,11 +531,11 @@ MathJSON `Count` · `(xs: collection<any>, element: any?, levels: any?) -> infin
 - `element` — The value to count, compared structurally, or a predicate that each counted element satisfies. Sample: `1`.
 - `levels` — The levels of a nested list to count in, with a value to count: `n` for the levels 1 to `n`, `[n]` for the level `n` only, `[from, to]` for a range. Sample: `2`.
 
-`Count(xs)`: the number of elements in the collection.
+`count(xs)`: the number of elements in the collection.
 
-`Count(xs, v)`: how many elements are structurally the same as `v`.
+`count(xs, v)`: how many elements are structurally the same as `v`.
 
-`Count(xs, p)`: how many elements satisfy the predicate `p`.
+`count(xs, p)`: how many elements satisfy the predicate `p`.
 
 ```epsil
 count([1, 2, 1, 3, 1], 1)
@@ -577,7 +577,7 @@ MathJSON `Dedup` · `(collection<any>) -> collection`
 
 Return the collection with consecutive duplicate elements collapsed to a single element.
 
-Only immediately-adjacent equal elements are removed; unlike `Unique`, a value that recurs after a different element is kept.
+Only immediately-adjacent equal elements are removed; unlike `unique`, a value that recurs after a different element is kept.
 
 ```epsil
 dedup([1, 1, 2, 2, 1])
@@ -598,9 +598,9 @@ A negative index counts from the end. An out-of-range, zero, or non-integer inde
 
 Deleting from a string yields a string.
 
-On a dictionary or a record, `DeleteAt(d, key)` returns a copy without the entry of the string `key`; `d` does not change. A key that is not there gives the value unchanged. The type of a record loses the field (`record{a: integer, b: string?}` gives `record{a: integer}`); with a key known only at evaluation, every field of the record becomes optional.
+On a dictionary or a record, `deleteAt(d, key)` returns a copy without the entry of the string `key`; `d` does not change. A key that is not there gives the value unchanged. The type of a record loses the field (`record{a: integer, b: string?}` gives `record{a: integer}`); with a key known only at evaluation, every field of the record becomes optional.
 
-A value of a declared (nominal) record type is not a collection, so `DeleteAt` refuses it, as `At` does.
+A value of a declared (nominal) record type is not a collection, so `deleteAt` refuses it, as `At` does.
 
 ```epsil
 deleteAt([1, 2, 3, 4], 2)
@@ -658,7 +658,7 @@ MathJSON `Drop` · `((xs: T, count: number) -> T where T: string) & ((xs: indexe
 
 Return the indexed collection without its first `count` elements.
 
-A negative `count` counts from the end: `Drop(xs, -n)` is the collection without its last `n` elements.
+A negative `count` counts from the end: `drop(xs, -n)` is the collection without its last `n` elements.
 
 A count past the length is clamped: the result is empty.
 
@@ -786,13 +786,13 @@ MathJSON `Field` · `(value: any, field: string) -> unknown`
 
 Return the named field of a value: `p.x` in Epsil.
 
-On a record or dictionary value, `Field(d, "x")` behaves exactly as `d["x"]` (`At` semantics, including the absence marker for a key a dictionary may not have).
+On a record or dictionary value, `field(d, "x")` behaves exactly as `d["x"]` (`At` semantics, including the absence marker for a key a dictionary may not have).
 
-On a value of a NOMINAL type whose definition body has named fields (a record body, or a named-tuple body), the field is resolved through the type definition — the sanctioned accessor window of the nominal-types design (D6/§4.5b D16). This does not make the value a collection: `First(p)` and `p["x"]` keep rejecting.
+On a value of a NOMINAL type whose definition body has named fields (a record body, or a named-tuple body), the field is resolved through the type definition — the sanctioned accessor window of the nominal-types design (D6/§4.5b D16). This does not make the value a collection: `first(p)` and `p["x"]` keep rejecting.
 
 A field name that is not in a record/named-tuple definition is a static defect (the result type is `error`); on an unknown-typed operand the expression stays symbolic.
 
-Record types are closed: on an operand of a record type, a field name that the type does not list is refused when the expression is boxed (`unknown-field`). An optional field (`b: string?`) that the value leaves out reads as the absent value of its type: `Missing`, or `NaN` for a numeric field.
+Record types are closed: on an operand of a record type, a field name that the type does not list is refused when the expression is boxed (`unknown-field`). An optional field (`b: string?`) that the value leaves out reads as the absent value of its type: `missing`, or `NaN` for a numeric field.
 
 ```epsil
 {x -> 1, y -> 2}.y
@@ -810,7 +810,7 @@ Return the elements of the collection for which the predicate function returns T
 
 Equivalent to `[x for x in xs if p(x)]`.
 
-The collection is the first argument and the predicate the second. `Map` has the opposite order, `Map(f, xs)`, because it takes any number of collections after its function.
+The collection is the first argument and the predicate the second. `map` has the opposite order, `map(f, xs)`, because it takes any number of collections after its function.
 
 ```epsil
 filter([1, 2, 3, 4, 5, 6], x => x % 2 == 0)
@@ -824,7 +824,7 @@ MathJSON `Find` · `(xs: indexed_collection<T>, predicate: (T) any -> boolean) -
 - `xs` — The collection to search, from its first element. Sample: `[1, 4, 9, 16]`.
 - `predicate` — The test that the element found passes. Sample: `x => x > 5`.
 
-Return the first element of the collection satisfying the predicate. When no element satisfies it, return the absent value of the domain of the elements: `NaN` for numbers, a point whose coordinates are all `NaN` for points, and `Missing` otherwise.
+Return the first element of the collection satisfying the predicate. When no element satisfies it, return the absent value of the domain of the elements: `NaN` for numbers, a point whose coordinates are all `NaN` for points, and `missing` otherwise.
 
 ```epsil
 find([1, 4, 9, 16], x => x > 5)
@@ -854,7 +854,7 @@ MathJSON `FlatMap` · `(xs: collection<T>, mapping: (T) any -> U) -> list where 
 
 Map a function over a collection and concatenate the results into a single list, splicing collection-valued results and keeping scalar results as single elements.
 
-The collection is the first argument, as for `Filter`. `Map` has the opposite order, `Map(f, xs)`, because it takes any number of collections after its function.
+The collection is the first argument, as for `filter`. `map` has the opposite order, `map(f, xs)`, because it takes any number of collections after its function.
 
 ```epsil
 flatMap([1, 2, 3], x => [x, x])
@@ -871,7 +871,7 @@ MathJSON `Fold` · `(reducer: (unknown, T) any -> unknown, initial: value, xs: c
 
 Fold a collection to a single value, applying a binary function f(accumulator, element) left to right from an initial value.
 
-The function is the first argument and the collection the last. `Reduce` does the same with the collection first: `Reduce(xs, f, initial)`.
+The function is the first argument and the collection the last. `reduce` does the same with the collection first: `reduce(xs, f, initial)`.
 
 ```epsil
 fold((a, b) => a + b, 0, [1, 2, 3, 4])
@@ -910,7 +910,7 @@ MathJSON `IndexOf` · `(xs: indexed_collection<any>, element: any) -> integer`
 - `xs` — The list or string to search; the elements of a string are its characters. Sample: `[10, 20, 30]`.
 - `element` — The value to find, compared structurally. Sample: `20`.
 
-Return the 1-based index of the first occurrence of value in collection, or 0 if not found. The comparison is structural, so an absent value is found where the same marker sits: `IndexOf([1, NaN], NaN)` is 2. Stays unevaluated when the collection cannot be searched (a symbol with no value, an unbounded source with no match).
+Return the 1-based index of the first occurrence of value in collection, or 0 if not found. The comparison is structural, so an absent value is found where the same marker sits: `indexOf([1, NaN], NaN)` is 2. Stays unevaluated when the collection cannot be searched (a symbol with no value, an unbounded source with no match).
 
 ```epsil
 indexOf([10, 20, 30], 20)
@@ -1012,7 +1012,7 @@ Produce an infinite sequence by repeatedly applying a function to the previous v
 
 The function is invoked as `f(index, acc)`: `index` is the 1-based position of the element being produced, and `acc` is the previous element — the `initial` value when producing element 1. Element `k` is therefore `f(k, element(k-1))`.
 
-A function whose type says it is UNARY is applied to the accumulator alone (`Iterate(2 * _, 1)` produces `[2, 4, 8, 16, …]`); a statically-unknown arity keeps the two-argument form.
+A function whose type says it is UNARY is applied to the accumulator alone (`iterate(2 * _, 1)` produces `[2, 4, 8, 16, …]`); a statically-unknown arity keeps the two-argument form.
 
 ```epsil
 take(iterate(x => 2x, 1), 5)
@@ -1029,9 +1029,9 @@ Join the elements of some collections into a flat collection.
 
 A tuple operand is appended as a single element, not spliced.
 
-A scalar operand is appended as a single element too: `Join([1, 2], 3)` is `[1, 2, 3]`.
+A scalar operand is appended as a single element too: `join([1, 2], 3)` is `[1, 2, 3]`.
 
-When every operand is a string, the result is their concatenation as a string: `Join` is the variadic string concatenation.
+When every operand is a string, the result is their concatenation as a string: `join` is the variadic string concatenation.
 
 ```epsil
 join([1, 2], [3, 4])
@@ -1087,7 +1087,7 @@ MathJSON `Length` · `(any) -> infinity | integer`
 
 - argument 1 — The collection or string to measure. Sample: `[5, 6, 7]`.
 
-Number of elements in a collection. Returns +oo for an infinite collection (an unbounded Range, `Integers`, `Repeat(5)`, an interval), as `Count` does, an `incompatible-type` error for an operand that is decidably not a collection, `Missing` for an absent operand, and stays unevaluated for a collection whose size is not known (a `Filter` over an infinite source).
+Number of elements in a collection. Returns +oo for an infinite collection (an unbounded Range, `integers`, `repeat(5)`, an interval), as `count` does, an `incompatible-type` error for an operand that is decidably not a collection, `missing` for an absent operand, and stays unevaluated for a collection whose size is not known (a `filter` over an infinite source).
 
 ```epsil
 length([5, 6, 7])
@@ -1168,7 +1168,7 @@ With a single collection, equivalent to `[f(x) for x in xs]`. With multiple coll
 
 `Map(f, xs, ys) = [f(x1, y1), f(x2, y2), …]`, with the length of the shortest input.
 
-The mapping function is the first argument, because `Map` takes any number of collections after it. Most other operations that take a function, such as `Filter`, `FlatMap` and `Reduce`, take one collection and put it first: `Filter(xs, p)`. `Map(xs, f)` is an `incompatible-type` error.
+The mapping function is the first argument, because `map` takes any number of collections after it. Most other operations that take a function, such as `filter`, `flatMap` and `reduce`, take one collection and put it first: `filter(xs, p)`. `map(xs, f)` is an `incompatible-type` error.
 
 ```epsil
 map(x => x^2, [1, 2, 3])
@@ -1195,7 +1195,7 @@ maxBy(["pear", "fig", "apple"], length)
 
 Call the member `name` of a value with the value as its first argument: `c.area(2)` in Epsil.
 
-A parse-level node. Canonicalization rewrites it to `Apply(Field(c, "area"), 2)` when the receiver's type declares a field `area` (a stored function is called), or to the bare protocol call `area(c, 2)` when `area` is a protocol function member; a canonical expression never contains it.
+A parse-level node. Canonicalization rewrites it to `apply(field(c, "area"), 2)` when the receiver's type declares a field `area` (a stored function is called), or to the bare protocol call `area(c, 2)` when `area` is a protocol function member; a canonical expression never contains it.
 
 ### minBy
 
@@ -1401,7 +1401,7 @@ With a predicate function instead of an integer, split into two groups: elements
 
 Asymmetry: with no `step`, the trailing partial chunk is included; with an explicit `step`, only complete windows are returned.
 
-See `Chunk` for splitting into a given number of nearly-equal groups.
+See `chunk` for splitting into a given number of nearly-equal groups.
 
 ```epsil
 partition([1, 2, 3, 4, 5], 2)
@@ -1526,11 +1526,11 @@ MathJSON `QuotientRing` · `(set<any>, any) -> set`
 
 The quotient of a ring by the ideal generated by the second argument.
 
-`QuotientRing(Integers, n)` is ℤ/nℤ, the integers modulo `n`.
+`quotientRing(integers, n)` is ℤ/nℤ, the integers modulo `n`.
 
-For an integer literal `n` ≥ 1 it is a finite collection with `n` elements, and `Count` answers. A symbolic modulus, or a base other than `Integers`, stays inert.
+For an integer literal `n` ≥ 1 it is a finite collection with `n` elements, and `count` answers. A symbolic modulus, or a base other than `integers`, stays inert.
 
-The elements of ℤ/nℤ are `ResidueClass(0, n)` … `ResidueClass(n - 1, n)`, which it lists, and the element type is `value`. `Element(ResidueClass(k, n), ℤ/nℤ)` is `True`. An integer is not an element: `Element(7, ℤ/5ℤ)` is `False`, because 7 is a representative of a class, not the class.
+The elements of ℤ/nℤ are `residueClass(0, n)` … `residueClass(n - 1, n)`, which it lists, and the element type is `value`. `Element(residueClass(k, n), ℤ/nℤ)` is `True`. An integer is not an element: `Element(7, ℤ/5ℤ)` is `False`, because 7 is a representative of a class, not the class.
 
 ```epsil
 quotientRing(integers, 5)
@@ -1573,9 +1573,9 @@ MathJSON `RangeOf` · `(xs: indexed_collection<T>, needle: indexed_collection<T>
 - `needle` — The run of consecutive elements to find. Sample: `[30, 40]`.
 - `from` — The 1-based index where the search starts, 1 by default. Sample: `2`.
 
-Return the 1-based inclusive index span of the first occurrence of `needle` as a contiguous subsequence of the indexed collection, or `Missing` when it does not occur.
+Return the 1-based inclusive index span of the first occurrence of `needle` as a contiguous subsequence of the indexed collection, or `missing` when it does not occur.
 
-The search starts at index `from` (1 by default) and the span is always expressed in the original collection's indices, so `RangeOf(xs, needle, Last(r) + 1)` finds the next non-overlapping occurrence and the loop ends at `Missing`.
+The search starts at index `from` (1 by default) and the span is always expressed in the original collection's indices, so `rangeOf(xs, needle, last(r) + 1)` finds the next non-overlapping occurrence and the loop ends at `missing`.
 
 On a string the needle is matched character by character, so a match never begins or ends inside a grapheme cluster.
 
@@ -1628,7 +1628,7 @@ MathJSON `Repeat` · `(value: any, count: integer?) -> list`
 - `value` — The value to repeat; a value that is not pure is evaluated again for each element. Sample: `0`.
 - `count` — The number of copies, 0 or less for an empty list; without it the sequence is infinite. Sample: `3`.
 
-Produce a sequence by repeating a single value. With 1 argument, returns an infinite sequence; with 2 arguments (value, count), returns a finite list of `count` copies. A value that is not pure (`Random()`) is evaluated once per element, in order, and each read of an element of a lazy `Repeat` evaluates it again.
+Produce a sequence by repeating a single value. With 1 argument, returns an infinite sequence; with 2 arguments (value, count), returns a finite list of `count` copies. A value that is not pure (`random()`) is evaluated once per element, in order, and each read of an element of a lazy `repeat` evaluates it again.
 
 ```epsil
 repeat(0, 3)
@@ -1668,11 +1668,11 @@ MathJSON `ResidueClass` · `(k: any, n: any) -> residue`
 
 An element of ℤ/nℤ: the class of the integer `k` modulo `n`.
 
-The canonical form reduces `k` into 0…n−1, so `ResidueClass(7, 5)` is `ResidueClass(2, 5)`, and two classes are equal when their canonical forms are. `n` must be an exact integer literal ≥ 1, and `k` an exact integer (or a rational with a denominator that is a unit mod `n`); any other call stays inert, a float `k` or `n` included.
+The canonical form reduces `k` into 0…n−1, so `residueClass(7, 5)` is `residueClass(2, 5)`, and two classes are equal when their canonical forms are. `n` must be an exact integer literal ≥ 1, and `k` an exact integer (or a rational with a denominator that is a unit mod `n`); any other call stays inert, a float `k` or `n` included.
 
-Sums, differences, products and integer powers of classes of one modulus are classes. An exact integer or rational next to a class is read in its ring: `ResidueClass(5, 7) + 3` is `ResidueClass(1, 7)`. A float is not. Arithmetic on classes of different moduli stays unevaluated. The inverse, a division and a negative power need a unit: when `gcd(k, n) ≠ 1` they stay unevaluated.
+Sums, differences, products and integer powers of classes of one modulus are classes. An exact integer or rational next to a class is read in its ring: `residueClass(5, 7) + 3` is `residueClass(1, 7)`. A float is not. Arithmetic on classes of different moduli stays unevaluated. The inverse, a division and a negative power need a unit: when `gcd(k, n) ≠ 1` they stay unevaluated.
 
-Classes are not ordered, and `Mod` is not this: `Mod(7, 5)` is the integer remainder 2. The elements of `QuotientRing(Integers, n)` are the classes `ResidueClass(0, n)` … `ResidueClass(n - 1, n)`.
+Classes are not ordered, and `Mod` is not this: `Mod(7, 5)` is the integer remainder 2. The elements of `quotientRing(integers, n)` are the classes `residueClass(0, n)` … `residueClass(n - 1, n)`.
 
 LaTeX: `\overline{k}_{n}`, for integer literals `k` and `n ≥ 1`.
 
@@ -1837,7 +1837,7 @@ Return a contiguous run of elements from an indexed collection.
 
 Given `start` and `end` (1-based, inclusive), a negative index is counted from the end and out-of-bounds indices are clamped.
 
-Given a `range` (an ascending index span such as `2..4`), returns the elements at those indices: `Slice(xs, r)` is `Slice(xs, First(r), Last(r))`.
+Given a `range` (an ascending index span such as `2..4`), returns the elements at those indices: `slice(xs, r)` is `slice(xs, first(r), last(r))`.
 
 ```epsil
 slice([10, 20, 30, 40, 50], 2, 4)
@@ -1956,9 +1956,9 @@ MathJSON `Table` · `(function, integer+) -> collection`
 - argument 1 — The function of the indices, or an expression in the index variables of the iterator specs. Sample: `i => i^2`.
 - arguments 2, … — The size of one dimension, or an iterator spec `(i, n)`, `(i, lo, hi)` or `(i, lo, hi, step)`. Sample: `5`.
 
-Return the list of the values of a function at each index of the given dimensions, as `Tabulate` (the preferred name) does.
+Return the list of the values of a function at each index of the given dimensions, as `tabulate` (the preferred name) does.
 
-It also accepts Mathematica-style iterator specs, e.g. `Table(i^2, {i, n})` (`i` from 1 to `n`), `Table(i^2, {i, 1, n})` or `Table(i, {i, lo, hi, step})`, and the equivalent tuple spelling `Table(i^2, (i, 1, n))`.
+It also accepts Mathematica-style iterator specs, e.g. `table(i^2, {i, n})` (`i` from 1 to `n`), `table(i^2, {i, 1, n})` or `table(i, {i, lo, hi, step})`, and the equivalent tuple spelling `table(i^2, (i, 1, n))`.
 
 ```epsil
 table(i^2, (i, 1, 5))
@@ -1985,7 +1985,7 @@ MathJSON `Take` · `((xs: T, count: number) -> T where T: string) & ((xs: indexe
 
 Return the first `n` elements of an indexed collection.
 
-A negative `n` counts from the end: `Take(xs, -n)` is the last `n` elements.
+A negative `n` counts from the end: `take(xs, -n)` is the last `n` elements.
 
 A count past the length is clamped: the result is the whole collection.
 

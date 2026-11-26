@@ -382,7 +382,7 @@ N(airyBiPrime(0))
 
 MathJSON `Arg` · `(complex | infinity) -> number`
 
-`Arg` is an alias for `Argument`, which is the preferred name. Returns the complex argument (phase angle) of a number.
+`arg` is an alias for `argument`, which is the preferred name. Returns the complex argument (phase angle) of a number.
 
 ```epsil
 [arg(i), arg(1 + i)]
@@ -873,7 +873,7 @@ hurwitzZeta(2, 2)
 
 MathJSON `Im` · `(complex | infinity) -> number`
 
-`Im` is an alias for `Imaginary`, which is the preferred name. Returns the imaginary part of a complex number.
+`im` is an alias for `imaginary`, which is the preferred name. Returns the imaginary part of a complex number.
 
 ```epsil
 im(3 + 4i)
@@ -928,7 +928,7 @@ Like Min, but defined for open sets.
 
 MathJSON `Interpret` · `(any) -> any`
 
-Interpret a notational expression as its mathematical meaning. In v1: a continuation-bearing `Add`/`Multiply` (e.g. `1 + 2 + \dots + n`) becomes a `Sum`/`Product`. Returns the argument unchanged when the (strict) inference gate does not pass
+Interpret a notational expression as its mathematical meaning. In v1: a continuation-bearing `Add`/`Multiply` (e.g. `1 + 2 + \dots + n`) becomes a `sum`/`product`. Returns the argument unchanged when the (strict) inference gate does not pass
 
 ```epsil
 interpret(1 + 2 + ContinuationPlaceholder + n)
@@ -939,7 +939,7 @@ interpret(1 + 2 + ContinuationPlaceholder + n)
 
 MathJSON `IsComposite` · `(number) -> boolean`
 
-`IsComposite(n)` returns `True` if `n` is a composite number
+`isComposite(n)` returns `True` if `n` is a composite number
 
 ```epsil
 [isComposite(21), isComposite(7)]
@@ -950,7 +950,7 @@ MathJSON `IsComposite` · `(number) -> boolean`
 
 MathJSON `IsEven` · `(number) -> boolean`
 
-`IsEven(n)` returns `True` if `n` is an even number
+`isEven(n)` returns `True` if `n` is an even number
 
 ```epsil
 [isEven(7), isEven(8)]
@@ -961,7 +961,7 @@ MathJSON `IsEven` · `(number) -> boolean`
 
 MathJSON `IsOdd` · `(number) -> boolean`
 
-`IsOdd(n)` returns `True` if `n` is an odd number
+`isOdd(n)` returns `True` if `n` is an odd number
 
 ```epsil
 [isOdd(7), isOdd(8)]
@@ -972,7 +972,7 @@ MathJSON `IsOdd` · `(number) -> boolean`
 
 MathJSON `IsPrime` · `(number) -> boolean`
 
-`IsPrime(n)` returns `True` if `n` is a prime number
+`isPrime(n)` returns `True` if `n` is a prime number
 
 ```epsil
 [isPrime(17), isPrime(21)]
@@ -1136,7 +1136,7 @@ Minimum of two or more numbers.
 
 `(real, real, real?) -> real`
 
-Modulo: the remainder of the floored division of x by y. The sign of the result follows the sign of the divisor y (floored-division convention, matching most CAS). For a truncated/round-to-nearest remainder, see `Remainder`.
+Modulo: the remainder of the floored division of x by y. The sign of the result follows the sign of the divisor y (floored-division convention, matching most CAS). For a truncated/round-to-nearest remainder, see `remainder`.
 
 ```epsil
 [7 % 3, -7 % 3]
@@ -1289,7 +1289,7 @@ PreIncrement(5)
 
 MathJSON `Product` · `(any, tuple*) -> number`
 
-`Product(f, a, b)` computes the product of `f` from `a` to `b`.
+`product(f, a, b)` computes the product of `f` from `a` to `b`.
 
 ```epsil
 product(k, (k, 1, 5))
@@ -1316,7 +1316,7 @@ Construct a rational number from a numerator and denominator.
 
 MathJSON `Rationalize` · `(real, real<0..>?) -> rational`
 
-Approximate a real number by a rational. With a second argument `tolerance`, return the rational with the smallest denominator that approximates the number to within `tolerance` (a continued-fraction convergent); with no tolerance, rationalize at full working precision, as single-argument `Rational`.
+Approximate a real number by a rational. With a second argument `tolerance`, return the rational with the smallest denominator that approximates the number to within `tolerance` (a continued-fraction convergent); with no tolerance, rationalize at full working precision, as single-argument `rational`.
 
 ```epsil
 rationalize(1.75)
@@ -1332,7 +1332,7 @@ rationalize(sqrt(3), 1/500)
 
 MathJSON `Re` · `(complex | infinity) -> number`
 
-`Re` is an alias for `Real`, which is the preferred name. Returns the real part of a complex number.
+`re` is an alias for `real`, which is the preferred name. Returns the real part of a complex number.
 
 ```epsil
 re(3 + 4i)
@@ -1442,7 +1442,7 @@ Difference between two or more values.
 
 MathJSON `Sum` · `(any, tuple*) -> number`
 
-`Sum(f, [a, b])` computes the sum of `f` from `a` to `b`; `Sum(L)` sums the elements of a collection `L`.
+`sum(f, [a, b])` computes the sum of `f` from `a` to `b`; `sum(L)` sums the elements of a collection `L`.
 
 ```epsil
 sum(k^2, (k, 1, 10))
