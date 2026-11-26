@@ -149,6 +149,26 @@ there.
   compiler that refuses to fold `Sqrt(-2)` to `NaN` has this defect when
   `Ln(-2)`, `arcsin(2)` and the same `Sqrt` over a variable compile and return
   `NaN`.
+- **A run-time check of a value in compiled code** (a length, a dimension, an
+  order, a range) follows the rule of `AGENTS.md`, "A run-time check of a
+  value". Ask four questions.
+  - Where the diff declines, or leaves a value unspecified, because two
+    lengths or dimensions are not proved equal: does the operation already
+    loop over its operand? Then one check before the loop is the expected
+    fix, and the decline is a finding for a `corpus` or `plausible` program.
+  - Where the diff adds a check: is the guarded operation one or a few
+    machine operations (arithmetic, a comparison, one read of an element)?
+    Then the check is the finding.
+  - Does the check run once, outside every loop, and is its value read by
+    every result that relies on the equality it proves? A check that
+    nothing reads is removed as dead code. Probe two operations that share
+    an operand and are fused into one loop, such as `(L + M)·(M − N)` with
+    one list of another length.
+  - Does the check throw only where the interpreter gives an error? Probe
+    a loop of zero passes, an arm that no position selects, and the operand
+    of a short-circuit operator that is not reached.
+  A check compares two values of a settled shape. A test that chooses
+  between two shapes or two types is a finding in every case.
 
 ## LaTeX parse and serialize
 
