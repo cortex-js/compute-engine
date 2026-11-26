@@ -2859,6 +2859,20 @@ a parameter of the same name. These decline:
 A function that only reads a variable still holds its value at the
 compilation as a literal (`pure = (t: real) => s + t` gives `0.5 + a0`).
 
+On `javascript`, a variable whose value is the empty list compiles too
+(CE-1808). `[]` has no type of its own, so it takes the type of its place:
+the declared type of the variable when that is a list of integers, reals,
+booleans or strings of no stated length (`let x: list<string> = []`), the
+type of its position in a tuple (`let fig = ("circle", [])`, read with
+`fig[2]`), or the type of its field in a value of a named tuple type
+(`Figure("circle", [])`). With no stated element type (`let pts = []`) it is
+an empty list of integers: `length(pts)` and `[...pts, t]` compile, and
+`[...pts, "a"]` declines, since the two lists are of two types. An empty
+list of points (`let x: list<tuple<real, real>> = []`), one at a union type
+(`list<string> | nothing`) and a `[]` that the program writes as an argument
+of a function still decline ("an empty list"), and so do GLSL and
+`interval-js`.
+
 ### Functions of the host
 
 Compiled JavaScript calls a function that the host declared with

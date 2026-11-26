@@ -265,12 +265,20 @@ export function recordLowering(cx: Lowering, javascript: boolean) {
 
   /** The field `k` (from 0) of the record `r`: the value it was made of,
    *  or its read. The read of a string field of a known value is that
-   *  value (`Lowering.known()`); its type does not hold it. */
-  const field = (r: V, k: number): V => {
+   *  value (`Lowering.known()`); its type does not hold it. A field whose
+   *  length is the constant 0 (the empty list of an outer variable,
+   *  `Figure("circle", [])`) is read as the empty list of its lane, a build
+   *  of no element: no value has a stated length of 0. `e` is the read. */
+  const field = (e: Expression, r: V, k: number): V => {
     const known = parts.get(r)?.[k];
     if (known !== undefined) return known;
     const t = type(r);
     const { constant, ...f } = t.fields![k];
+    if (f.shape.includes(0)) {
+      if (f.shape.length !== 1 || t.marks?.[k] !== undefined)
+        decline(e, 'a read of a field that is an empty list of lists or points');
+      return cx.emptyList(e, f.lane);
+    }
     const v = b.op('field', [r, b.constant(k, 'integer')], f);
     const listed = listedOf(cx, r);
     if (Array.isArray(listed)) cx.listed.set(v, listed[k] ?? false);
@@ -301,7 +309,7 @@ export function recordLowering(cx: Lowering, javascript: boolean) {
         e,
         'At of a record at an index that is not a constant in range (a record is read at a constant position)'
       );
-    return field(r, k);
+    return field(e, r, k);
   };
 
   /** `Field(r, name)`: the field of that name of a record of a named tuple
@@ -316,7 +324,7 @@ export function recordLowering(cx: Lowering, javascript: boolean) {
         e,
         `Field of a record with no field ${name ?? ''} (${typeToString(t)})`
       );
-    return field(r, k);
+    return field(e, r, k);
   };
 
   return { construct, literal, dictionary, at, named, make, field };

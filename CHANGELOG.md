@@ -125,6 +125,14 @@
 
 ### Improvements
 
+- **A function that reads a variable whose value is the empty list compiles
+  to JavaScript** (CE-1808). With `let x: list<string> = []`, the function
+  `f(t: real) = length(x) + t` declined with "an empty list" and now
+  compiles; so do a read of `fig[2]` with `let fig = ("circle", [])`, and a
+  read of a variable with no stated type, `let pts = []`. The element type
+  is the declared one (integers, reals, booleans or strings), and integers
+  when none is stated. An empty list of points and GLSL still decline.
+
 - **Compiled JavaScript reads a `Map` or a `Filter` where it is, with no
   array** (CE-1806). Where one reader reads a view whose callback has no
   effect and cannot fail, the code builds no list: `first(map(x => x * 2, L))`

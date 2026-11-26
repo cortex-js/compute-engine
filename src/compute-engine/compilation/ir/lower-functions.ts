@@ -1402,16 +1402,20 @@ export function functionLowering(
       : [lane, lane + 'n'])
       if (!variants.has(k)) variants.set(k, fn);
     // A length value of the body that is a constant is its number: a call
-    // then has one result of that length.
+    // then has one result of that length. The constant 0 (the empty list
+    // of an outer variable) stays a length value: a stated length is at
+    // least 1.
     if (fn.result === undefined) {
       const t = type(fn.value!);
       fn.result = {
         ...t,
         // On the declared lane where a recursive call took it.
         lane: fn.assumed ? fn.declared!.lane : t.lane,
-        shape: t.shape.map((n) =>
-          typeof n === 'number' ? n : (cx.constant(n.v) ?? n)
-        ),
+        shape: t.shape.map((n) => {
+          if (typeof n === 'number') return n;
+          const c = cx.constant(n.v);
+          return c !== undefined && c > 0 ? c : n;
+        }),
       };
     }
     ir.results.push(
@@ -1951,8 +1955,10 @@ export function functionLowering(
         );
       const r = b.newValue(type(fn.ir.body.yields[0]));
       b.emit({ k: 'call', outs: [r], fn: fn.ir.name, args: all });
-      fn.writes.forEach((n, k) => (cx.stateWrite(e, n).v = cx.field(r, k + 1)));
-      const v = cx.field(r, 0);
+      fn.writes.forEach(
+        (n, k) => (cx.stateWrite(e, n).v = cx.field(e, r, k + 1))
+      );
+      const v = cx.field(e, r, 0);
       if (fn.listed !== undefined) cx.listed.set(v, fn.listed);
       return v;
     }

@@ -134,6 +134,7 @@ import {
   type DeclineReason,
   STATIC_TYPE_ERROR,
   text,
+  tupleBody,
   TUPLE_RULES,
   UNSETTLED_SHAPE,
   UntypedInputs,
@@ -1906,7 +1907,11 @@ function lowerOnce(
     rowsNode = admitted ? e : undefined;
     // The root `Tuple` is lowered where it is (`rootParts`).
     const shared =
-      want && isFunction(e) && e !== rootTuple && facts(e).writes.size === 0;
+      want &&
+      isFunction(e) &&
+      e !== rootTuple &&
+      facts(e).writes.size === 0 &&
+      !emptyLanes.has(e);
     const id = shared ? idOf(e) : 0;
     if (shared) {
       const m = memo.get(id);
@@ -2243,6 +2248,8 @@ function lowerOnce(
       case 'List': {
         // A list, or a record of elements of several lanes; a list of
         // lists of run-time length is of the lane `rows` (CE-1736).
+        const empty = e.nops === 0 ? emptyLanes.get(e) : undefined;
+        if (empty != null) return emptyList(e, empty);
         const elements = e.ops.map((op) => value(op)!);
         // (JavaScript only, outside the interval and the bigint modes:
         // `rowLane()` declines elsewhere).
@@ -3059,6 +3066,10 @@ function lowerOnce(
         const t = v === undefined ? undefined : type(v);
         if (t?.head === 'List') return v;
         if (t?.head === 'Tuple') {
+          // No value has a stated length of 0 (`field()` of
+          // `lower-records.ts`).
+          if (t.fields!.some((f) => f.shape.includes(0)))
+            decline(e, 'ListFrom of arguments with an empty list');
           const l = b.list(
             t.fields!.map((f, k) =>
               b.op('field', [v!, b.constant(k, 'integer')], {
@@ -4363,8 +4374,23 @@ function lowerOnce(
           ? `a symbol whose colour value is not ${r.head} of three real numbers`
           : 'a symbol with a value that is not a number or a list of numbers (or a tuple of numbers), or a colour of three numbers'
       );
-    // After `expression()`: a decline in it leaves no capture behind.
-    const x = literal ? undefined : expression(e, name, v);
+    // After `expression()`: a decline in it leaves no capture behind. A
+    // `List()` of `v` has the lane of its place in the type of the name
+    // while `v` is lowered (`placeEmptyLists()`).
+    const placed = new Map<Expression, Lane | null>();
+    if (!literal) placeEmptyLists(v, e.type.type, placed);
+    const before = [...placed.keys()].map(
+      (k) => [k, emptyLanes.get(k)] as const
+    );
+    for (const [k, lane] of placed) emptyLanes.set(k, lane);
+    let x: V | undefined;
+    try {
+      x = literal ? undefined : expression(e, name, v);
+    } finally {
+      for (const [k, lane] of before)
+        if (lane === undefined) emptyLanes.delete(k);
+        else emptyLanes.set(k, lane);
+    }
     if (!library) b.captures.add(name);
     if (x !== undefined) return x;
     // The interval mode: a constant of the library whose value is not exact
@@ -7360,16 +7386,72 @@ function lowerOnce(
     return ir.lane === 'integer' || ir.lane === 'real' ? ir.lane : undefined;
   };
 
+  /** The lane of each `List()` in the value of a free name that
+   *  `captured()` is lowering (`placeEmptyLists()`), and `null` for each
+   *  node that holds one: the memo of `value()`, whose key does not have
+   *  the place of a node, takes none of them. */
+  const emptyLanes = new Map<Expression, Lane | null>();
+
+  /** Adds to `out` each `List()` of `v`, the value of a free name of the
+   *  type `t`, with the lane of its place, and each node that holds one
+   *  with `null`; returns whether it added one. The places: `v` where `t`
+   *  is a list of rank
+   *  1 of no stated length, of integers, reals, booleans or strings
+   *  (`let x: list<string> = []`); an operand of a `Tuple` at the type of
+   *  its position in a tuple type `t`, and an operand of the constructor of
+   *  a nominal tuple type at the type of its field (`Figure("circle", [])`).
+   *  A list of no stated element type (`let pts = []`, `list<unknown>`)
+   *  takes the integer lane, as a conditional whose arms are all `List()`
+   *  does: it has no element that an operator can read. In any other place,
+   *  on a target with no run-time length and in the interval mode, `List()`
+   *  declines. */
+  const placeEmptyLists = (
+    v: Expression,
+    t: Type,
+    out: Map<Expression, Lane | null>
+  ): boolean => {
+    if (interval || !options.runtimeLengths || !isFunction(v)) return false;
+    if (isEmptyList(v)) {
+      if (typeof t !== 'object' || t.kind !== 'list') return false;
+      if (t.dimensions !== undefined) return false;
+      const open = t.elements === 'unknown' || t.elements === 'never';
+      const ir = inputType(t, cx.wide, true);
+      const lane = open ? 'integer' : ir?.shape.length === 1 ? ir.lane : null;
+      if (
+        lane === 'integer' ||
+        lane === 'real' ||
+        lane === 'boolean' ||
+        lane === 'string'
+      )
+        out.set(v, lane);
+      return out.has(v);
+    }
+    const fields =
+      recordConstructor(v)?.types ??
+      (!isFunction(v, 'Tuple')
+        ? undefined
+        : typeof t === 'object' && t.kind === 'tuple'
+          ? t.elements.map((x) => x.type)
+          : tupleBody(t)?.map((x) => x.type));
+    if (fields?.length !== v.nops) return false;
+    const held = v.ops.map((op, k) => placeEmptyLists(op, fields[k], out));
+    if (held.includes(true)) out.set(v, null);
+    return out.has(v);
+  };
+
   /** The list of no element of the lane `lane`: a build of no element (a
    *  stated length is at least 1). `element` makes the element of the
    *  build from the zero of the lane (a point of zeros for a list of
    *  points). */
   const emptyList = (
-    e: Fn,
+    e: Expression,
     lane: Lane,
     element: (zero: V) => V = (zero) => zero
   ): V => {
-    const zero = b.constant(lane === 'boolean' ? false : 0, lane);
+    const zero = b.constant(
+      lane === 'boolean' ? false : lane === 'string' ? '' : 0,
+      lane
+    );
     const k = b.newValue(scalarType('integer'));
     return region(
       'build',
@@ -7550,7 +7632,8 @@ function lowerOnce(
     stateWrite: (e, name) => stateWrite(e, name),
     // `records` is made after this context, before any lowering.
     pack: (e, values) => records.make(e, values),
-    field: (r, k) => records.field(r, k),
+    field: (e, r, k) => records.field(e, r, k),
+    emptyList: (e, lane) => emptyList(e, lane),
     widen,
     wide: options.mode === 'complex' ? 'complex' : 'real',
     interval,

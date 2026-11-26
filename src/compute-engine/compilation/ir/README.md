@@ -1612,7 +1612,20 @@ list (a build of no element) of the lane of the conditional's engine type when
 that type is a flat list of integers or reals (`If(n < 1, [], Range(1, n))`, of
 type `list<integer>`; arms that are all `List()`, of type `list<never>`, take
 the integer lane); so is `List()` at a parameter of `Apply` declared such a list
-(`Typed(xs, 'list<integer>')`). Otherwise, and on GLSL and in the interval mode,
+(`Typed(xs, 'list<integer>')`). A `List()` in the value of a free name
+(`captured()`) takes the lane of its place in the type of the name
+(`placeEmptyLists()`; CE-1808): the value itself where the type is a list of
+rank 1 of no stated length, of integers, reals, booleans or strings
+(`let x: list<string> = []`), an operand of a `Tuple` at the type of its
+position, and an operand of the constructor of a nominal tuple type at the type
+of its field (`Figure("circle", [])`); a list of no stated element type
+(`let pts = []`, of type `list<unknown>`) takes the integer lane. The memo of
+`value()` takes no node that holds such a `List()`: its key does not have the
+place of the node. No value has a stated length of 0: the result of a function
+whose length is the constant 0 keeps its length value, and the read of a record
+field of the stated length 0 (the type of a field states a constant length) is
+an empty build of the lane of the field. Otherwise (a list of points, a union
+type, a `List()` that the program writes), and on GLSL and in the interval mode,
 `List()` declines ("an empty list"). The invariant: a value that a type names
 (of a value or of a function's result) is live wherever that type is, so `dce`
 keeps it; when `fold` takes the arm of an `if` whose list is the program's
