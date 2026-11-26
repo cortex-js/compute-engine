@@ -222,6 +222,14 @@ const flatRows: RegionSpelling = ({ outs: [c, out], args: [g] }) => ({
   close: () => [],
 });
 
+/** A value of the lane `rows` whose rows have one length, read as a list
+ *  of rank 2 (`rows.matrix`, `rows.matrix.int`): the same array of
+ *  arrays. */
+const matrixOfRows: RegionSpelling = ({ outs: [out], args: [g] }) => ({
+  open: [`const ${out} = ${g};`],
+  close: () => [],
+});
+
 /** The text of the result of the entry of the record type `t`, read from
  *  `value`: a record of a named tuple type is an object keyed by the names
  *  of its fields; a record with no names stays the array of its fields; a
@@ -493,6 +501,9 @@ export const JS: Syntax = deepFreeze({
     // of the host's rows (arrays or typed arrays), in order.
     'rows.flat': flatRows,
     'rows.flat.int': flatRows,
+    // A value of the lane `rows` read as a list of rank 2: the same array.
+    'rows.matrix': matrixOfRows,
+    'rows.matrix.int': matrixOfRows,
     // The indices of `RandomSample(L, k)`, drawn as the interpreter draws.
     'sample': ({ outs: [c, out], args: [n, k] }) => ({
       open: [

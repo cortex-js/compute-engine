@@ -839,6 +839,21 @@ export const REGION_ROWS: readonly RegionRow[] = deepFreeze([
           ]
         : undefined,
   })),
+  // A value `g` of the lane `rows` whose rows have one length, of reals
+  // (`rows.matrix`) or of integers (`rows.matrix.int`), read as a list of
+  // rank 2 (its body is empty): the same array of arrays, with the number
+  // of rows and the length of the rows read after `g` as its two lengths.
+  // The reverse of the operation `rows.of`. JavaScript only.
+  ...(['rows.matrix', 'rows.matrix.int'] as const).map((op): RegionRow => ({
+    op,
+    effect: 'pure',
+    args: ['rows', I, I],
+    params: [],
+    results: ([, n, w], ys) =>
+      ys.length === 0
+        ? [{ lane: op === 'rows.matrix' ? R : I, shape: [{ v: n }, { v: w }] }]
+        : undefined,
+  })),
   // The engine's machine quadrature from `a` to `b` of the region's yield
   // at its parameter.
   {

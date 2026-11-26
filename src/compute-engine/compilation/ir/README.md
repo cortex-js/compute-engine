@@ -943,7 +943,9 @@ absent row is unspecified (`Sum` gives 0). A row of a `Chunk` or a `Partition`
 is read at a constant index in range of a constant count only. Every other read
 of the name declines (`symbol()` of `lower.ts`, which admits only the occurrence
 that `wholeRows()` lowers): arithmetic, an argument of a parameter of another
-type, and a list that the program makes at such a parameter (`sq(sq(g))`). A list of lists of booleans,
+type, and a list that the program makes at such a parameter (`sq(sq(g))`). A
+value whose rows have one length is read as a matrix there instead (below,
+`asMatrix()`). A list of lists of booleans,
 the bigint and the interval modes and GLSL decline the input. The entry checks
 it as a list (a string or a typed array is refused), and a batch shares it
 between its cells.
@@ -975,7 +977,22 @@ read (`rows.count`), so two forms compile for it that decline for them: an
 `If` with no else whose list arm reads it (`If(n > 0, Map(r ↦ Sum(r), M))`,
 a list of NaN where the condition is false, as for an input of type
 `list<real>`), and a `Sum` whose term is a list made from it
-(`Sum(k · Map(r ↦ Sum(r), M), k, 1, 200)`). An argument at a parameter of a
+(`Sum(k · Map(r ↦ Sum(r), M), k, 1, 200)`).
+
+A read of a value of the lane whose rows have one length (`rowWidths`) and
+whose elements are reals or integers (`rowsElements`) that no reader of the
+lane admits is a read of a matrix: `symbol()` and `wholeOnly()` of `lower.ts`
+give `asMatrix()` of it, a list of rank 2 of the shape `[{v: r}, {v: c}]` of
+its number of rows and the length of its rows. For an input of the entry it
+is the parameter that `rows.of` reads (`matrixOf`); for another value (a
+parameter of a matrix type, a `Transpose`, a product, an `Inverse`, a table
+that the program builds, a `Map` or a `Filter` of rows of one length) it is
+the region `rows.matrix` (`rows.matrix.int` of integers), whose body is empty:
+the same array of arrays (`const v = g;`), the reverse of `rows.of`. So the
+operations that thread over a list thread over it ("Matrices", the operations
+on the elements), and `Add(Transpose(M), B)` compiles. A value of the lane
+with no such fact (an input of type `list<list<real>>`, the result of a call,
+a join, a value that a loop carries) still declines. An argument at a parameter of a
 matrix type, of a user function
 or of `Apply`, must have rows of one length (`matrixRows()` of
 `lower-lists.ts`): a value of the lane with the fact is taken as it is, and a
@@ -1010,9 +1027,10 @@ at a parameter of that lane, as the value of a local and as the result. A
 `Block` (its last statement), an `If`, a `Which`, a `Coalesce`, a `Typed`, a
 `WithRandomSeed` and an `Apply` of a function literal (its body, when no
 argument is mapped over) pass the admission to the operands that give their value
-(`passesWhole()` and `wholeOnly()` of `lower.ts`); every other read declines ("a
-list of lists of run-time length read whole other than by a reader of its rows
-…"). The join of two arms of the lane (`branch()`) is of the lane, of reals
+(`passesWhole()` and `wholeOnly()` of `lower.ts`); every other read is a read of
+a matrix where the rows have one length (`asMatrix()`, above), and declines
+otherwise ("a list of lists of run-time length read whole other than by a
+reader of its rows …"). The join of two arms of the lane (`branch()`) is of the lane, of reals
 where one arm is. A call of a user function whose body is such a list
 (`step(g: list<list<integer>>) = map(r => map(x => x + 1, r), g)`) is of the
 lane, so `step(step(g))` compiles. A local that holds such a list is written
@@ -2682,11 +2700,45 @@ arrays, so the operation `rows.of` (`$0`) reads it as a value of the lane
 `rows` at no cost, with `r` and `c` as its `rowCounts` and `rowWidths`. That
 value is the binding of the name: every reader below, and every reader of
 "The rows lane", reads it, and a read of the name that no reader of the lane
-admits declines. The other values of a matrix type (a parameter of a user
-function or of `Apply`, an input that a user function reads, a variable of
-the engine that a root literal assigns, a build) are of the lane `rows`.
+admits reads the parameter itself. The other values of a matrix type (a
+parameter of a user function or of `Apply`, an input that a user function
+reads, a variable of the engine that a root literal assigns, a build) are of
+the lane `rows`, and such a read reads them as a list of rank 2 too
+(`rows.matrix`; "The rows lane", `asMatrix()`).
 `docs/plans/2026-11-25-matrix-of-run-time-size.md` describes the change that
 gives each of them this shape.
+
+The operations on the elements of a matrix of run-time size (CE-1834). An
+operation that threads over a list threads over a list of rank 2 of two
+run-time lengths as over any list: `2·A`, `A + 1`, `Sin(A)` and `A + 2·A` are
+one operation of the shape of `A`. Two matrices whose shapes the type does not
+prove the same (`resultType()` gives none: `A + B`, `Transpose(A) + B`, `A + K`
+of a `K` of stated size) are lowered by `elementwise()` of `lower-matrices.ts`:
+the `build` of the rows, each the `build` of the operation on the elements at
+one place and on the scalar operands. Each of the two lengths of the result is
+the length of two flat lists that an operation reads at each index
+(`agreedLength()` of `lower-lists.ts`, "Lists"): the length plus the value 0
+of the check `rows.agree`, which throws a `RangeError`
+(`incompatible-dimensions: lists of lengths …`) where the lengths of the
+operands differ, the interpreter's error. It is made once, before the
+builds, which read it as their length, so `dce` keeps it, and a later
+operation on the same matrices reads the same check; a reader of one length
+only (`Length(A + B)`) runs the comparison of that length only (a known
+limitation of `docs/COMPILATION-MODEL.md`). Two
+lengths that are two constants (`knownLength()`), a matrix with a list (`A + v`, whose value in
+the interpreter adds `v[i]` to the row `i`), a tuple operand, a target that
+compares no length (`checks`) and a row that does not thread decline as
+before ("lists of different lengths or ranks"). The result is a list of rank
+2 of run-time lengths. The matrix operators read one whose rows have a
+run-time length as its rows (`matrixRows()`, a `rows.build` of them): the
+operators of `TABLE_HEADS` and `Flatten`; `RowReduce` of it declines, as of a
+value of the lane. A parameter of a matrix type takes it the same way, and
+the body of a user function whose value it is gives its rows, since a call
+gives one length (`call()` of `lower-functions.ts`): the result of the call
+has no row length, so `inc(A) + 1` declines where `inc := m ↦ m + 1`. Not
+lowered here: an element or a row of such a result (`At(A + B, 1)`), an `If`
+whose arms are two such results of two sizes, and the reductions of a matrix
+(`Sum(A)`), which decline.
 
 Two lengths that must be equal (the inner lengths of
 `MatrixMultiply`, the numbers of rows and of columns of `Trace`) and that

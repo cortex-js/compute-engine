@@ -16,6 +16,11 @@ import type { Expression } from '../../src/compute-engine/global-types';
 // An input of the entry is a list of rank 2 whose two lengths are parameters
 // before it, its number of rows and the length of its first row (`README.md`,
 // "Matrices"); the readers of the lane read it as its rows (`rows.of`).
+//
+// A read that no reader of the lane admits (arithmetic, a function of each
+// element) reads the matrix as a list of rank 2 of its two lengths, so the
+// operation threads over its elements; two matrices whose lengths the
+// lowering does not prove equal are compared once at run time (CE-1834).
 
 type Json = unknown;
 type Grid = number[][];
@@ -41,6 +46,8 @@ ce.declare('tr', '(matrix<real>) -> list<list<real>>');
 ce.assign('tr', box(F(['Transpose', 'm'], 'm')));
 ce.declare('gram', '(matrix<real>) -> list<list<real>>');
 ce.assign('gram', box(F(['MatrixMultiply', 'm', ['Transpose', 'm']], 'm')));
+ce.declare('inc', '(matrix<real>) -> list<list<real>>');
+ce.assign('inc', box(F(['Add', 'm', 1], 'm')));
 ce.declare('tk', '(real) -> list<list<real>>');
 ce.assign(
   'tk',
@@ -315,11 +322,180 @@ describe('a matrix input: its two lengths', () => {
     expect(errors).toBe(0);
   });
 
-  // A read that no reader of the rows admits declines (element-wise
-  // arithmetic: CE-1834).
-  test('arithmetic of the input declines', () => {
-    expect(declines(['Add', 'M', 1])).toMatch(
-      /M of type matrix<real> other than in an element read M\[i\]\[j\]/
+});
+
+// CE-1834. `A` has the size of `M` at the last point only, and `K` at the
+// first.
+describe('a matrix input: operations on its elements', () => {
+  const code = (json: Json) => compile(box(json), { fallback: false }).code;
+  const rowSum = F(['Sum', 'r'], 'r');
+  const table = [
+    'Map',
+    F(['Map', F(['Multiply', 'i', 'j'], 'j'), ['Range', 1, 'n']], 'i'),
+    ['Range', 1, 'n'],
+  ];
+
+  test.each([
+    ['a scalar factor', ['Multiply', 2, 'M']],
+    ['an integer input as a factor', ['Multiply', 'n', 'M']],
+    ['a scalar term', ['Add', 'M', 1]],
+    ['a function of each element', ['Sin', 'M']],
+    ['the negation', ['Negate', 'M']],
+    ['a quotient by a scalar', ['Divide', 'M', 2]],
+    ['a matrix of integers', ['Multiply', 2, 'I']],
+    ['integers divided: reals', ['Divide', 'I', 2]],
+    ['a matrix of no stated element type', ['Add', 'Q', 1]],
+    ['the matrix and itself', ['Add', 'M', 'M']],
+    ['the matrix and a function of it', ['Add', 'M', ['Multiply', 2, 'M'], 1]],
+    ['of a transpose', ['Multiply', 2, ['Transpose', 'M']]],
+    ['of a product', ['Add', ['MatrixMultiply', 'M', ['Transpose', 'M']], 1]],
+    ['of a table that the program builds', ['Add', table, 1]],
+    ['of a Map of the rows', ['Add', ['Map', F(['Multiply', 2, 'r'], 'r'), 'M'], 1]],
+    ['of a Filter of the rows', ['Sin', ['Filter', 'M', F(['Greater', ['Sum', 'r'], 5], 'r')]]],
+  ])('one matrix: %s', (_, json) => {
+    expect(check(json).errors).toBe(0);
+  });
+
+  test.each([
+    ['a sum', ['Add', 'M', 'A']],
+    ['a difference', ['Subtract', 'M', 'A']],
+    ['a sum of three', ['Add', 'M', 'A', 'M']],
+    ['functions of each', ['Add', ['Exp', 'M'], ['Cos', 'A']]],
+    ['a transpose and a matrix', ['Add', ['Transpose', 'M'], 'A']],
+    ['a product and a matrix', ['Add', ['MatrixMultiply', 'M', ['Transpose', 'M']], 'A']],
+    ['a matrix of integers and a matrix of reals', ['Add', 'I', 'M']],
+    ['a matrix of stated size, second', ['Add', 'M', 'K']],
+    ['a matrix of stated size, first', ['Subtract', 'K', 'M']],
+    ['a table that the program builds', ['Add', 'A', table]],
+  ])('two matrices: %s', (_, json) => {
+    // A size that differs is a `RangeError`, where the interpreter gives
+    // the error `incompatible-dimensions` (`check()`).
+    const { r, errors } = check(json);
+    expect(errors).toBeGreaterThan(0);
+    expect(r.code).toMatch(/_agree\(|_order\(/);
+  });
+
+  test('the message of two sizes', () => {
+    const r = compile(box(['Add', 'M', 'A']), { fallback: false });
+    const run = (M: Grid, A: Grid) => r.run!({ M, A } as never);
+    expect(run([[1, 2], [3, 4]], [[1, 1], [1, 1]])).toEqual([[2, 3], [4, 5]]);
+    // Two numbers of rows, then two lengths of the rows (the canonical
+    // sum reads `A` first).
+    expect(() => run([[1, 2]], [[1, 1], [1, 1]])).toThrow(
+      'incompatible-dimensions: lists of lengths 2 and 1'
+    );
+    expect(() => run([[1, 2, 3], [4, 5, 6]], [[1, 1], [1, 1]])).toThrow(
+      'incompatible-dimensions: lists of lengths 2 and 3'
+    );
+  });
+
+  test('a comparison with a scalar: a matrix of booleans', () => {
+    const json = ['Greater', 'M', 2];
+    const M = [[1, 2, 3], [4, 5, 6]];
+    const r = compile(box(json), { fallback: false });
+    expect(r.run!({ M } as never)).toEqual([[false, false, true], [true, true, true]]);
+    ce.withValues({ M: list(M) } as never, () =>
+      expect(read(box(json).evaluate())).toEqual(r.run!({ M } as never))
+    );
+  });
+
+  test('lengths that are proved equal are not compared', () => {
+    for (const json of [
+      ['Add', 'M', 'M'],
+      ['Add', 'M', ['Multiply', 2, 'M'], 1],
+      ['Subtract', ['Sin', 'M'], ['Cos', 'M']],
+    ])
+      expect(code(json)).not.toMatch(/_agree/);
+    // One comparison of each length for two matrices, also where a second
+    // operation reads them.
+    expect(code(['Add', 'M', 'A']).match(/_agree\(/g)).toHaveLength(2);
+    const twice = code(['Subtract', ['Sin', ['Add', 'M', 'A']], ['Add', 'M', 'A']]);
+    expect(twice.match(/_agree\(/g)).toHaveLength(2);
+  });
+
+  test.each([
+    ['Length', ['Length', ['Multiply', 2, 'M']]],
+    ['Map of Sum', ['Map', rowSum, ['Multiply', 2, 'M']]],
+    ['the sum of the sums of the rows', ['Sum', ['Map', rowSum, ['Add', ['Multiply', 2, 'M'], 1]]]],
+    ['Flatten', ['Flatten', ['Multiply', 2, 'M']]],
+    ['Flatten of a sum', ['Flatten', ['Add', 'M', 'A']]],
+    ['Filter', ['Filter', ['Multiply', 2, 'M'], F(['Greater', ['Sum', 'r'], 10], 'r')]],
+    ['Transpose', ['Transpose', ['Multiply', 2, 'M']]],
+    ['Transpose of a sum', ['Transpose', ['Add', 'M', 'A']]],
+    ['Shape', ['Shape', ['Add', 'M', 'A']]],
+    ['Rank', ['Rank', ['Multiply', 2, 'M']]],
+    ['Diagonal', ['Diagonal', ['Add', 'M', 1]]],
+    ['Trace', ['Trace', ['Multiply', 2, 'M']]],
+    ['Determinant', ['Determinant', ['Add', 'M', 'A']]],
+    ['MatrixPower', ['MatrixPower', ['Multiply', 2, 'A'], 2]],
+    ['a product, first', ['MatrixMultiply', ['Add', 'M', 1], 'A']],
+    ['a product, second', ['MatrixMultiply', 'A', ['Multiply', 2, 'A']]],
+    ['a product with a list', ['MatrixMultiply', ['Multiply', 2, 'M'], 'v']],
+    ['a parameter of a user function', ['tr', ['Add', 'M', 1]]],
+    ['a parameter of Apply', ['Apply', F(['Trace', 'm'], typed('m', 'matrix<real>')), ['Multiply', 2, 'M']]],
+    ['a local', ['Block', ['Declare', 'c', "'unknown'", ['Add', 'M', 1]], ['Add', 'c', 'c']]],
+    ['a local that holds a transpose', ['Block', ['Declare', 'c', "'unknown'", ['Transpose', 'M']], ['Add', 'c', 'A']]],
+    ['the arms of an If', ['If', ['Greater', 'n', 2], ['Multiply', 2, 'M'], ['Add', 'M', 1]]],
+  ])('a reader of the result: %s', (_, json) => {
+    check(json);
+  });
+
+  test('a parameter of a matrix type', () => {
+    // A user function, whose value is its rows.
+    expect(check(['inc', 'M']).errors).toBe(0);
+    expect(check(['inc', ['Multiply', 2, 'M']]).errors).toBe(0);
+    expect(
+      check(['Apply', F(['Add', 'm', 1], typed('m', 'matrix<real>')), 'M']).errors
+    ).toBe(0);
+    // Two parameters of a root function literal.
+    const literal = F(
+      ['Add', 'm', 'k'],
+      typed('m', 'matrix<real>'),
+      typed('k', 'matrix<real>')
+    );
+    const { errors } = check(
+      literal,
+      (p) => [p.M, p.A],
+      ['Add', 'M', 'A']
+    );
+    expect(errors).toBeGreaterThan(0);
+  });
+
+  // The interpreter's value of these is not the value element by element,
+  // or the shape of the value is not settled.
+  test.each([
+    ['a list of lists whose rows can differ', ['Add', 'g', 'g'], /g of type list<list<real>> other than in an element read g\[i\]\[j\]/],
+    ['a matrix and a list', ['Add', 'M', 'v'], /lists of different lengths or ranks/],
+    ['a product of two matrices', ['Multiply', 'M', 'A'], /Multiply of a matrix/],
+    ['Equal of two matrices', ['Equal', 'M', 'A'], /Equal of a list/],
+    ['the sum of the rows', ['Sum', ['Multiply', 2, 'M']], /a term that is not a number/],
+    ['RowReduce', ['RowReduce', ['Multiply', 2, 'M']], /RowReduce of a matrix whose number of rows is known at run time only/],
+    ['a row of the result', ['At', ['Add', 'M', 'A'], 1], /an index that can be out of range/],
+    ['an element of the result', ['At', ['At', ['Multiply', 2, 'M'], 1], 2], /an index that can be out of range/],
+    ['arms of two sizes', ['If', ['Greater', 'n', 2], ['Multiply', 2, 'M'], ['Multiply', 2, 'A']], /arms of two types/],
+    ['an arm that is the input', ['If', ['Greater', 'n', 2], ['Add', 'M', 1], 'A'], /arms of two types/],
+    ['a call result', ['Add', ['inc', 'M'], 1], /a list of lists of run-time length read whole/],
+    ['a join', ['Add', ['Join', 'M', 'A'], 1], /a list of lists of run-time length read whole/],
+  ])('declines: %s', (_, json, message) => {
+    expect(declines(json)).toMatch(message);
+  });
+
+  // A known limitation of `docs/COMPILATION-MODEL.md`: the comparison of a
+  // length runs when that length or an element is read.
+  test('Length of a sum of matrices whose rows have two lengths', () => {
+    const r = compile(box(['Length', ['Add', 'M', 'A']]), { fallback: false });
+    const [M, A] = [[[1, 2, 3], [4, 5, 6]], [[1, 0], [0, 1]]];
+    expect(r.run!({ M, A } as never)).toBe(2);
+    expect(() => r.run!({ M, A: [[1, 0]] } as never)).toThrow(RangeError);
+  });
+
+  test.each([
+    ['GLSL', { to: 'glsl' }],
+    ['the interval mode', { to: 'interval-js' }],
+    ['the bigint mode', { mode: 'bigint' }],
+  ])('%s declines the input', (_, options) => {
+    expect(declines(['Add', 'I', 1], options)).toMatch(
+      /the input I of type matrix<integer>/
     );
   });
 });

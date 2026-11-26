@@ -237,7 +237,19 @@ interpreter's value. A line is removed when the case declines or is fixed.
   (`D, E: list<real>`) is read by the length of the result, so it does not
   run where nothing reads the result: `Block(D + E, 5)` at `D = [1, 2]`,
   `E = [1, 2, 3]` gives `5`, where the interpreter gives
-  `incompatible-dimensions`.
+  `incompatible-dimensions`. The comparison of the sizes of two matrices
+  under an operation on their elements is read by the two lengths of the
+  result, each by one length: `Length(M + A)`, `Count(M + A)` and
+  `Map(r ↦ 1, M + A)` at that `M` and `A`, which have two rows, give `2`,
+  `2` and `[1, 1]`, and `Rank(M + A)`, which reads no length, gives `2`,
+  where the interpreter gives `incompatible-dimensions`.
+- `javascript` (crafted), `A, B: matrix<real>`, `x: real`: the comparison of
+  the row lengths of two matrices under an operation on their elements
+  reads the row lengths of the inputs, also where a `Filter` kept no row of
+  either. `Filter(A, r ↦ Sum(r) > x) + Filter(B, r ↦ Sum(r) > x)` at
+  `A = [[1, 2, 3], [4, 5, 6]]`, `B = [[1, 2], [3, 4]]`, `x = 100` throws
+  `RangeError: incompatible-dimensions: lists of lengths 3 and 2`; the
+  interpreter gives `[]`.
 - `javascript` (crafted): a selection at each position compares the lengths
   of the lists of an element-wise arm once, before it selects. With
   `L, M: list<real>`, `If(L > 0, L·M, 0)` at `L = [-1, -2]`, `M = [3, 4, 5]`
@@ -1892,6 +1904,28 @@ and compares nothing. In the interval mode, and for lists of points of
 run-time lengths (`P, Q: list<tuple<real, real>>`), the result is
 unspecified: `P + Q` at lengths that differ gives a list as long as `P` on
 `javascript`, or throws a `TypeError` when `Q` is the shorter list.
+
+Arithmetic and the functions of a number apply to each element of a matrix
+of run-time size, as they do for a matrix of stated size: an input or a
+parameter of a matrix type of no stated dimensions, and a value that the
+program makes whose rows have one length (a `Transpose`, a product, an
+`Inverse`, a `Map` whose row length does not depend on the element). With
+`A, B: matrix<real>` at `A = [[1, 2], [3, 4]]` and `B = [[0, 1], [1, 0]]`,
+`A + B` gives `[[1, 3], [4, 4]]`, `2A + 1` gives `[[3, 5], [7, 9]]` and
+`Transpose(A) + B` gives `[[1, 4], [3, 4]]`. The result is a matrix of
+run-time size, which the readers of the rows and the matrix operators read
+(`Determinant(A + B)` gives -8; `RowReduce` declines). Two matrices whose
+sizes the compiler does not prove equal are compared as two flat lists are,
+the number of rows and the length of the rows, once, before the loops. At
+`B = [[1, 2, 3]]`, `A + B` throws
+`RangeError: incompatible-dimensions: lists of lengths 2 and 1`.
+`A + A` and `A + 2A` compare nothing. These decline: a matrix with a list
+(`A + v` with `v: list<real>`, where the interpreter adds `v[i]` to the row
+`i`), a `list<list<real>>` input (`g + g`: its rows can have different
+lengths; declare it `matrix<real>`), the result of a call
+(`inc(A) + 1`), an element or a row of the result (`(A + B)[1][2]`; write
+`A[1][2] + B[1][2]`), an `If` whose arms are two such results of two sizes,
+and a reduction of a matrix (`Sum(A)`).
 
 Compiled `Equal` and `NotEqual` on numeric operands are the IEEE 754
 comparison (`===` on JavaScript, `==` on the shader targets), with no

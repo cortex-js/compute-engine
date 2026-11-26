@@ -1,10 +1,11 @@
 # A matrix of run-time size as a shape of the IR
 
 Status: approved by the user 2026-11-25, with Q1 (a), Q2 (yes) and Q3
-(yes) of section 6; step 1 is done (section 8), steps 2 to 6 are not
-started. Scope: the `javascript` target of the IR
+(yes) of section 6; steps 1 and 2 are done (section 8), steps 3 to 6 are
+not started. Scope: the `javascript` target of the IR
 compiler (`src/compute-engine/compilation/ir/`), outside the interval and
-`bigint` modes. GLSL keeps stated sizes. Issues it resolves: CE-1834.
+`bigint` modes. GLSL keeps stated sizes. Issues it resolves: CE-1834 (by
+step 2).
 Related: CE-1837 (an untyped parameter inferred `unknown`).
 
 ## 1. The question
@@ -214,3 +215,84 @@ a root literal assigns) stay on the lane `rows` until steps 3 and 4.
 - `rows.*` operations of `operators.ts`: 25 before, 26 after (`rows.of`).
   The operation `rows.width` is no longer made for an input of the entry.
   The reads of `rowWidths` and `rowCounts` do not change.
+
+**Step 2.** A read of a value of the lane `rows` whose rows have one length
+that no reader of the lane admits is a read of a list of rank 2 of its two
+lengths (`asMatrix()` of `lower.ts`): the parameter itself for an input of
+the entry, and for another value the region `rows.matrix`, the same array
+(the reverse of `rows.of`). So an operation that threads over a list threads
+over it, as one operation of its shape (`2·A`, `A + 1`, `Sin(A)`,
+`A + 2·A`). Two matrices whose shapes are not proved the same are lowered
+by `elementwise()` of `lower-matrices.ts`, a build of builds whose two
+lengths read the check of two flat lists of lengths not proved equal
+(`agreedLength()` of `lower-lists.ts`, which landed on main while this step
+was made: `33dee3c390e4044fc03b54172568dd54a8ae7f38`), a `RangeError`
+`incompatible-dimensions` where they differ. The matrix operators read a list of rank 2 whose rows have a
+run-time length as its rows (`matrixRows()`), and the body of a user
+function whose value is one gives its rows.
+
+- Acceptance: of the witnesses of CE-1834, `A + B`, `A - B`, `2·A`, `x·A`,
+  `A + 1`, `Sin(A)` and `Transpose(A) + B` compile with the interpreter's
+  values, and two sizes throw `incompatible-dimensions`. `G + G` with
+  `G: list<list<real>>` declines, as 3.1 decides (its rows can differ).
+  CE-1834 is closed by this step.
+- Tests, on main `f61580d4d0434c9187b14650d0771e61b3ee3525` with this step:
+  the 105 files and 166 others (every `ir-*` file, the lane `rows`, the
+  arrays) pass (271 files, 16,507 tests with the new ones, 560 snapshots, no
+  snapshot changed), and so does the core set (18 files). Changed tests: one test of
+  `ir-matrix-input.test.ts` that pinned the decline of `M + 1` is replaced
+  by a block of 68 tests ("operations on its elements").
+- Emitted code of the 40 witnesses of step 1: the 32 that compiled have the
+  same code; `M + A`, `2M`, `M + 1`, `Sin(M)` and
+  `Sum(Map(r ↦ Sum(r), 2M + 1))` compile; `RowReduce(M)`, `Transpose(g)`
+  and `Sum(M)` decline as before.
+- 176 forms that read a matrix other than through a reader of its rows
+  (arithmetic, the generic list operators, locals, loops, `If`, user
+  functions, `Apply`), compared with the interpreter at four points (a
+  square size, two rows of three, and `A` and `B` of two numbers of rows and
+  of two row lengths): 93 that declined compile, the 21 that compiled have
+  the same code, 62 decline (41 with another message, since the read of the
+  name no longer declines first), none compiles less. At the square point
+  the 114 compiled forms give the interpreter's value. At the other points
+  every difference is a `RangeError` where the interpreter gives an error,
+  except `Length(A + B)` of two row lengths, which gives the number of rows
+  (a known limitation, recorded in `docs/COMPILATION-MODEL.md`).
+- The operators of the library (701 names, less 78 that the probe skips:
+  assignments, loops, `Sum`, `Product`, the calculus and the slow number
+  functions; the reviewer's probe ran all but 49 structural names) applied
+  to `2·A`, `A + B`, `A` and `Transpose(A)` in ten operand patterns: no
+  internal error, and no value that differs from the interpreter's because
+  of this step. The differences are NaN where the interpreter gives a
+  complex number, an error or an unevaluated form, and forms where the
+  canonical form reads the matrix expression as a function of the input
+  (`EvaluateAt(Transpose(A), 2)` gives 2: older code, the same before this
+  step, CE-1147).
+- The review found one more case, recorded as a known limitation
+  (crafted): two `Filter`s that keep no row of matrices of two row lengths
+  throw where the interpreter gives `[]`.
+- The builds of step 3 compile already through `rows.matrix`
+  (`Tabulate`-like `Map(i ↦ Map(j ↦ i·j, Range(1, n)), Range(1, n)) + 1`,
+  `Sin` of it): step 3 changes their carrier, not their value.
+- Not reached: the target of 3.2 that `Sum(Map(r ↦ Sum(r), 2·A + 1))` is two
+  loops and no array. It is three loops and two arrays (the matrix
+  `2·A + 1` in one pass, the list of the sums, the sum). The pass `fold`
+  reads an element of a threaded operation at a constant index only, and
+  `forward` copies a build of one element, not a build of builds; lowering
+  every operation as builds was measured and is worse (one array per
+  operation: `2·A + 1` is two passes). It needs a rule of the passes for a
+  row of a threaded operation at a run-time index, for flat lists too.
+- Still declining, for a later step: an element or a row of a result
+  (`(A + B)[2][3]`, `First(2·A)`; step 4, the readers on the shape), an `If`
+  whose arms are results of two sizes or a result and an input, a local
+  that a loop rewrites (`c ≔ c + 1`), the result of a call (`inc(A) + 1`),
+  and the reductions (step 5).
+- For step 5: `Max(A)` and `Min(A)` of a matrix are one number in the
+  interpreter (10 and 1 at `[[1, 2, 3], [4, 5, 6], [7, 8, 10]]`), not a list
+  of the columns as 3.4 says, and `Mean(A)`, `Median(A)` and `Variance(A)`
+  have the static type `error` (`incompatible-type`); `Sum(A)` and
+  `Product(A)` are the lists of the columns.
+- `rows.*` operations of `operators.ts`: 26 before, 28 after (the regions
+  `rows.matrix` and `rows.matrix.int`; no new check: the comparison is the
+  `rows.agree` of the flat lists). Reads of
+  `rowWidths` and `rowCounts`: 9 before, 11 after (`asMatrix()`). Both go
+  down in step 4.

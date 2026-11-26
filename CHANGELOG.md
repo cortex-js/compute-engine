@@ -391,10 +391,22 @@
   `[[-2, 1], [1.5, -0.5]]`, and for a matrix that is not square
   `Determinant(M)` throws
   `RangeError: expected-square-matrix: a matrix of 2 rows and 3 columns`.
+  Arithmetic and the functions of a number apply to each element of such a
+  matrix, as for a matrix of stated size (CE-1834): with `A, B: matrix<real>`
+  at `A = [[1, 2], [3, 4]]` and `B = [[0, 1], [1, 0]]`, `A + B` gives
+  `[[1, 3], [4, 4]]`, `2A + 1` gives `[[3, 5], [7, 9]]` and
+  `Transpose(A) + B` gives `[[1, 4], [3, 4]]`; the result is read by the
+  matrix operators (`Determinant(A + B)` gives -8). Two matrices whose
+  sizes the compiler does not prove equal are compared once at run time:
+  at `B = [[1, 2, 3]]`, `A + B` throws
+  `RangeError: incompatible-dimensions: lists of lengths 2 and 1`,
+  where the interpreter gives the error `incompatible-dimensions`.
   A `list<list<real>>` argument and a call result at a parameter of a
-  matrix type, `RowReduce` of a matrix of run-time size, matrices of complex numbers or
-  of booleans, a matrix of one stated dimension (`matrix<real^2x?>`), GLSL,
-  the interval target and the `bigint` mode decline.
+  matrix type, `RowReduce` of a matrix of run-time size, an element or a
+  row of the result of such an operation (`(A + B)[1]`), matrices of complex
+  numbers or of booleans, a matrix of one stated dimension
+  (`matrix<real^2x?>`), GLSL, the interval target and the `bigint` mode
+  decline.
 
 - **Compiled JavaScript compares the lengths of two lists of run-time
   length.** With `L, M: list<real>`, a user function of scalar parameters
