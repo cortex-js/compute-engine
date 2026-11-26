@@ -6591,6 +6591,20 @@ volumes
       // argument of the function. A single order is the ordinary (univariate)
       // n-th derivative; `Derivative(f, 1, 0)` is ∂f/∂arg₁ of a bivariate f.
       signature: '(function, order:number*) -> function',
+      examples: ['Derivative(Sin)', 'Apply(Derivative(x => x^3, 2), 1)'],
+      // By position: `order` is a rest parameter, which a call cannot pass
+      // by name.
+      parameters: [
+        {
+          description: 'The function to differentiate.',
+          sample: 'sin',
+        },
+        {
+          description:
+            'The order of the derivative; with several orders, one for each argument of the function (`1, 0` is the partial derivative in the first argument); by default, 1.',
+          sample: '2',
+        },
+      ],
       type: ([fn], { engine }) => {
         // A derivative function has the same signature as the function it
         // derives (same parameters and codomain). Preserving it lets an
@@ -7480,9 +7494,22 @@ volumes
         'that holds a formula is read as that formula: with G := sin(x),',
         'ND(G, 1) is cos(1).',
       ],
+      examples: ['ND(Sin(x), 1)', 'ND(x => x^3, 2)'],
       broadcastable: false,
       lazy: true,
       signature: '(function, at:number) -> number | tuple | list<number>',
+      parameters: [
+        {
+          description:
+            'The function to differentiate: an expression in one variable, a function literal or the name of a function.',
+          sample: 'x => x^3',
+        },
+        {
+          description:
+            'The point where the derivative is evaluated; a symbol with no value leaves the call unevaluated.',
+          sample: '2',
+        },
+      ],
       // The value has the kind of the function's value: a number for a
       // scalar function, a point for a point-valued one (a space curve),
       // a list for a list-valued one. `number` when the literal's result
@@ -7576,13 +7603,16 @@ volumes
 
     JacobianMatrix: {
       description: [
-        'JacobianMatrix(fs, vars): the matrix of partial derivatives',
+        'JacobianMatrix(fs, variables): the matrix of partial derivatives',
         '∂fᵢ/∂xⱼ, one row per function and one column per variable.',
         '`fs` is a list of expressions. A single (non-list) expression is the',
         'gradient case: the result is the flat vector [∂f/∂x₁, …, ∂f/∂xₙ].',
-        '`vars` is a list of symbols and may be omitted, in which case the',
+        '`variables` is a list of symbols and may be omitted, in which case the',
         'free variables of `fs` are used, in lexicographic order.',
-        'Example: JacobianMatrix([x^2 y, x + z], [x, y, z]).',
+      ],
+      examples: [
+        'JacobianMatrix([x^2 * y, x + z], [x, y, z])',
+        'JacobianMatrix(x^2 * y, [x, y])',
       ],
       keywords: ['jacobian', 'gradient', 'derivative', 'partial derivative'],
       broadcastable: false,
@@ -7592,7 +7622,19 @@ volumes
       // nothing to differentiate with respect to. Held operands arrive
       // unbound, so each is canonicalized below before use.
       lazy: true,
-      signature: '(any, any?) -> value',
+      signature: '(fs: any, variables: any?) -> value',
+      parameters: {
+        fs: {
+          description:
+            'The list of expressions to differentiate, one row each, or a single expression for its gradient.',
+          sample: '[x * y, x + y]',
+        },
+        variables: {
+          description:
+            'The list of the variables, one column each; by default, the parameters of a function `fs`, or else the free variables of `fs` in lexicographic order.',
+          sample: '[x, y]',
+        },
+      },
 
       // A system of functions yields a matrix; a single function yields the
       // gradient vector. Reported from the operand's *shape*, which is
@@ -7753,6 +7795,15 @@ volumes
       // scope of the caller.
       operands: operandRolesFrom([RAW_ROLE], CLAUSE_ROLE),
       signature: '(function, limits+) -> number',
+      examples: ['CircularIntegrate(1/z, (z, CircleContour(0, 1), Nothing))'],
+      // By position: the limits are a rest parameter.
+      parameters: [
+        { description: 'The integrand.', sample: 'z => 1 / z' },
+        {
+          description:
+            'The variable and the contour, as `(z, contour, Nothing)`; other limits leave the integral unevaluated.',
+        },
+      ],
 
       // The integrand is left as the bare application it was parsed as (not
       // wrapped in a `Function` literal the way `Integrate` does), so it
@@ -7792,24 +7843,80 @@ volumes
     CircleContour: {
       description:
         'Closed circle: center, positive radius, optional orientation (+1 or -1).',
+      examples: [
+        'ContourIntegrate(1/z, z, CircleContour(0, 1))',
+        'ContourIntegrate(1/z, z, CircleContour(0, 1, -1))',
+      ],
       signature:
         '(center:complex, radius:real, orientation:integer?) -> expression',
+      parameters: {
+        center: { description: 'The center of the circle.', sample: '0' },
+        radius: {
+          description:
+            'The radius of the circle; a radius that is not positive leaves the integral unevaluated.',
+          sample: '1',
+        },
+        orientation: {
+          description:
+            '1 for counterclockwise, -1 for clockwise; by default, 1.',
+          sample: '-1',
+        },
+      },
     },
     RealLineContour: {
       description:
         'The real axis from minus infinity to infinity. Pass True to explicitly request a Cauchy principal value.',
+      examples: [
+        'ContourIntegrate(1/(x^2 + 1), x, RealLineContour())',
+        'ContourIntegrate(1/x, x, RealLineContour(True))',
+      ],
       signature: '(principalValue:boolean?) -> expression',
+      parameters: {
+        principalValue: {
+          description:
+            'Whether the integral is a Cauchy principal value, which admits a simple pole on the real axis; by default, false.',
+          sample: 'true',
+        },
+      },
     },
     PolygonContour: {
       description:
         'Simple closed polygon: a list of complex vertices in traversal order, with optional orientation override (+1 or -1).',
+      examples: ['ContourIntegrate(1/z, z, PolygonContour([1, i, -1, -i]))'],
       signature: '(vertices:list<complex>, orientation:integer?) -> expression',
+      parameters: {
+        vertices: {
+          description: 'The vertices of the polygon, in traversal order.',
+          sample: '[1, i, -1, -i]',
+        },
+        orientation: {
+          description:
+            '1 for counterclockwise, -1 for clockwise; by default, the orientation of the traversal order of the vertices.',
+          sample: '-1',
+        },
+      },
     },
     RectangleContour: {
       description:
         'Closed rectangle: lower-left and upper-right complex corners, optional orientation (+1 or -1).',
+      examples: ['ContourIntegrate(1/z, z, RectangleContour(-1 - i, 1 + i))'],
       signature:
         '(lowerLeft:complex, upperRight:complex, orientation:integer?) -> expression',
+      parameters: {
+        lowerLeft: {
+          description: 'The lower-left corner of the rectangle.',
+          sample: '-1 - i',
+        },
+        upperRight: {
+          description: 'The upper-right corner of the rectangle.',
+          sample: '1 + i',
+        },
+        orientation: {
+          description:
+            '1 for counterclockwise, -1 for clockwise; by default, 1.',
+          sample: '-1',
+        },
+      },
     },
     ContourIntegrate: {
       description:
@@ -7820,6 +7927,19 @@ volumes
       // The variable (operand 1) is bound by the integral.
       operands: operandRolesFrom([RAW_ROLE, BOUND_ROLE], RAW_ROLE),
       signature: '(expression, variable:symbol, contour:expression) -> number',
+      examples: [
+        'ContourIntegrate(Exp(z)/z, z, CircleContour(0, 1))',
+        'ContourIntegrate(1/(x^2 + 1), x, RealLineContour())',
+      ],
+      parameters: [
+        { description: 'The integrand.', sample: '1 / z' },
+        { description: 'The variable of integration.', sample: 'z' },
+        {
+          description:
+            'The path: `CircleContour`, `RectangleContour`, `PolygonContour` or `RealLineContour`.',
+          sample: 'circleContour(0, 1)',
+        },
+      ],
       canonical: (ops, { engine: ce }) => {
         if (ops.length !== 3 || !isSymbol(ops[1])) return null;
         return ce._fn(
@@ -7869,6 +7989,15 @@ volumes
       // (`integralTypeOf`): `tensor` admits a vector and a matrix of
       // integrals alike, where `list<number>` admits a vector only.
       signature: '(function, limits+) -> number | tensor | tuple | list<tuple>',
+      examples: ['Integrate(x^2, x)', 'Integrate(Sin(x), (x, 0, Pi))'],
+      // By position: the limits are a rest parameter.
+      parameters: [
+        { description: 'The integrand.', sample: 'x => x^2' },
+        {
+          description:
+            'The variable of integration, alone for an antiderivative or with its bounds as `(x, a, b)`; several limits give a multiple integral.',
+        },
+      ],
       // An integral where a lower or upper bound is a LIST
       // (`∫_{-∞}^{G} f(Z) dZ` with `G = [-1, 0, 1]`) is one integral per
       // element, and its value is the list of those integrals. This applies
@@ -9909,6 +10038,23 @@ volumes
       readsRandomFrame: true,
       lazy: true,
       signature: '(function, lower:number, upper:number) -> number',
+      examples: ['NIntegrate(Exp(-x^2), 0, 1)'],
+      parameters: [
+        {
+          description:
+            'The integrand: an expression in one variable, a function literal or the name of a function.',
+          sample: 'x => x^2',
+        },
+        {
+          description:
+            'The lower bound, possibly `-Infinity`; a lower bound above the upper bound gives the negated integral.',
+          sample: '0',
+        },
+        {
+          description: 'The upper bound, possibly `Infinity`.',
+          sample: '1',
+        },
+      ],
       canonical: (ops, { engine }) => {
         // A `Return` in an operand has no function to end (ROADMAP CE-96).
         const returnError = canonicalWithEscapingReturn(
@@ -10051,9 +10197,26 @@ volumes
 
     DSolve: {
       description: 'Symbolic differential equation solver.',
+      examples: [
+        'DSolve([D(y(x), x) == y(x), y(0) == 2], y, x)',
+        'DSolve(D(y(x), x, x) == -y(x), y, x)',
+      ],
       broadcastable: false,
       lazy: true,
-      signature: '(expression, symbol, symbol) -> expression',
+      signature:
+        '(equation: expression, dependent: symbol, variable: symbol) -> expression',
+      parameters: {
+        equation: {
+          description:
+            'The differential equation, or a list of the equation and its initial conditions; without initial conditions the solution has arbitrary constants.',
+          sample: '[D(y(x), x) == y(x), y(0) == 2]',
+        },
+        dependent: {
+          description: 'The unknown function, or a list of them for a system.',
+          sample: 'y',
+        },
+        variable: { description: 'The independent variable.', sample: 'x' },
+      },
       canonical: (ops, { engine }) => {
         if (ops.length === 0)
           return engine._fn('DSolve', [
@@ -10091,9 +10254,23 @@ volumes
 
     RSolve: {
       description: 'Symbolic recurrence equation solver.',
+      examples: [
+        'RSolve([a(n + 1) == 2 * a(n), a(0) == 3], a, n)',
+        'RSolve(a(n + 2) == a(n + 1) + a(n), a, n)',
+      ],
       broadcastable: false,
       lazy: true,
-      signature: '(expression, symbol, symbol) -> expression',
+      signature:
+        '(equation: expression, dependent: symbol, index: symbol) -> expression',
+      parameters: {
+        equation: {
+          description:
+            'The recurrence, or a list of the recurrence and its initial values; without initial values the solution has arbitrary constants.',
+          sample: '[a(n + 1) == 2 * a(n), a(0) == 3]',
+        },
+        dependent: { description: 'The unknown sequence.', sample: 'a' },
+        index: { description: 'The index of the sequence.', sample: 'n' },
+      },
       canonical: (ops, { engine }) => {
         if (ops.length === 0)
           return engine._fn('RSolve', [
@@ -10126,10 +10303,37 @@ volumes
 
     NDSolve: {
       description: 'Numerical differential equation solver.',
+      examples: ['NDSolve(D(y(x), x) == y(x), y, (x, 0, 1), 1, 4)'],
       broadcastable: false,
       lazy: true,
       signature:
-        '(expression, symbol, limits:(tuple|symbol), number, number?) -> list',
+        '(equation: expression, dependent: symbol, limits:(tuple|symbol), initial: number, steps: number?) -> list',
+      parameters: {
+        equation: {
+          description:
+            'The differential equation, or a list of first-order equations for a system.',
+          sample: 'D(y(x), x) == y(x)',
+        },
+        dependent: {
+          description: 'The unknown function, or a list of them for a system.',
+          sample: 'y',
+        },
+        limits: {
+          description:
+            'The independent variable and the interval of integration, as `(x, start, end)`; `end` may be below `start`.',
+          sample: '(x, 0, 1)',
+        },
+        initial: {
+          description:
+            'The value of the solution at the start of the interval, or a list of values for a system.',
+          sample: '1',
+        },
+        steps: {
+          description:
+            'The number of intervals between the sample points of the result, a positive integer; by default, 100.',
+          sample: '4',
+        },
+      },
       canonical: (ops, { engine }) => {
         const missing = engine.error('missing');
         const limits =
@@ -10169,7 +10373,27 @@ volumes
       // wherever the caller happened to have it.
       operands: operandRolesFrom([RAW_ROLE, RAW_ROLE, CLAUSE_ROLE], RAW_ROLE),
       signature:
-        '(expression, symbol, limits:(tuple|symbol), number) -> function',
+        '(equation: expression, dependent: symbol, limits:(tuple|symbol), initial: number) -> function',
+      examples: [
+        'Apply(NDSolveFunction(D(y(x), x) == y(x), y, (x, 0, 1), 1), 0.5)',
+      ],
+      parameters: {
+        equation: {
+          description: 'The differential equation.',
+          sample: 'D(y(x), x) == y(x)',
+        },
+        dependent: { description: 'The unknown function.', sample: 'y' },
+        limits: {
+          description:
+            'The independent variable and the interval of integration, as `(x, start, end)`.',
+          sample: '(x, 0, 1)',
+        },
+        initial: {
+          description:
+            'The value of the solution at the start of the interval.',
+          sample: '1',
+        },
+      },
       canonical: (ops, { engine }) => {
         const missing = engine.error('missing');
         const limits =
@@ -10203,6 +10427,19 @@ volumes
       broadcastable: false,
       lazy: true,
       signature: '(list<any>, number?) -> number',
+      examples: ['InterpolatingFunction([[0, 1, 1, 2, 0, 0, 0]], 0.5)'],
+      parameters: [
+        {
+          description:
+            'The coefficient table, one row `[x0, h, r1, r2, r3, r4, r5]` per step: its start, its width and the five coefficients of its interpolant.',
+          sample: '[[0, 1, 1, 2, 0, 0, 0]]',
+        },
+        {
+          description:
+            'The point where the solution is evaluated; a point outside the covered interval is clamped to it.',
+          sample: '0.5',
+        },
+      ],
       evaluate: ([data, x], { engine }) => {
         if (x === undefined) return undefined;
         const xv = x.N().re;
@@ -10254,13 +10491,36 @@ volumes
         'the variable is chosen from it: with G := sin(x), Limit(G, 0) is 0.',
         'The variable is bound: it never takes the value assigned to a',
         'symbol of the same name.',
-        'Example: Limit(Sqrt(x), 3) is sqrt(3), also after x := 4.',
+      ],
+      examples: [
+        'Limit(Sqrt(x), 3)',
+        'Limit(Sin(x)/x, x, 0)',
+        'Limit(1/x, 0, -1)',
       ],
       complexity: 5000,
       broadcastable: false,
 
       lazy: true,
       signature: '(function, point:number, direction:number?) -> number',
+      // By position: in the form `Limit(f, x, a)` the slot `point` holds the
+      // variable and the slot `direction` the point.
+      parameters: [
+        {
+          description:
+            'The expression, function literal or function name whose limit is taken.',
+          sample: 'x => sin(x) / x',
+        },
+        {
+          description:
+            'The point that the variable approaches, possibly `Infinity` or `-Infinity`; in the form `Limit(f, x, a)`, the variable.',
+          sample: '0',
+        },
+        {
+          description:
+            '1 for the limit from above, -1 for the limit from below; by default, the two-sided limit, which stays unevaluated when the one-sided limits differ; in the form `Limit(f, x, a)`, the point, and the direction is a fourth argument.',
+          sample: '1',
+        },
+      ],
       canonical: (ops, { engine }) => {
         // A `Return` in an operand has no function to end (ROADMAP CE-96).
         const returnError = canonicalWithEscapingReturn(engine, 'Limit', ops);
@@ -10441,6 +10701,16 @@ volumes
 
       lazy: true,
       signature: '(expression, variable:symbol, point:value) -> number',
+      examples: ['Residue(1/(z^2 + 1), z, i)', 'Residue(Exp(z)/z^2, z, 0)'],
+      parameters: [
+        { description: 'The function.', sample: '1 / (z^2 + 1)' },
+        'The variable.',
+        {
+          description:
+            'The point; the residue is 0 at a point where the function has no pole.',
+          sample: 'i',
+        },
+      ],
       canonical: ([f, x, a], { engine }) => {
         if (!f || !x || !a || !isSymbol(x)) return null;
         return engine._fn('Residue', [f.canonical, x, a.canonical]);
@@ -10462,11 +10732,29 @@ volumes
         'function, or, when it holds a formula (G := sin(x)), is read as',
         'that formula, whose variable is chosen with the same rule.',
       ],
+      examples: ['NLimit((1 + 1/x)^x, Infinity)', 'NLimit(Abs(x)/x, 0, -1)'],
       complexity: 5000,
       broadcastable: false,
 
       lazy: true,
       signature: '(function, point:number, direction:number?) -> number',
+      parameters: [
+        {
+          description:
+            'The expression, function literal or function name whose limit is approximated.',
+          sample: 'x => sin(x) / x',
+        },
+        {
+          description:
+            'The point that the variable approaches, possibly `Infinity` or `-Infinity`.',
+          sample: '0',
+        },
+        {
+          description:
+            'A positive number for the limit from above, a negative number for the limit from below, 0 for both sides (`NaN` when they differ); by default, from above.',
+          sample: '1',
+        },
+      ],
       canonical: (ops, { engine }) => {
         // A `Return` in an operand has no function to end (ROADMAP CE-96).
         const returnError = canonicalWithEscapingReturn(engine, 'NLimit', ops);
@@ -10532,6 +10820,23 @@ volumes
       operands: operandRolesFrom([RAW_ROLE, BOUND_ROLE], RAW_ROLE),
       signature:
         '(expression, variable:symbol?, point:value?, order:number?) -> number',
+      parameters: [
+        { description: 'The expression to expand.', sample: 'sin(x)' },
+        {
+          description:
+            'The variable of the expansion; by default, the single symbol of the expression, or `x` among several; with several symbols and no `x`, the call stays unevaluated.',
+        },
+        {
+          description:
+            'The point of the expansion, possibly `Infinity`; by default, 0.',
+          sample: '0',
+        },
+        {
+          description:
+            'The order of the last term kept, in powers of the distance to the point (of `1/x` at infinity), after which a `BigO` term stands; by default, 5.',
+          sample: '3',
+        },
+      ],
       canonical: (ops, { engine: ce }) => {
         const f = ops[0]?.canonical;
         if (!f) return null;
@@ -10617,8 +10922,16 @@ volumes
         'Landau big-O remainder term. Inert; a numeric approximation ' +
         '(.N()) keeps the term and approximates its operand. Strip it ' +
         'with Normal.',
+      examples: ['N(x / 3 + BigO(x^2))', 'Normal(1 + x + BigO(x^2))'],
       broadcastable: false,
       signature: '(value) -> number',
+      parameters: [
+        {
+          description:
+            'The order of the remainder, usually a power of the variable.',
+          sample: 'x^3',
+        },
+      ],
     },
 
     //
@@ -10629,9 +10942,17 @@ volumes
     Normal: {
       description:
         'Strip Big-O remainder terms from a series, yielding the truncated ' +
-        'polynomial. Example: Normal(Series(\\sin x, x)) → x - x^3/6 + x^5/120',
+        'polynomial.',
+      examples: ['Normal(Series(Sin(x), x))'],
       broadcastable: false,
       signature: '(value) -> value',
+      parameters: [
+        {
+          description:
+            'The series; a value with no `BigO` term is returned unchanged.',
+          sample: 'series(sin(x), x)',
+        },
+      ],
       // `Normal` is a passthrough that strips `BigO` remainder terms, so the
       // result's honest type is the operand's own type: a truncated series
       // stays numeric, and a non-numeric value (which `normalStrip` returns

@@ -280,6 +280,14 @@ describe('THE LIBRARY DOCUMENTATION', () => {
         resolved.fn.length === 2
           ? resolved.fn[1]
           : resolved;
+      // A name is a sample of a parameter of type `symbol` (the variable of
+      // `DSolve`): boxed, a name has the type of its value, not `symbol`.
+      const isName =
+        (typeof statement === 'string' && !statement.startsWith("'")) ||
+        (typeof statement === 'object' &&
+          statement !== null &&
+          'sym' in statement);
+      if (isName && candidates.some((type) => type === 'symbol')) return;
       const value = engine.box(statement);
       if (!candidates.some((type) => value.type.matches(type)))
         broken.push(`${where}: ${sample} is not of the type of its parameter`);
@@ -378,6 +386,23 @@ describe('THE LIBRARY DOCUMENTATION', () => {
     });
     expect(brokenSamples(engine, ['Pad'])).toEqual([
       'Pad(count): "two" is not of the type of its parameter',
+    ]);
+  });
+
+  test('a name is a sample of a symbol parameter, a number is not', () => {
+    const engine = new ComputeEngine();
+    engine.declare('Vary', {
+      signature: '(f: expression, variable: symbol) -> expression',
+      evaluate: ([f]) => f,
+      parameters: { f: { sample: 'x^2' }, variable: { sample: 'x' } },
+    });
+    engine.declare('Fix', {
+      signature: '(variable: symbol) -> expression',
+      evaluate: ([v]) => v,
+      parameters: { variable: { sample: '2' } },
+    });
+    expect(brokenSamples(engine, ['Vary', 'Fix'])).toEqual([
+      'Fix(variable): 2 is not of the type of its parameter',
     ]);
   });
 

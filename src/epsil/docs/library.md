@@ -615,21 +615,21 @@ The [Calculus reference](/epsil/reference/calculus/) has the full description an
 | `circularIntegrate` | `CircularIntegrate` | `(function, limits+) -> number` | Closed-path integral. |
 | `contourIntegrate` | `ContourIntegrate` | `(expression, variable: symbol, contour: expression) -> number` | Symbolic integral over an explicit closed contour or the real line (`realLineContour`), using the residue theorem. |
 | — | `D` | `(expression, variables: symbol*) -> expression` | Symbolic partial derivative with respect to one or more variables. |
-| `dSolve` | `DSolve` | `(expression, symbol, symbol) -> expression` | Symbolic differential equation solver. |
+| `dSolve` | `DSolve` | `(equation: expression, dependent: symbol, variable: symbol) -> expression` | Symbolic differential equation solver. |
 | `derivative` | `Derivative` | `(function, order: number*) -> function` | Derivative operator that returns a derivative function. |
 | `integrate` | `Integrate` | `(function, limits+) -> list<tuple> \| number \| tensor \| tuple` | Symbolic integral with optional bounds. |
 | `interpolatingFunction` | `InterpolatingFunction` | `(list<any>, number?) -> number` | Piecewise-quartic dense-output interpolant of a numeric ODE solution (produced by `ndSolveFunction`). |
-| `jacobianMatrix` | `JacobianMatrix` | `(any, any?) -> value` | JacobianMatrix(fs, vars): the matrix of partial derivatives |
+| `jacobianMatrix` | `JacobianMatrix` | `(fs: any, variables: any?) -> value` | JacobianMatrix(fs, variables): the matrix of partial derivatives |
 | `limit` | `Limit` | `(function, point: number, direction: number?) -> number` | Limit of a function. |
 | — | `Limits` | `(index: symbol, lower: value, upper: value, step: value?) -> tuple` | Limits of a function |
 | `nd` | `ND` | `(function, at: number) -> list<number> \| number \| tuple` | Numerical derivative evaluated at a point. |
-| `ndSolve` | `NDSolve` | `(expression, symbol, limits: symbol \| tuple, number, number?) -> list` | Numerical differential equation solver. |
-| `ndSolveFunction` | `NDSolveFunction` | `(expression, symbol, limits: symbol \| tuple, number) -> function` | Numerically solve an ordinary differential equation and return the solution as an applicable function (a `Function` literal wrapping an `interpolatingFunction`), usable at any point of the integration interval. |
+| `ndSolve` | `NDSolve` | `(equation: expression, dependent: symbol, limits: symbol \| tuple, initial: number, steps: number?) -> list` | Numerical differential equation solver. |
+| `ndSolveFunction` | `NDSolveFunction` | `(equation: expression, dependent: symbol, limits: symbol \| tuple, initial: number) -> function` | Numerically solve an ordinary differential equation and return the solution as an applicable function (a `Function` literal wrapping an `interpolatingFunction`), usable at any point of the integration interval. |
 | `nIntegrate` | `NIntegrate` | `(function, lower: number, upper: number) -> number` | Numerical approximation of a definite integral. |
 | `nLimit` | `NLimit` | `(function, point: number, direction: number?) -> number` | Numerical approximation of the limit of a function. |
 | `normal` | `Normal` | `(value) -> value` | Strip Big-O remainder terms from a series, yielding the truncated polynomial. |
 | `polygonContour` | `PolygonContour` | `(vertices: list<complex>, orientation: integer?) -> expression` | Simple closed polygon: a list of complex vertices in traversal order, with optional orientation override (+1 or -1). |
-| `rSolve` | `RSolve` | `(expression, symbol, symbol) -> expression` | Symbolic recurrence equation solver. |
+| `rSolve` | `RSolve` | `(equation: expression, dependent: symbol, index: symbol) -> expression` | Symbolic recurrence equation solver. |
 | `realLineContour` | `RealLineContour` | `(principalValue: boolean?) -> expression` | The real axis from minus infinity to infinity. |
 | `rectangleContour` | `RectangleContour` | `(lowerLeft: complex, upperRight: complex, orientation: integer?) -> expression` | Closed rectangle: lower-left and upper-right complex corners, optional orientation (+1 or -1). |
 | `residue` | `Residue` | `(expression, variable: symbol, point: value) -> number` | Residue of a function at a point (the coefficient of (x-a)⁻¹ in its Laurent expansion) |
