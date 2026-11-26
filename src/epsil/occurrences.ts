@@ -266,15 +266,11 @@ export function documentBindings(
      *   field target (`a[1] = 2`, `r.x = 2`), is a `write`.
      *
      * `defined(name)` is true when the engine or the library binds `name`
-     * outside the program. `library(name, start)` is true when the
-     * occurrence of `name` at the offset `start` names the library whatever
-     * the program binds: no binding of the program is visible there, and a
-     * call with that head binds its variables. A group made at the top
-     * level of the program has `topLevel` set.
+     * outside the program. A group made at the top level of the program
+     * has `topLevel` set.
      */
     engineRules?: {
       defined: (name: string) => boolean;
-      library?: (name: string, start: number) => boolean;
     };
   }
 ): BindingGroup[] {
@@ -1216,7 +1212,6 @@ export function documentBindings(
     name: string,
     offset: number
   ): BindingGroup | undefined {
-    if (rules?.library?.(name, offset) === true) return undefined;
     // The binding of a `let` whose initializer holds the occurrence
     // (`engineRules`).
     let own: BindingGroup | undefined;

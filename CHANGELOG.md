@@ -253,6 +253,20 @@
 
 ### Resolved Issues
 
+- **In Epsil, a function that uses a variable declared below it reads the
+  variable when a library function has the same name** (CE-1826). In
+  `let h = () => mean(3)`, `let mean = (x) => x + 4`, `h()`, the body of
+  `h` called the library function `Mean`, and the program gave `3`. A `let`
+  or a `const` binds its name in its whole block, as it did for a name that
+  the library does not have, so the body now calls the variable, and the
+  program gives `7`. A recursive `let mean = (n) => … mean(n - 1)` now calls
+  itself, where it called the library function. A statement above the `let`
+  that reads the name (`let a = mean`, then `let mean = 7`) read the library
+  function and is now an error (`read-before-declaration`), as for any other
+  name. The
+  initializer still reads the library: `let mean = mean(xs)` is not changed.
+  `epsilProgramSites()` reports such a name as the `program` binding.
+
 - **The Epsil editor functions give whole paragraphs for the description of
   a library function** (CE-1811). For `findRoot`, `limit`, `map`, `solve` and
   about twenty other names, each element of the `description` of

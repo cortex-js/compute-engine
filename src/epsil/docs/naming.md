@@ -75,7 +75,7 @@ User-defined variables, functions, and types are lowercase too: `total`,
 case; the library spellings and the user names share one namespace and
 resolve by **scope**, not by case.
 
-A user binding shadows a library name for the rest of its scope, whichever
+A user binding shadows a library name in its scope, whichever
 spelling the library name has: a `let`, a `const`, a parameter, a loop
 variable, a `match` pattern, or a `function` definition. A function member
 of a `protocol` takes the bare name from the `protocol` statement onward,
@@ -117,7 +117,7 @@ the exponential, `i^2` is `-1`, and `1 + 2i` is a complex number. They
 shadow like any other name — `let e = 3; e^2` is `9`.
 
 The capitalized spelling shadows the same way in a nested scope: in a
-function body, `let Pi = 3` makes `Pi` the number `3` for the rest of the
+function body, `let Pi = 3` makes `Pi` the number `3` in the whole
 body, and `function Square(x) { x + 100 }` makes `Square(3)` call that
 function.
 
@@ -147,15 +147,30 @@ The constants `e` and `i` are not in this group. The engine never writes
 them by name in a result (it writes `ExponentialE` and a complex number), so
 `let e = 3` and `let i = 1` are correct at the top level.
 
-A top-level `let` of a constant name shadows the constant only from its
-statement on. A function defined before the `let` reads the constant:
+A `let` or a `const` binds its name in its whole block, or in the whole
+program for a top-level statement. A function written above the statement
+reads the variable, not the library definition:
+
+```epsil
+let h = () => mean + 1
+let mean = 7
+h()
+// ➔ 8
+```
 
 ```epsil
 function g() { i^2 }
 let i = 2
 [g(), i^2]
-// ➔ [-1, 4]
+// ➔ [4, 4]
 ```
+
+A statement above the `let` that reads the name is a use of the variable
+before its declaration (the error `read-before-declaration`); it does not
+read the library definition. The initializer of the statement is the
+exception: `let mean = mean(xs)` calls the library function. An initializer
+that is a function literal names the variable itself, so
+`let fact = (n) => if n <= 1 { 1 } else { n * fact(n - 1) }` is recursive.
 
 Shadowing a name that an operator builds changes the operator too: `+` is
 `Add`, so a user `Add` is what `+` calls in its scope, and a definition such

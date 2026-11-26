@@ -53,6 +53,13 @@ function run(source: string, ce = new ComputeEngine()): string {
   return executeEpsil(ce, source).value.toString();
 }
 
+/** The codes of the diagnostics of `source` on a fresh engine. */
+function codes(source: string): string[] {
+  return executeEpsil(new ComputeEngine(), source).diagnostics.map(
+    (d) => String(d.message[3])
+  );
+}
+
 /** The value of `source` as a symbol name (`True`, `False`), or `undefined`
  * when the value is not a symbol. */
 function runSymbol(source: string): string | undefined {
@@ -315,12 +322,12 @@ describe('the resolution pass', () => {
     ).toBe('3');
     expect(run('match (0, 3) { (0, count) => count }')).toBe('3');
     expect(run('if let count = 5 { count }')).toBe('5');
-    // A `let` after a use: the use above reads the library, as it would with
-    // any outer binding.
+    // A `let` binds its name in the whole program: the use above it names
+    // the variable, and is a read before the declaration.
     expect(resolved('mean; let mean = 1')).toEqual({
       fn: [
         'Program',
-        { sym: 'Mean' },
+        { sym: 'mean' },
         {
           fn: [
             'Declare',
@@ -333,6 +340,57 @@ describe('the resolution pass', () => {
             },
           ],
         },
+      ],
+    });
+  });
+
+  test('a `let` binds its name in the whole block (CE-1826)', () => {
+    // A function body above the `let` reads the variable, as the
+    // interpreter does for a name that the library does not have.
+    expect(run('let h = () => mean\nlet mean = 7\nh()')).toBe('7');
+    expect(run('function g() { mean }\nlet mean = 7\ng()')).toBe('7');
+    expect(run('let h = () => mean(3)\nlet mean = (x) => x + 4\nh()')).toBe(
+      '7'
+    );
+    expect(run('let h = () => pi\nconst pi = 3\nh()')).toBe('3');
+    expect(
+      run('let h = () => mean + max\nlet (mean, max) = (1, 2)\nh()')
+    ).toBe('3');
+    // In a block and in a function body too.
+    expect(
+      run('do { let h = () => mean(3); let mean = (x) => x + 4; h() }')
+    ).toBe('7');
+    expect(
+      run(
+        'function f() { let r = () => mean(3); let mean = (x) => x + 4; r() }\nf()'
+      )
+    ).toBe('7');
+    // The call of a library binder above a `let` of its name is a call of
+    // the variable, and binds nothing.
+    expect(
+      run('let h = () => sum(k, k in 1..3)\nlet sum = (a, b) => 7\nh()')
+    ).toBe('7');
+    // The initializer reads the library, except in a function literal,
+    // which names the binding itself.
+    expect(run('let mean = mean([1, 3])\nmean')).toBe('2');
+    expect(
+      run('let mean = (n) => if n <= 0 { 0 } else { mean(n - 1) }\nmean(2)')
+    ).toBe('0');
+    // A statement above the `let` is a use before the declaration, as for
+    // any name.
+    expect(codes('let a = pi\nlet pi = 3')).toEqual([
+      'read-before-declaration',
+    ]);
+    expect(codes('let a = q\nlet q = 3')).toEqual(['read-before-declaration']);
+    // An assignment declares nothing: its target keeps its name, and the
+    // reads name the library.
+    expect(codes('mean = 5')).toEqual(['assignment-to-undeclared-variable']);
+    expect(codes('mean += 1')).toEqual(['assignment-to-undeclared-variable']);
+    expect(resolved('mean = 5; mean')).toEqual({
+      fn: [
+        'Program',
+        { fn: ['Assign', { sym: 'mean' }, { num: '5' }] },
+        { sym: 'Mean' },
       ],
     });
   });

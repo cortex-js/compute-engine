@@ -44,9 +44,12 @@ import {
 // `function`, or variable of a library call (`binderSitesOf` says which
 // operands bind one) — and nothing in the ENGINE binds it either
 // (an earlier notebook cell's `let mean = 5`, a host `ce.declare`). The
-// scope model is the one the language server uses for rename
-// (`documentBindings`), so what the server treats as one binding, this pass
-// treats as one binding.
+// scope model is the walk of `documentBindings()` under its `engineRules`
+// option, which is the model of the interpreter: a `let` or a `const` binds
+// its name in its whole block, or in the whole program for a top-level
+// statement, so a function body above `let mean = …` names the variable.
+// The initializer of the statement is the exception: `let mean = mean(xs)`
+// calls the library function.
 //
 // Two forms are never rewritten: a verbatim spelling (`` `sin` ``), which
 // names the raw symbol, and a name that spells nothing in the library.
@@ -788,6 +791,13 @@ export function resolveLibraryNames(
   const groups = documentBindings(ast, source, {
     binderSites: (node, isBound, declarationOf) =>
       binderSitesOf(ce, node, source, members, isBound, declarationOf),
+    // The rules of the interpreter: a `let` binds its name in its whole
+    // block, so a function body above the statement names the variable.
+    engineRules: {
+      defined: (name) =>
+        ce.lookupDefinition(name) !== undefined ||
+        canonicalLibraryName(name) !== undefined,
+    },
   });
 
   // The occurrences to rewrite, keyed by the start offset AND the name of the
@@ -808,6 +818,10 @@ export function resolveLibraryNames(
     for (const occurrence of group.occurrences) {
       // The verbatim form names the raw symbol.
       if (source[occurrence.start] === '`') continue;
+      // The target of an assignment that no `let` of the program declares
+      // keeps its name, so that the interpreter reports
+      // `assignment-to-undeclared-variable` for the name as written.
+      if (occurrence.role === 'write') continue;
       // A protocol function member of this program declared above the
       // occurrence shadows the spelling.
       if (memberFrom !== undefined && occurrence.start >= memberFrom) continue;

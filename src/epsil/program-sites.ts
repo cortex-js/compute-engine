@@ -26,10 +26,10 @@ import { binderSitesOf } from './resolve-library-names.js';
 // macro that expands to a read adds no site, and `v / v` has two sites also
 // when its value is the constant 1.
 //
-// The query gives what the interpreter does, also in a case with an open
-// issue. A library spelling that `resolveLibraryNames()` rewrites before the
-// program is boxed is `library`, also where a `let` of the program binds
-// the name in the whole scope: a function body above the `let` (CE-1826).
+// The query gives what the interpreter does: `resolveLibraryNames()` reads
+// the same walk, so a library spelling that it rewrites before the program
+// is boxed is `library`, and a spelling that a `let` of the program binds
+// (also in a function body above the `let`) is that binding.
 //
 
 /** What a name of an Epsil program resolves to. */
@@ -290,25 +290,21 @@ export function epsilProgramSites(
 
   const members = protocolFunctionMembers(ast);
   /** The name of the library definition that the spelling `name` stands
-   * for at `start`, as `resolveLibraryNames()` decides it. */
-  const libraryName = (name: string, start: number): string | undefined => {
+   * for at `start`, as `resolveLibraryNames()` decides it. The target of an
+   * assignment keeps its name. */
+  const libraryName = (
+    name: string,
+    start: number,
+    write: boolean
+  ): string | undefined => {
     const canonical = canonicalLibraryName(name);
-    if (canonical === undefined || source[start] === '`') return undefined;
+    if (canonical === undefined || source[start] === '`' || write)
+      return undefined;
     const from = members.get(name)?.from;
     return from !== undefined && start >= from ? undefined : canonical;
   };
-  // The occurrences that `resolveLibraryNames()` takes as free, by start
-  // and name: it reads the walk without `engineRules`, and rewrites a
-  // library spelling there to the library name before the program is boxed.
-  const rewritten = new Set<string>();
-  for (const group of documentBindings(ast, source, {
-    binderSites: (node, isBound, declarationOf) =>
-      binderSitesOf(ce, node, source, members, isBound, declarationOf),
-  }))
-    if (group.kind === 'free' && ce.lookupDefinition(group.name) === undefined)
-      for (const occurrence of group.occurrences)
-        if (libraryName(group.name, occurrence.start) !== undefined)
-          rewritten.add(`${occurrence.start}:${group.name}`);
+  // The same walk as `resolveLibraryNames()`, so a spelling that it rewrites
+  // to the library name is a free name here.
   const groups = documentBindings(ast, source, {
     binderSites: (node, isBound, declarationOf) =>
       binderSitesOf(ce, node, source, members, isBound, declarationOf),
@@ -316,7 +312,6 @@ export function epsilProgramSites(
       defined: (name) =>
         ce.lookupDefinition(name) !== undefined ||
         canonicalLibraryName(name) !== undefined,
-      library: (name, start) => rewritten.has(`${start}:${name}`),
     },
   });
 
@@ -336,7 +331,11 @@ export function epsilProgramSites(
   // The binding of a name that the program does not bind, for one site.
   const outside = new Map<string, number>();
   const system = ce.contextStack[0]?.lexicalScope;
-  const outsideBinding = (name: string, start: number): number => {
+  const outsideBinding = (
+    name: string,
+    start: number,
+    write: boolean
+  ): number => {
     const definition = ce.lookupDefinition(name);
     let binding: EpsilSiteBinding;
     if (definition !== undefined) {
@@ -351,7 +350,7 @@ export function epsilProgramSites(
           ? { name, kind: 'library' }
           : { name, kind: 'external', scopeDepth: depth };
     } else {
-      const library = libraryName(name, start);
+      const library = libraryName(name, start, write);
       binding =
         library !== undefined
           ? { name: library, kind: 'library' }
@@ -378,7 +377,8 @@ export function epsilProgramSites(
     const occurrence = group.occurrences[occurrenceIndex];
     const { start, end } = occurrence;
     let binding: number;
-    if (group.kind === 'free') binding = outsideBinding(group.name, start);
+    if (group.kind === 'free')
+      binding = outsideBinding(group.name, start, occurrence.role === 'write');
     else {
       binding =
         inside.get(group) ??
