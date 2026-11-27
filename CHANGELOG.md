@@ -82,6 +82,10 @@
 
 ### Behavior Changes
 
+- **Epsil preserves callback effects when a function shadows a library constant.**
+  A recursive helper named `i` can forward a callback that writes to the
+  enclosing scope without widening its caller's effects to `any`.
+
 - **JavaScript compiles polygon results.** A `Polygon` returns
   `{ __tag: "Polygon", geom: [x0, y0, x1, y1, …] }`. Lists and
   comprehensions of polygons return those records in source order, including

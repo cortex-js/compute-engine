@@ -7849,7 +7849,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
             isProtocolDispatcher(existing) &&
             ce.context.lexicalScope.bindings.get(symbolName) !== existing;
           if (existing === undefined) ce.symbol(symbolName);
-          else if (isBuiltin && isProgramStatement())
+          else if (isBuiltin && isOperatorDef(existing) && isProgramStatement())
             // A Program function statement installs an ordinary clause.
             // Its shadow must be inferred so installation keeps the
             // clause's parameter names.

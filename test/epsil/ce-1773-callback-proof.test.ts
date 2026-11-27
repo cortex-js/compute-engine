@@ -323,6 +323,9 @@ ${f}`,
     );
     expect(first).toEqual(['scope']);
     expect(second).toEqual(first);
+    expect(effectsAfter(`${cycle}${f.replace('f()', 'f() scope')}`, 'f')).toEqual(
+      first
+    );
   });
 
   test('a parameter that the function returns, called by the caller', () => {
