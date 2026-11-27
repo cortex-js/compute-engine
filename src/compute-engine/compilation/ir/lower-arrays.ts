@@ -29,6 +29,7 @@ import type { Type } from '../../../common/type/types.js';
 import {
   arrayCellType,
   arrayStorageKind,
+  arrayTupleLayout,
   throughTransparentAliases,
 } from '../../../common/type/array-storage.js';
 import { resolveTypeReference } from '../../../common/type/subtype.js';
@@ -47,6 +48,7 @@ import {
 } from '../../boxed-expression/type-guards.js';
 import {
   isSubLane,
+  sameArrayCells,
   scalarType,
   typeToString,
   type ArrayCells,
@@ -111,6 +113,7 @@ export function arrayCells(t: Type): ArrayCells | string | undefined {
     cell: engineTypeToString(c),
     type: c,
     lane,
+    layout: arrayTupleLayout(c),
     tuple: { tag, ...(names === undefined ? {} : { names }) },
   };
 }
@@ -156,7 +159,8 @@ export function arrayEntryCheck(
       isMutableArray(a) &&
       a._storage === kind.storage &&
       a._tuple === kind.tuple &&
-      engineTypeToString(a.cellType.type) === cells.cell
+      engineTypeToString(a.cellType.type) === cells.cell &&
+      (!kind.tuple || arrayTupleLayout(a.cellType.type) === cells.layout)
     )
       return true;
     throw new TypeError(
@@ -500,6 +504,8 @@ export function arrayLowering(
     const parts: V[] | undefined = nominal
       ? t.lane === 'record' &&
         t.nominal === cells.tuple.tag &&
+        (cells.tuple.names === undefined ||
+          t.names?.join('\u0000') === cells.tuple.names.join('\u0000')) &&
         t.fields?.length === 4 &&
         t.fields.every((f) => f.lane === 'integer' && f.shape.length === 0)
         ? [0, 1, 2, 3].map((k) => records.field(e, v, k))
@@ -731,7 +737,7 @@ export function arrayLowering(
       if (e.nops !== 2) decline(e, 'Swap of other than two arrays');
       const [x, y] = e.ops.map((op) => cx.value(op)!);
       const [s, t] = [cellsOfValue(e.ops[0], x), cellsOfValue(e.ops[1], y)];
-      if (s.cell !== t.cell)
+      if (!sameArrayCells(s, t))
         decline(
           e,
           `Swap of an array<${s.cell}> and an array<${t.cell}> (the interpreter gives incompatible-type)`

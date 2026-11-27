@@ -1,6 +1,7 @@
-import type { NumericType, Type, TypeReference } from './types.js';
+import type { NumericType, TupleType, Type, TypeReference } from './types.js';
 import { aliasDefinitionAt } from './instantiate.js';
 import { declarationOf } from './reference.js';
+import { typeToString } from './serialize.js';
 import { resolveTypeReference } from './subtype.js';
 
 /**
@@ -37,6 +38,24 @@ export function arrayCellType(type: Type): Type | undefined {
   if (t === undefined || typeof t === 'string' || t.kind !== 'array')
     return undefined;
   return t.elements;
+}
+
+/** The ordered fields and byte ranges of a tuple cell, through aliases. */
+export function arrayTupleType(cellType: Type): TupleType | undefined {
+  const body = resolveTypeReference(cellType);
+  if (typeof body !== 'object' || body.kind !== 'tuple') return undefined;
+  return {
+    kind: 'tuple',
+    elements: body.elements.map((field) => ({
+      ...field,
+      type: throughTransparentAliases(field.type) ?? field.type,
+    })),
+  };
+}
+
+export function arrayTupleLayout(cellType: Type): string | undefined {
+  const type = arrayTupleType(cellType);
+  return type === undefined ? undefined : typeToString(type);
 }
 
 /** The integer storages, in the order of the table: the first one whose

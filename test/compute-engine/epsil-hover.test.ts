@@ -362,6 +362,13 @@ describe('EPSIL HOVER: THE ENGINE', () => {
 });
 
 describe('EPSIL DEFINITION', () => {
+  test('an early read points to the inner declaration that shadows it (CE-1900)', () => {
+    const source = 'let x = 10\ndo { let before = x; let x = 2; before }';
+    const read = source.indexOf('= x') + 2;
+    const inner = source.lastIndexOf('x');
+    expect(epsilDefinition(ce, source, read)?.name).toEqual([inner, inner + 1]);
+  });
+
   test('a function gives its name and its header', () => {
     expect(epsilDefinition(ce, F, F.indexOf('f(1)'))).toEqual({
       name: [29, 30],
@@ -422,13 +429,13 @@ describe('EPSIL DEFINITION', () => {
     });
   });
 
-  test('a nearer later local blocks a forward lookup further out', () => {
+  test('early reads and writes resolve to the local that shadows an outer name', () => {
     expect(
       definition('function f() { print(▮c); let c = 1 }\nconst c = 5')
-    ).toBeNull();
+    ).toEqual({ name: 'c', header: 'let c = 1' });
     expect(
       definition('function f() { ▮c = 2; let c = 1 }\nconst c = 5')
-    ).toEqual({ name: 'c', header: 'c = 2' });
+    ).toEqual({ name: 'c', header: 'let c = 1' });
   });
 
   test('a parameter, a loop variable and a pattern variable', () => {

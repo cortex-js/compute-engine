@@ -17,6 +17,41 @@ import { executeEpsil } from '../../src/epsil';
 
 type Run = (...args: unknown[]) => unknown;
 
+test('an existing byte tuple array keeps its layout after redeclaration (CE-1903)', () => {
+  const ce = new ComputeEngine();
+  const runSource = (source: string) => {
+    const result = executeEpsil(ce, source);
+    expect(result.diagnostics).toEqual([]);
+    return result.value;
+  };
+  runSource(`type alias B = integer<0..255>
+type Pixel = tuple<r: B, g: B, b: B, a: B>
+let old = arrayFrom([Pixel(17, 23, 31, 255)], "Pixel")
+let red = () => old[1].r
+let channel = (a: array<Pixel>) => a[1].r`);
+  const compileReader = (name: string) =>
+    compile(ce.expr(name).evaluate(), { fallback: false }).run! as Run;
+  const captured = compileReader('red');
+  const entry = compileReader('channel');
+  const original = ce.expr('old').evaluate();
+  expect(captured()).toBe(17);
+  expect(entry(original)).toBe(17);
+
+  runSource(`type Pixel = tuple<g: B, r: B, b: B, a: B>
+let replacement = arrayFrom([Pixel(19, 29, 31, 255)], "Pixel")
+let exchange = () => do { swap(old, replacement); old[1].r }`);
+  expect(runSource('red()')?.json).toBe(17);
+  expect(captured()).toBe(17);
+  expect(entry(original)).toBe(17);
+  expect(() => entry(ce.expr('replacement').evaluate())).toThrow(TypeError);
+  expect(ce.expr(['Swap', 'old', 'replacement']).evaluate().isValid).toBe(false);
+  expect(() => compileReader('exchange')).toThrow(/Swap of an array/);
+  runSource('type alias B = integer<0..127>');
+  expect(entry(original)).toBe(17);
+  expect(captured()).toBe(17);
+  expect(runSource('red()')?.json).toBe(17);
+});
+
 /** An engine with the host functions of the tests: `hostDraw(x)` records
  *  `x` and the value of `s` in the engine; `hostSet(x)` assigns `s`;
  *  `hostFail(x)` records `s` and throws; `hostFlag()` records `on`;

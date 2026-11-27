@@ -774,6 +774,31 @@ describe('Apply whose value is a list of rows', () => {
   });
 });
 
+test('a named matrix result requires proof of uniform row width (CE-1901)', () => {
+  const engine = new ComputeEngine();
+  engine.declare('M', 'matrix<real>');
+  engine.declare('clip', '(matrix<real>) -> matrix<real>');
+  engine.declare('rows', '(matrix<real>) -> list<list<real>>');
+  engine.declare('transpose', '(matrix<real>) -> matrix<real>');
+  const clip = engine.expr(
+    F(['Map', F(['Filter', 'r', F(['Greater', 'x', 2], 'x')], 'r'), 'm'], 'm') as never
+  );
+  engine.assign('clip', clip);
+  engine.assign('rows', clip);
+  engine.assign('transpose', engine.expr(F(['Transpose', 'm'], 'm') as never));
+
+  expect(() => compile(engine.expr(['clip', 'M']), { fallback: false })).toThrow(
+    /matrix<real> of lengths that the body settles/
+  );
+  const input = { M: [[1, 2, 3], [4, 5, 6]] };
+  expect(compile(engine.expr(['rows', 'M']), { fallback: false }).run!(input)).toEqual([
+    [3], [4, 5, 6],
+  ]);
+  expect(compile(engine.expr(['transpose', 'M']), { fallback: false }).run!(input)).toEqual([
+    [1, 4], [2, 5], [3, 6],
+  ]);
+});
+
 describe('a matrix type of stated dimensions keeps its code', () => {
   // The code of the base commit (a3421e13d) for these forms.
   test('Transpose of a 2 × 3 matrix', () => {

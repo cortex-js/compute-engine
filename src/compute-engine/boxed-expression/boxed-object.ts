@@ -589,7 +589,8 @@ export function makeObject(
  * - The reference node's own properties, including the resolved `def` — the
  *   LAYOUT, the thing a re-declaration replaces. The `object{…}` body is
  *   copied one level (a fresh `elements` map) so that even an in-place edit of
- *   the layout cannot reach the pin.
+ *   the layout cannot reach the pin. An array can supply a byte tuple layout
+ *   whose field ranges it has already resolved through aliases.
  * - The printed NAME is unchanged, so `P` still prints and diagnoses as `P`;
  *   the two populations are distinct nominal types that share a name.
  * - Field types are NOT followed. A field declared `Inner` keeps pointing at
@@ -605,11 +606,11 @@ export function makeObject(
  *   live pointer leaves reading through to the registry is the declared
  *   parameter list and the "is it an object type at all" answer.
  */
-export function detachNominalType(t: BoxedType): BoxedType {
+export function detachNominalType(t: BoxedType, layout?: Type): BoxedType {
   const ref = t.type;
   if (typeof ref !== 'object' || ref.kind !== 'reference') return t;
 
-  const def = detachDefinitionBody(ref.def);
+  const def = detachDefinitionBody(layout ?? ref.def);
 
   if (ref.args === undefined)
     return new BoxedType({ ...ref, def } as TypeReference, t.typeResolver);

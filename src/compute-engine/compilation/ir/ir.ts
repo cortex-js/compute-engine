@@ -46,8 +46,8 @@ export type Lane =
 
 /** The cells of a value of the lane `array`, a mutable array of the engine
  *  of machine cells (`lower-arrays.ts`, `arrayStorageKind()`): `cell`, its
- *  cell type spelled (`typeToString()` of the engine), which makes two
- *  array types one IR type; `type`, that cell type; `lane`, the lane of a
+ *  cell type spelled (`typeToString()` of the engine); `type`, that cell
+ *  type; `layout`, the ordered fields and ranges of a tuple cell; `lane`, the lane of a
  *  cell of one number or of each byte of a tuple cell; `tuple`, for the
  *  tuple cell of four bytes, the head of the value of a cell (the name of
  *  its nominal type, or `Tuple`) and its field names. */
@@ -55,8 +55,13 @@ export type ArrayCells = {
   readonly cell: string;
   readonly type: Type;
   readonly lane: 'integer' | 'real';
+  readonly layout?: string;
   readonly tuple?: { readonly tag: string; readonly names?: readonly string[] };
 };
+
+export function sameArrayCells(a?: ArrayCells, b?: ArrayCells): boolean {
+  return a?.cell === b?.cell && a?.layout === b?.layout;
+}
 
 /** The value of a constant of the `complex` lane. */
 export type Cx = { readonly re: number; readonly im: number };
@@ -500,7 +505,7 @@ export function sameFields(
   // Two arrays are one type when their cell types are (an array type is
   // invariant in its cell type).
   if (a.lane === 'array' || b.lane === 'array')
-    return a.lane === b.lane && a.array?.cell === b.array?.cell;
+    return a.lane === b.lane && sameArrayCells(a.array, b.array);
   if (a.lane !== 'record' && b.lane !== 'record') return true;
   const [f, g] = [a.fields ?? [], b.fields ?? []];
   const [m, n] = [a.marks ?? [], b.marks ?? []];

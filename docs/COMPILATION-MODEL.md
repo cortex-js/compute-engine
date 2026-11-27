@@ -824,7 +824,8 @@ asynchronous text of the same IR, which awaits at such a loop.
   `run()` throws (`onLoop` reports `'pool-declined'`). A deadline frame
   current at the call (`ce.withTimeLimit()`) bounds the workers too: the
   promise then rejects with that frame's `CancellationError` (its
-  attribution and spans), and no sub-range runs again. A `signal` already
+  attribution and spans), and no sub-range runs again. The deadline settles
+  the promise before any grace period for worker replacement elapses. A `signal` already
   aborted rejects before any statement runs; an abort during a wait rejects
   at once (the queued sub-ranges are dropped, and a running worker is
   replaced after the pool's grace period); an abort while statements run is

@@ -19,6 +19,8 @@ import type { Type, TypeString } from '../../common/type/types.js';
 import { BoxedType } from '../../common/type/boxed-type.js';
 import {
   arrayStorageKind,
+  arrayTupleLayout,
+  arrayTupleType,
   throughTransparentAliases,
   type ArrayStorage,
 } from '../../common/type/array-storage.js';
@@ -64,18 +66,20 @@ type CellSpec = {
   readonly tag: string | undefined;
   /** For a tuple cell: the type of each of its four elements. */
   readonly elements: readonly Type[] | undefined;
+  readonly layout?: string;
   /** The field names of a structural tuple are also available out of range. */
   readonly absentTupleType?: BoxedType;
 };
 
-/** A structural tuple read from an array keeps its cell layout as a value. */
+/** A tagged or structural tuple read from an array keeps its cell layout. */
 class NamedArrayTuple extends BoxedFunction {
   constructor(
     ce: ComputeEngine,
+    private readonly tag: string,
     ops: readonly Expression[],
     private readonly tupleType: BoxedType
   ) {
-    super(ce, 'Tuple', ops, { canonical: true });
+    super(ce, tag, ops, { canonical: true });
   }
 
   override get type(): BoxedType {
@@ -89,7 +93,10 @@ class NamedArrayTuple extends BoxedFunction {
   override evaluate(options?: Partial<EvaluateOptions>): Expression {
     // The four coordinates are already evaluated. Rebuilding the tuple
     // would discard the field names of its layout.
-    if (!options?.signal?.aborted && isLibraryOperator(this, 'Tuple'))
+    if (
+      !options?.signal?.aborted &&
+      (this.tag !== 'Tuple' || isLibraryOperator(this, 'Tuple'))
+    )
       return this;
     return super.evaluate(options);
   }
@@ -386,9 +393,9 @@ export class BoxedArray extends _BoxedExpression implements ArrayInterface {
         ce.number(bytes[at + 2]),
         ce.number(bytes[at + 3]),
       ];
-      if (spec.absentTupleType !== undefined)
-        return new NamedArrayTuple(ce, elements, spec.cellType);
-      return ce._fn(spec.tag!, elements);
+      if (spec.tag === 'Tuple' && spec.absentTupleType === undefined)
+        return ce._fn('Tuple', elements);
+      return new NamedArrayTuple(ce, spec.tag!, elements, spec.cellType);
     }
     return ce.number((cells as Float64Array)[i]);
   }
@@ -486,6 +493,7 @@ export class BoxedArray extends _BoxedExpression implements ArrayInterface {
     if (
       a.storage !== b.storage ||
       a.tuple !== b.tuple ||
+      a.layout !== b.layout ||
       !isSubtype(a.cellType.type, b.cellType.type) ||
       !isSubtype(b.cellType.type, a.cellType.type)
     )
@@ -648,11 +656,16 @@ export function makeArray(
  */
 function pinCellType(cellType: BoxedType): BoxedType {
   const t = throughTransparentAliases(cellType.type) ?? cellType.type;
+  // A byte tuple owns its ranges too, even when the fields were declared
+  // through aliases. A later alias declaration cannot change those ranges.
+  const tuple = arrayStorageKind(t).tuple ? arrayTupleType(t) : undefined;
   const pinned =
     t === cellType.type ? cellType : new BoxedType(t, cellType.typeResolver);
   return typeof t === 'object' && t.kind === 'reference'
-    ? detachNominalType(pinned)
-    : pinned;
+    ? detachNominalType(pinned, tuple)
+    : tuple === undefined
+      ? pinned
+      : new BoxedType(tuple, cellType.typeResolver);
 }
 
 /** The cell spec of the (pinned) cell type `cellType`. */
@@ -681,7 +694,15 @@ function cellSpec(cellType: BoxedType): CellSpec {
           cellType.typeResolver
         )
       : undefined;
-  return { cellType, storage, tuple, tag, elements, absentTupleType };
+  return {
+    cellType,
+    storage,
+    tuple,
+    tag,
+    elements,
+    layout: arrayTupleLayout(cellType.type),
+    absentTupleType,
+  };
 }
 
 /** The head of the value of a tuple cell: the name of the nominal type that
@@ -735,6 +756,7 @@ function absentCell(ce: ComputeEngine, spec: CellSpec): Expression {
   if (spec.absentTupleType !== undefined)
     return new NamedArrayTuple(
       ce,
+      'Tuple',
       [ce.NaN, ce.NaN, ce.NaN, ce.NaN],
       spec.absentTupleType
     );
@@ -791,6 +813,8 @@ function machineInteger(
  */
 function tupleBytes(spec: CellSpec, value: Expression): number[] | undefined {
   if (!isFunction(value) || value.operator !== spec.tag || value.nops !== 4)
+    return undefined;
+  if (spec.tag !== 'Tuple' && arrayTupleLayout(value.type.type) !== spec.layout)
     return undefined;
   const elements = spec.elements!;
   const bytes: number[] = [];

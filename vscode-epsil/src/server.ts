@@ -907,6 +907,7 @@ function resolveBindings(
   members: ReadonlyMap<string, ProtocolFunctionMember>
 ): BindingGroup[] {
   return documentBindings(ast, text, {
+    lexicalTargets: true,
     binderSites: (node, isBound, declarationOf) =>
       binderSitesOf(engine, node, text, members, isBound, declarationOf),
   });

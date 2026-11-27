@@ -105,6 +105,23 @@
 
 ### Behavior Changes
 
+- **Compiled matrix results require rows of equal width.** A function declared
+  to return `matrix<real>` declines if filtering each row can leave different
+  widths. A result declared as `list<list<real>>` can still have ragged rows.
+
+- **Existing arrays keep their declared tuple layout.** Redefining `Pixel`
+  with `g` before `r` leaves the red channel of arrays built with the original
+  layout in its original slot. A swap or compiled argument requires a
+  compatible layout.
+
+- **Compiled worker calls reject at the caller's deadline.** A delayed
+  `runAsync()` worker result produces the deadline's `CancellationError`
+  during the worker replacement grace period.
+
+- **Epsil navigation and rename follow the local that shadows an outer name.**
+  A read before the inner declaration goes to that declaration and still
+  reports `read-before-declaration`.
+
 - **Conjugate transpose with equal axes conjugates every entry.** For example,
   `ConjugateTranspose([[1 + 2i, 3]], 1, 1)` gives `[[1 - 2i, 3]]`.
 

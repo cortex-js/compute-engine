@@ -28,6 +28,7 @@ import {
 import {
   isSubLane,
   isSubType,
+  sameArrayCells,
   sameShape,
   scalarType,
   typeToString,
@@ -847,7 +848,7 @@ export function functionLowering(
     if ('array' in p && p.array !== undefined) {
       const cells = arrayCells(p.array);
       if (typeof cells === 'string') decline(op ?? cx.root, cells);
-      if (t.lane !== 'array' || t.array?.cell !== cells?.cell)
+      if (t.lane !== 'array' || !sameArrayCells(t.array, cells))
         decline(
           op ?? cx.root,
           `an argument of type ${typeToString(t)} for a parameter of type ${engineTypeToString(p.array)}`,
@@ -1296,12 +1297,14 @@ export function functionLowering(
         }
         // A list of lists of two lengths not stated: a list of rank 2 of
         // the lengths that the body settles, or of the lane `rows` whose
-        // elements are of the lane of the result (CE-1736).
+        // elements are of the lane of the result (CE-1736). A matrix result
+        // also requires the body to prove that the rows have one width.
         const rows = t.lane === 'rows' ? cx.rowsElements.get(body) : undefined;
         if (
           grid !== undefined &&
           (rows !== undefined
-            ? !isSubLane(rows, grid)
+            ? !isSubLane(rows, grid) ||
+              (isFreeMatrix(r!) && !cx.rowWidths.has(body))
             : t.shape.length !== 2 ||
               cx.tuples.has(body) ||
               !isSubLane(t.lane, grid))

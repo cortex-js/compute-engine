@@ -589,10 +589,11 @@ class KernelPoolImpl implements KernelPool, FitSlicePool, CallPool {
           const running = slot.running;
           if (!running || running.job !== m.job) return;
           this.endRunning(slot);
-          // A late value of a call that the main thread settled on abort is
-          // dropped; the worker is free again either way.
-          if (!running.settled && running.task.type === 'call')
-            running.task.resolve(m.value);
+          // The message can beat the deadline timer to the event loop.
+          if (!running.settled && running.task.type === 'call') {
+            if (deadlinePassed(running.task)) settleAborted(running.task);
+            else running.task.resolve(m.value);
+          }
           void this.pump(slot);
           return;
         }
@@ -622,8 +623,11 @@ class KernelPoolImpl implements KernelPool, FitSlicePool, CallPool {
           this.endRunning(slot);
           if (!running.settled) {
             const task = running.task;
-            if (m.kind === 'deadline' && task.type === 'call')
-              task.reject(task.deadlineError());
+            if (
+              task.type === 'call' &&
+              (m.kind === 'deadline' || deadlinePassed(task))
+            )
+              settleAborted(task);
             else task.reject(new Error(m.message));
           }
           void this.pump(slot);
@@ -807,9 +811,8 @@ class KernelPoolImpl implements KernelPool, FitSlicePool, CallPool {
    * worker's compiled code throws a timeout at it, as the calling thread's
    * does. The promise then rejects with `deadlineError()`: when the call
    * still waits at the deadline (also before it is sent), when the worker
-   * answers with a deadline stop, and when the worker has not answered
-   * within the grace period after the deadline (it is then terminated and
-   * replaced).
+   * answers with a deadline stop, or the deadline passes during a call.
+   * The grace period applies to worker replacement.
    */
   runCall(
     stored: StoredResult,
@@ -916,8 +919,9 @@ class KernelPoolImpl implements KernelPool, FitSlicePool, CallPool {
     // worker that never becomes ready (a worker that never posts `ready`
     // and fails only when it gets a message) never settles: the watchdog
     // of the deadline is armed only when the task is sent (`armDeadline()`).
-    // A task that runs on the worker at its deadline is the watchdog's. A
-    // call task is rejected with the error of its deadline.
+    // A running call rejects at its deadline. The watchdog gives the worker
+    // time to stop before replacing it. Other running tasks can return a
+    // partial result during that grace period.
     const deadline =
       task.type === 'cells' ? task.slice.deadline : task.deadline;
     if (deadline !== undefined) {
@@ -928,8 +932,14 @@ class KernelPoolImpl implements KernelPool, FitSlicePool, CallPool {
         const timer = setTimeout(() => {
           const holder = owner();
           const q = holder.queue.indexOf(task);
-          if (q < 0) return;
-          holder.queue.splice(q, 1);
+          if (q >= 0) holder.queue.splice(q, 1);
+          else if (
+            task.type === 'call' &&
+            holder.running?.task === task &&
+            !holder.running.settled
+          )
+            this.cancelRunning(holder);
+          else return;
           settleAborted(task);
           void this.pump(holder);
         }, delay);

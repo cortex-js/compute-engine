@@ -49,7 +49,7 @@ import {
 } from './compute-engine/compilation/javascript-runtime.js';
 import { createIntervalRuntime } from './compute-engine/compilation/interval-runtime.js';
 import { INTERVAL_RUNTIME_VERSION } from './compute-engine/interval/index.js';
-import { isTimeoutCancellation } from './common/interruptible.js';
+import { checkDeadline, isTimeoutCancellation } from './common/interruptible.js';
 import type {
   BroadcastInputs,
   BroadcastOptions,
@@ -415,6 +415,7 @@ port.on((m) => {
         // check as they tick.
         jsRuntime.iterationLimit = m.iterationLimit ?? defaultIterationLimit;
         jsRuntime.deadline = m.deadline;
+        checkDeadline(m.deadline);
         value = call(...m.args);
       } catch (e) {
         port.post({

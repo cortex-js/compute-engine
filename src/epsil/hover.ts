@@ -289,9 +289,10 @@ function nameAt(
     ast === null ? new Map() : protocolFunctionMembers(ast);
   // The scope model of the library-name resolution pass: a variable that a
   // library call binds (`sum(k^2, k, 1, 3)`) is a binding of that call. The
-  // walk is the editor's: a `let` is visible from the end of its statement,
-  // where the resolution pass binds it in its whole block (CE-1866).
+  // walk resolves a declaration throughout its block, including a read
+  // that diagnostics will report as occurring before initialization.
   const groups = documentBindings(ast, source, {
+    lexicalTargets: true,
     binderSites: (node, isBound, declaration) =>
       binderSitesOf(ce, node, source, members, isBound, declaration),
   });

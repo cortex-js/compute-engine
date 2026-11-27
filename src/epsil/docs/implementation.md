@@ -885,7 +885,9 @@ the "Show Info" and "Go to Definition" commands of an editor. Both give
 `null` when the offset is not on a name: in the text of a string, a comment
 or a LaTeX island, on a number, between two statements. A name in an
 interpolation hole of a string (`"\(x + 1)"`) is code. The name is the name
-that contains the offset or ends at it.
+that contains the offset or ends at it. Go to Definition and Rename resolve
+an early read of a shadowing local to its declaration in the block. The
+diagnostic for reading it before initialization still applies.
 
 ```ts
 const source =

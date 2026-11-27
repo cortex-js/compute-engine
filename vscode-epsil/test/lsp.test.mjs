@@ -640,12 +640,12 @@ await scenario('navigation', undefined, async (c) => {
   });
   check(
     'references to the outer x span its declaration and every co-binding use',
-    references?.length === 4 &&
-      references.some((r) => r.range.start.line === 2) &&
+    references?.length === 3 &&
+      references.some((r) => r.range.start.line === 0) &&
       references.filter((r) => r.range.start.line === 6).length === 2 &&
-      // The shadowed uses on lines 3–4 belong to the INNER x.
+      // The inner x also owns the read before its declaration.
       !references.some(
-        (r) => r.range.start.line === 3 || r.range.start.line === 4
+        (r) => r.range.start.line >= 2 && r.range.start.line <= 4
       ),
     JSON.stringify(references)
   );
@@ -656,11 +656,13 @@ await scenario('navigation', undefined, async (c) => {
   });
   check(
     'occurrence highlights cover the inner x only, write-kinded at its definition',
-    highlights?.length === 2 &&
-      highlights[0].range.start.line === 3 &&
-      highlights[0].kind === 3 && // Write
-      highlights[1].range.start.line === 4 &&
-      highlights[1].kind === 2, // Read
+    highlights?.length === 3 &&
+      highlights[0].range.start.line === 2 &&
+      highlights[0].kind === 2 && // Read before initialization
+      highlights[1].range.start.line === 3 &&
+      highlights[1].kind === 3 && // Write
+      highlights[2].range.start.line === 4 &&
+      highlights[2].kind === 2, // Read
     JSON.stringify(highlights)
   );
 
@@ -1316,6 +1318,32 @@ await scenario(
     );
   }
 );
+
+await scenario('rename with an early read of a shadowing local', undefined, async (c) => {
+  const block = 'do { let before = x; let x = 2; before }';
+  await c.open(URI, 'let x = 10\n' + block);
+  const definition = await c.request('textDocument/definition', {
+    textDocument: { uri: URI },
+    position: { line: 1, character: block.indexOf('= x') + 2 },
+  });
+  check(
+    'go to definition reaches the uninitialized inner declaration',
+    definition?.range.start.line === 1 &&
+      definition.range.start.character === block.lastIndexOf('x'),
+    JSON.stringify(definition)
+  );
+  const rename = await c.request('textDocument/rename', {
+    textDocument: { uri: URI },
+    position: { line: 0, character: 4 },
+    newName: 'outer',
+  });
+  const edits = rename?.changes?.[URI];
+  check(
+    'renaming the outer variable leaves the inner read alone',
+    edits?.length === 1 && edits[0].range.start.line === 0,
+    JSON.stringify(rename)
+  );
+});
 
 await scenario('rename on a broken parse', undefined, async (c) => {
   await c.open(URI, 'q = 2\nlet = 1');

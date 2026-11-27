@@ -86,6 +86,7 @@ import {
   Builder,
   elementIndex,
   entryOf,
+  sameArrayCells,
   sameFields,
   elementType,
   isSubLane,
@@ -5177,7 +5178,7 @@ function lowerOnce(
   /** `ir`, the type of an input, is the IR type of the engine type `t`. */
   const sameInput = (ir: IRType, t: Type): boolean => {
     if (ir.lane === 'array')
-      return arrayIRType(t)?.array?.cell === ir.array?.cell;
+      return sameArrayCells(arrayIRType(t)?.array, ir.array);
     if (ir.lane === 'record') {
       const record = numericRecordInput(ce, t);
       return record !== undefined && sameFields(ir, record);
@@ -6695,7 +6696,7 @@ function lowerOnce(
           ) {
             const cells = arrays.cellsOf(s, ce.type(typeName).type)!;
             const v = cx.value(value)!;
-            if (type(v).array?.cell !== cells.cell)
+            if (!sameArrayCells(type(v).array, cells))
               decline(
                 s,
                 `a value of type ${typeToString(type(v))} for a local declared ${typeName}`,

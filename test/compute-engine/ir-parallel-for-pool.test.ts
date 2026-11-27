@@ -44,7 +44,13 @@ const WORKER_URL = pathToFileURL(join(__dirname, '../../src/kernel-worker.ts'));
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-type Message = { type: string; job: number; args?: unknown[]; value?: unknown };
+type Message = {
+  type: string;
+  job: number;
+  args?: unknown[];
+  value?: unknown;
+  deadline?: number;
+};
 
 /** A pool of `size` worker threads, each wrapped to record the `call` tasks
  * sent (with their arguments) and the values answered. `onCall` can drop a
@@ -54,6 +60,7 @@ function watchedPool(
     size?: number;
     cancelGrace?: number;
     onCall?: () => 'drop' | 'fail' | undefined;
+    delayCallPastDeadline?: boolean;
   } = {}
 ) {
   const log = {
@@ -80,6 +87,13 @@ function watchedPool(
             if (act === 'drop') return;
             if (act === 'fail') {
               void w.terminate();
+              return;
+            }
+            if (options.delayCallPastDeadline && sent.deadline !== undefined) {
+              setTimeout(
+                () => w.postMessage(m, transfer ?? []),
+                Math.max(0, sent.deadline + 10 - Date.now())
+              );
               return;
             }
           }
@@ -940,6 +954,36 @@ describe('Errors and cancellation', () => {
     });
     expect(r.reports).toEqual([]);
     expect(r.elapsed).toBeLessThan(20_000);
+  }, 60_000);
+
+  test('a short range delivered after its deadline rejects without replay (CE-1902)', async () => {
+    const delayed = watchedPool({
+      size: 1,
+      cancelGrace: 5000,
+      delayCallPastDeadline: true,
+    });
+    pools.push(delayed.pool);
+    await delayed.pool.prewarm();
+    const { ce, code } = program(
+      `function f(n: integer) -> integer {
+        let s: integer = 0
+        parallel for k in 1..n { s += k }
+        s
+      }`,
+      { n: 'integer' },
+      { pool: delayed.pool }
+    );
+    const reports: ParallelLoopReport[] = [];
+    const pending = ce.withTimeLimit({ ms: 250, label: 'plot' }, () =>
+      code.runAsync({ n: 4 }, { minPasses: 1, onLoop: (r) => reports.push(r) })
+    );
+    await expect(pending).rejects.toMatchObject({
+      name: 'CancellationError',
+      cause: 'timeout',
+      attribution: 'plot',
+    });
+    expect(delayed.log.calls).toHaveLength(1);
+    expect(reports).toEqual([]);
   }, 60_000);
 
   test('a pass error in one sub-range and a deadline in another give the frame’s error', async () => {

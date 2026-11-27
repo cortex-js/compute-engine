@@ -246,6 +246,9 @@ export function documentBindings(
       isBound: (name: string) => boolean,
       declarationOf: (name: string) => ProgramDeclaration | undefined
     ) => readonly BinderSite[] | undefined;
+    /** Navigation and rename resolve a declaration before initialization.
+     * Keep its availability span so completion can filter eager reads. */
+    lexicalTargets?: boolean;
     /**
      * Resolve the names as the engine does when it prepares the program,
      * where the default is the model of the editor (above):
@@ -1248,7 +1251,8 @@ export function documentBindings(
           forwardDeclarations.has(binding) &&
           s.initializing?.has(name) !== true
         ) {
-          if (deferred && !forwardShadowed) return binding;
+          if ((deferred || options?.lexicalTargets) && !forwardShadowed)
+            return binding;
           // A sequential use can still see an already visible outer name.
           // An outer forward declaration cannot displace the nearer local.
           forwardShadowed = true;
@@ -1272,8 +1276,7 @@ export function documentBindings(
     return written === undefined ? [] : [written.name];
   }
 
-  /** Pre-register declarations for forward references. In the editor, only
-   * lookups from a deferred function body can see them early. */
+  /** Pre-register declarations so lookups can resolve forward references. */
   function hoistDeclarations(
     statements: readonly (MathJsonExpression | null)[],
     scope: Scope
