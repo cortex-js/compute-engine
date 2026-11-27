@@ -7955,6 +7955,7 @@ function lowerOnce(
    *  (`let x: list<string> = []`); an operand of a `Tuple` at the type of
    *  its position in a tuple type `t`, and an operand of the constructor of
    *  a nominal tuple type at the type of its field (`Figure("circle", [])`).
+   *  Walk through nonempty list literals to reach such constructors.
    *  A list of no stated element type (`let pts = []`, `list<unknown>`)
    *  takes the integer lane, as a conditional whose arms are all `List()`
    *  does: it has no element that an operator can read. In any other place,
@@ -7988,8 +7989,12 @@ function lowerOnce(
         : typeof t === 'object' && t.kind === 'tuple'
           ? t.elements.map((x) => x.type)
           : tupleBody(t)?.map((x) => x.type));
-    if (fields?.length !== v.nops) return false;
-    const held = v.ops.map((op, k) => placeEmptyLists(op, fields[k], out));
+    const held =
+      fields?.length === v.nops
+        ? v.ops.map((op, k) => placeEmptyLists(op, fields[k], out))
+        : isLibraryOperator(v as never, 'List')
+          ? v.ops.map((op) => placeEmptyLists(op, 'unknown', out))
+          : [];
     if (held.includes(true)) out.set(v, null);
     return out.has(v);
   };

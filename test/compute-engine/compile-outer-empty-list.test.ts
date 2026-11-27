@@ -135,6 +135,35 @@ describe('a record with a field that is the empty list', () => {
     if (!r.ok) throw new Error(r.message);
     expect(r.result.run({ t: 2 })).toEqual({ kind: 'circle', xs: [] });
   });
+
+  test('a timer callback returns a group containing records with empty lists', () => {
+    const ce = new ComputeEngine();
+    const result = executeEpsil(
+      ce,
+      `
+      type Leaf = tuple<geom: list, options: list<real>>
+      type Group = tuple<parts: list>
+      let leaf = Leaf([1], [])
+      let figure = Group([leaf])
+      let frame = (t: real) => figure
+      frame(0)
+      `
+    );
+    expect(result.diagnostics).toEqual([]);
+    expect(result.value?.json).toEqual([
+      'Group',
+      ['List', ['Leaf', ['List', 1], ['List']]],
+    ]);
+
+    const compiled = compile(ce.box('frame').evaluate(), {
+      to: 'javascript',
+      fallback: false,
+      constantFold: false,
+    });
+    expect(compiled.run?.(0)).toEqual({
+      parts: [{ geom: [1], options: [] }],
+    });
+  });
 });
 
 describe('what still declines', () => {

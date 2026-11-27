@@ -1641,7 +1641,8 @@ the integer lane); so is `List()` at a parameter of `Apply` declared such a list
 rank 1 of no stated length, of integers, reals, booleans or strings
 (`let x: list<string> = []`), an operand of a `Tuple` at the type of its
 position, and an operand of the constructor of a nominal tuple type at the type
-of its field (`Figure("circle", [])`); a list of no stated element type
+of its field (`Figure("circle", [])`), even when the constructor is inside
+a list literal (CE-1891). A list of no stated element type
 (`let pts = []`, of type `list<unknown>`) takes the integer lane. The memo of
 `value()` takes no node that holds such a `List()`: its key does not have the
 place of the node. No value has a stated length of 0: the result of a function

@@ -2976,7 +2976,8 @@ the declared type of the variable when that is a list of integers, reals,
 booleans or strings of no stated length (`let x: list<string> = []`), the
 type of its position in a tuple (`let fig = ("circle", [])`, read with
 `fig[2]`), or the type of its field in a value of a named tuple type
-(`Figure("circle", [])`). With no stated element type (`let pts = []`) it is
+(`Figure("circle", [])`), including a record inside a captured list
+(CE-1891). With no stated element type (`let pts = []`) it is
 an empty list of integers: `length(pts)` and `[...pts, t]` compile, and
 `[...pts, "a"]` declines, since the two lists are of two types. An empty
 list of points (`let x: list<tuple<real, real>> = []`), one at a union type

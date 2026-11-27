@@ -82,6 +82,11 @@
 
 ### Behavior Changes
 
+- **JavaScript compilation preserves empty list fields in nested records.**
+  A callback returning a captured `Group([Leaf([1], [])])` now compiles
+  when the empty field is declared `list<real>`. The result keeps the
+  empty array at that field.
+
 - **Epsil navigation and rename resolve later declarations in function bodies.**
   In `let h = () => mean(3)` above `let mean = (x) => x + 4`, hover and
   go-to-definition find the local variable, and renaming it updates the call.
