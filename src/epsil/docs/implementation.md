@@ -215,6 +215,11 @@ visible, which is an `external` binding when the program has none. The
 collection of a `for` clause is read outside its loop: in
 `for n in 1..n`, the second `n` is the binding around the loop.
 
+In `match 5 { _k => k }`, the definition site spans `_k` and the arm reads
+the local binding `k`. The same rule applies to rest captures such as
+`..._t` and wildcard call heads such as `_f(x)`. The rest definition
+spans the name token after the ellipsis.
+
 A host uses the result in three ways. The `external` sites with the role
 `read` or `read-write` are what the program depends on. To run the program
 with no write to the scope around it, the host declares a local copy of

@@ -70,6 +70,13 @@
   (`{grid -> ▮` puts `true` and `false` first), and the strings of a union of
   string literals come first, also for a record field.
 
+### Behavior Changes
+
+- **Epsil program sites resolve match captures to the names the arm reads.**
+  In `match 5 { _k => k }`, `epsilProgramSites` now reports `k` as local
+  to the arm. Rest captures such as `..._t` and wildcard call heads such as
+  `_f(x)` also get local definition sites.
+
 ### Resolved Issues
 
 - **A `Declare` boxed in the structural form evaluates its attributes

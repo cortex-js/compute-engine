@@ -483,11 +483,10 @@ export function documentBindings(
   }
 
   /**
-   * Bind a `Match` arm's pattern into the arm's scope. The parser marks a
-   * pattern VARIABLE by prefixing its name with `_` while keeping the span of
-   * the written name (`(0, y)` yields the symbol `_y` at `y`'s span); `_`
-   * alone is the wildcard. A pattern symbol without the marker is a value to
-   * match against — an ordinary read.
+   * Bind a `Match` arm's pattern into the arm's scope. The parser adds one
+   * underscore to a leaf and three to a rest capture. It keeps call heads
+   * as written. The matcher strips all leading underscores from capture
+   * names, including any written in the source.
    */
   function bindMatchPattern(
     node: MathJsonExpression | null,
@@ -496,10 +495,19 @@ export function documentBindings(
     if (node === null) return;
     const head = operator(node);
     if (head !== '') {
+      if (head === 'Pin') {
+        // A pin evaluates in the enclosing scope before the arm binds.
+        walk(operand(node, 1), scope.parent ?? scope);
+        return;
+      }
       if (head === 'Typed') {
         bindMatchPattern(operand(node, 1), scope);
         typeText(operand(node, 2), scope);
         return;
+      }
+      if (head.startsWith('_')) {
+        const span = writtenHeadSpan(node, head);
+        if (span !== undefined) bindCapture(head, span, span, scope);
       }
       for (const op of operands(node)) bindMatchPattern(op, scope);
       return;
@@ -508,37 +516,37 @@ export function documentBindings(
     if (marked === null || /^_+$/.test(marked)) return;
     const span = spanOf(node);
     if (span === undefined) return;
-    // A rest capture (`...rest`) is encoded as `___rest`, its span covering
-    // the ellipsis; the binding anchors on the NAME part only, so a rename
-    // rewrites `rest` and leaves the `...` alone.
-    if (marked.startsWith('___')) {
-      const name = marked.slice(3);
-      const nameSpan: [number, number] = [span[0] + 3, span[1]];
-      if (text.slice(span[0], span[0] + 3) === '...' && spelled(name, nameSpan))
-        ensureBinding(
-          scope,
-          name,
-          'pattern',
-          span,
-          scope.span[0]
-        ).occurrences.push({
-          start: nameSpan[0],
-          end: nameSpan[1],
-          role: 'definition',
-        });
+    if (marked.startsWith('___') && text.startsWith('...', span[0])) {
+      // The rest pattern's span includes the ellipsis. Its definition
+      // covers only the name token.
+      const token = tokenize(text.slice(span[0] + 3, span[1]))[0];
+      const nameSpan: [number, number] = [span[0] + 3 + token.start, span[1]];
+      if (spelled(marked.slice(3), nameSpan))
+        bindCapture(marked, nameSpan, span, scope);
       return;
     }
     if (marked.startsWith('_') && spelled(marked.slice(1), span)) {
-      ensureBinding(
-        scope,
-        marked.slice(1),
-        'pattern',
-        span,
-        scope.span[0]
-      ).occurrences.push({ start: span[0], end: span[1], role: 'definition' });
+      bindCapture(marked, span, span, scope);
       return;
     }
     if (spelled(marked, span)) use(marked, span, scope, 'read');
+  }
+
+  function bindCapture(
+    marked: string,
+    span: [number, number],
+    declaration: [number, number],
+    scope: Scope
+  ): void {
+    const name = marked.replace(/^_+/, '');
+    if (name === '') return;
+    ensureBinding(
+      scope,
+      name,
+      'pattern',
+      declaration,
+      scope.span[0]
+    ).occurrences.push({ start: span[0], end: span[1], role: 'definition' });
   }
 
   /** Bind a `DefineFunction`'s name into `scope` — visible scope-wide, so a
@@ -1144,19 +1152,25 @@ export function documentBindings(
    * by spelling the operator's name — plainly or verbatim. */
   function useHead(node: MathJsonExpression, name: string, scope: Scope): void {
     if (name === '' || name === '_') return;
+    const span = writtenHeadSpan(node, name);
+    if (span !== undefined) use(name, span, scope, 'read');
+  }
+
+  function writtenHeadSpan(
+    node: MathJsonExpression,
+    name: string
+  ): [number, number] | undefined {
     const span = spanOf(node);
-    if (span === undefined) return;
+    if (span === undefined) return undefined;
     const plain: [number, number] = [span[0], span[0] + name.length];
-    if (plain[1] <= span[1] && spelled(name, plain)) {
-      use(name, plain, scope, 'read');
-      return;
-    }
+    if (plain[1] <= span[1] && spelled(name, plain)) return plain;
     const verbatim: [number, number] = [span[0], span[0] + name.length + 2];
     if (
       verbatim[1] <= span[1] &&
       text.slice(verbatim[0], verbatim[1]) === '`' + name + '`'
     )
-      use(name, verbatim, scope, 'read');
+      return verbatim;
+    return undefined;
   }
 
   /**

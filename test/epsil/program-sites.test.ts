@@ -222,6 +222,66 @@ describe('EPSIL PROGRAM SITES — the sites of an external binding', () => {
     ])
       expect([source, external(sitesOf(source), 'k')]).toEqual([source, []]);
   });
+
+  test.each([
+    {
+      source: 'match (5) { _k => [k, _k] }',
+      value: ['List', 5, 9],
+      captures: [['k', '_k', 'k']],
+    },
+    {
+      source: 'match ([1,2,3]) { [h, ..._t] => [h, t, _t] }',
+      value: ['List', 1, 2, 3, 9],
+      captures: [['h', 'h', 'h'], ['t', '_t', 't']],
+    },
+    {
+      source: 'match (g(2)) { _f(x) => [f, x] }',
+      value: ['List', 'g', 2],
+      captures: [['f', '_f', 'f'], ['x', 'x', 'x']],
+    },
+  ])('match capture definitions and uses in $source', ({
+    source,
+    value,
+    captures,
+  }) => {
+    const outer = { k: 10, t: 10, f: 10, _k: 9, _t: 9 };
+    const result = epsilProgramSites(cellEngine(outer), source);
+    for (const [name, definition, ...reads] of captures) {
+      const binding = result.bindings.findIndex((b) => b.name === name);
+      expect(result.bindings[binding]).toEqual({
+        name,
+        kind: 'local',
+        form: 'pattern',
+      });
+      expect(
+        result.sites
+          .filter((site) => site.binding === binding)
+          .map((site) => [site.role, source.slice(site.start, site.end)])
+      ).toEqual([
+        ['definition', definition],
+        ...reads.map((read) => ['read', read]),
+      ]);
+      expect(external(result, name)).toEqual([]);
+    }
+    expect(run(source, outer).value).toEqual(value);
+  });
+
+  test('renaming an outer name skips its capture in the guard and body', () => {
+    const source = 'match k { _k if k > 0 => k }';
+    expect(renameExternal(source, 'k', 'slider')).toBe(
+      'match slider { _k if k > 0 => k }'
+    );
+  });
+
+  test('a pin reads the outer name even when the pattern also captures it', () => {
+    const source = 'match [6, 5] { [_k, ==k] => k }';
+    expect(shape(source, sitesOf(source))).toEqual([
+      '_k@16 definition local k',
+      'k@22 read external k',
+      'k@28 read local k',
+    ]);
+    expect(run(source).value).toBe(6);
+  });
 });
 
 describe('EPSIL PROGRAM SITES — the external bindings a program writes', () => {
