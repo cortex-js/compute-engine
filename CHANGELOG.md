@@ -82,6 +82,11 @@
 
 ### Behavior Changes
 
+- **Transpose waits for explicit axes and preserves Boolean cells.**
+  `Transpose(A, axis, 2)` and `ConjugateTranspose(A, axis, 2)` stay unevaluated
+  while `axis` has no value. `Transpose([[True, False]])` gives
+  `[[True], [False]]`.
+
 - **Transpose infers the shape of a list of fixed-width rows.** For
   `P: list<list<real^2>>`, `Transpose(P)` and `ConjugateTranspose(P)` have type
   `matrix<real^(2x?)>`. Filtering the transpose of `[[1, 2]]` for rows whose

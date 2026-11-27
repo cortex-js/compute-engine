@@ -489,7 +489,10 @@ export function absentCellsAsNaN(ce: ComputeEngine, x: Expression): Expression {
 export function packTensor(
   ce: ComputeEngine,
   x: Expression,
-  { numeric = false }: { numeric?: boolean } = {}
+  { numeric = false, boxedBooleans = false }: {
+    numeric?: boolean;
+    boxedBooleans?: boolean;
+  } = {}
 ): Tensor<TensorDataType> | undefined {
   if (!isFunction(x, 'List') || !isTensorValue(x)) return undefined;
 
@@ -549,12 +552,12 @@ export function packTensor(
   // arithmetic). Under `.N()` (`numeric: true`), a float result is the
   // contract — pack `float64` (fast, lossy-by-nature, and it floats the
   // result: `Inverse([[2,1],[1,3]]).N()` → `[[0.6,…]]`, not rationals).
-  const dtype =
-    info.dtype === 'uint8' || info.dtype === 'int32'
-      ? numeric
-        ? ('float64' as const)
-        : ('expression' as const)
-      : info.dtype;
+  let dtype = info.dtype;
+  if (dtype === 'uint8' || dtype === 'int32')
+    dtype = numeric ? 'float64' : 'expression';
+  // Structural consumers read cells back as expressions. The boolean
+  // storage type has no field that boxes raw booleans.
+  if (boxedBooleans && dtype === 'bool') dtype = 'expression';
   const td = expressionAsTensor(ce, x.ops, info.shape, dtype);
   if (!td) return undefined;
   // A matrix with a float entry is a float tensor: every cell, and every
@@ -578,7 +581,7 @@ export function packStructural(
   x: Expression
 ): Tensor<TensorDataType> | undefined {
   // A qualified tensor packs normally (may yield a faster numeric dtype).
-  const packed = packTensor(ce, x);
+  const packed = packTensor(ce, x, { boxedBooleans: true });
   if (packed !== undefined) return packed;
 
   if (!isFunction(x, 'List')) return undefined;

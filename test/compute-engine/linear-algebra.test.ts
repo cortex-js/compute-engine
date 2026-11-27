@@ -1061,6 +1061,35 @@ describe('Transpose', () => {
     expect(result.toString()).toMatchInlineSnapshot(`[[1,3],[2,4]]`);
   });
 
+  it('preserves Boolean cells when transposing a rectangular matrix', () => {
+    const expr = ce.expr(['Transpose', ['List', ['List', 'True', 'False']]]);
+    expect(expr.evaluate().json).toEqual(['List', ['List', 'True'], ['List', 'False']]);
+  });
+
+  it.each(['Transpose', 'ConjugateTranspose'])(
+    '%s waits for an assigned axis and declines out-of-range axes',
+    (operator) => {
+      const engine = new ComputeEngine();
+      engine.declare('axis', 'integer');
+      const matrix = engine.expr(['List', ['List', 1, 2, 3], ['List', 4, 5, 6]]);
+      const expr = engine.expr([operator, matrix, 'axis', 2]);
+      expect(expr.evaluate().json).toEqual(expr.json);
+
+      engine.assign('axis', 1);
+      expect(expr.evaluate().json).toEqual([
+        'List',
+        ['List', 1, 4],
+        ['List', 2, 5],
+        ['List', 3, 6],
+      ]);
+
+      for (const [a, b] of [[0, 2], [3, 3]]) {
+        const invalid = engine.expr([operator, matrix, a, b]);
+        expect(invalid.evaluate().json).toEqual(invalid.json);
+      }
+    }
+  );
+
   it('should transpose a matrix with unknowns', () => {
     const result = ce.expr(['Transpose', sq2_x]).evaluate();
     expect(result.toString()).toMatchInlineSnapshot(`[[a,c],[b,d]]`);

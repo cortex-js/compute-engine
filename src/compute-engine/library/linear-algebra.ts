@@ -1826,6 +1826,25 @@ const transposedType: OperatorTypeHandlerOnTypes = (ops, context) => {
   );
 };
 
+function transposeAxes(
+  ops: ReadonlyArray<Expression>,
+  rank: number
+): [number, number] | undefined {
+  if (ops.length !== 3) return [rank - 1, rank];
+  const axis1 = ops[1].re ?? NaN;
+  const axis2 = ops[2].re ?? NaN;
+  if (
+    !Number.isInteger(axis1) ||
+    axis1 < 1 ||
+    axis1 > rank ||
+    !Number.isInteger(axis2) ||
+    axis2 < 1 ||
+    axis2 > rank
+  )
+    return undefined;
+  return [axis1, axis2];
+}
+
 /**
  * The heads, other than `Tuple`, whose OPERANDS are the coordinates of the
  * point they build. Any other application that types as a tuple — a sum of
@@ -3472,19 +3491,10 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
           // For rank 1 (vectors), transpose is identity
           if (rank === 1) return op1;
 
-          // Default: swap last two axes (for rank-2, that's axes 1 and 2)
-          let axis1 = rank - 1; // second-to-last axis (1-based)
-          let axis2 = rank; // last axis (1-based)
-
-          if (ops.length === 3) {
-            axis1 = ops[1].re ?? axis1;
-            axis2 = ops[2].re ?? axis2;
-            console.assert(axis1 > 0 && axis2 > 0);
-          }
-
+          const axes = transposeAxes(ops, rank);
+          if (!axes) return undefined;
+          const [axis1, axis2] = axes;
           if (axis1 === axis2) return op1;
-          if (axis1 <= 0 || axis1 > rank) return undefined;
-          if (axis2 <= 0 || axis2 > rank) return undefined;
 
           return op1Tensor.transpose(axis1, axis2)?.expression;
         }
@@ -3552,19 +3562,10 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
             return ce.expr(['List', ...elements]);
           }
 
-          // Default: swap last two axes
-          let axis1 = rank - 1; // second-to-last axis (1-based)
-          let axis2 = rank; // last axis (1-based)
-
-          if (ops.length === 3) {
-            axis1 = ops[1].re ?? axis1;
-            axis2 = ops[2].re ?? axis2;
-            console.assert(axis1 > 0 && axis2 > 0);
-          }
-
+          const axes = transposeAxes(ops, rank);
+          if (!axes) return undefined;
+          const [axis1, axis2] = axes;
           if (axis1 === axis2) return op1;
-          if (axis1 <= 0 || axis1 > rank) return undefined;
-          if (axis2 <= 0 || axis2 > rank) return undefined;
 
           return op1Tensor.conjugateTranspose(axis1, axis2)?.expression;
         }
