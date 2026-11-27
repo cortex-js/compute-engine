@@ -86,3 +86,14 @@ describe('CE-623: a compiled closed-form integral keeps a parameter named like a
     expect(compiledValue(ce, expr)).toBeCloseTo(Math.E / 2, 12);
   });
 });
+
+test('a nested integral threads over a fixed-length numeric input', () => {
+  const ce = new ComputeEngine();
+  ce.declare('A', 'list<real^3>');
+  ce.declare('b', 'real');
+  ce.declare('g', '(real, real) -> real');
+  ce.parse(String.raw`g(y,q) := \int_0^y q x\,dx`).evaluate();
+  const e = ce.parse(String.raw`\int_0^b y g(y,A)\,dy`);
+  expect(compiledValue(ce, e, { A: [1, 2, 3], b: 2 })).toEqual([2, 4, 6]);
+  expect(compiledValue(ce, e, { A: [3, 2, 1], b: 2 })).toEqual([6, 4, 2]);
+});

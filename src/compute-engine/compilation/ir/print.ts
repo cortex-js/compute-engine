@@ -54,6 +54,8 @@ export type RegionSpelling = (r: {
 
 export type Syntax = {
   readonly nativeVectors?: boolean;
+  /** Return a final call directly from a JavaScript expression entry. */
+  readonly returnEntryCall?: boolean;
   /** A single fixed-count block, charged after successful completion. */
   shortLoop?(
     index: string,
@@ -453,6 +455,34 @@ export function printProgram(
     );
     if (spelling === undefined)
       throw new Error(`slice printer: no spelling for the operation ${op}`);
+    if (i !== undefined && spelling.text === ARITHMETIC.add) {
+      const right = index.def.get(i.args[1]);
+      if (right?.k === 'const') {
+        const literal = right.value;
+        if (
+          (literal.lane === 'real' || literal.lane === 'integer') &&
+          typeof literal.value === 'number' &&
+          Number.isFinite(literal.value) &&
+          (literal.value < 0 || Object.is(literal.value, -0))
+        )
+          return `(${operands(0)} - ${syntax.constant({
+            ...literal,
+            value: -literal.value,
+          })})`;
+      }
+      const left = index.def.get(i.args[0]);
+      if (
+        type(i.out).shape.length === 0 &&
+        left?.k === 'op' &&
+        spellingOf(syntax, left.op)?.text === ARITHMETIC.neg &&
+        inlined.has(left.out) &&
+        !inlined.has(left.args[0]) &&
+        !inlined.has(i.args[1]) &&
+        index.def.has(left.args[0]) &&
+        right !== undefined
+      )
+        return `(${operands(1)} - ${use(left.args[0])})`;
+    }
     for (const h of spelling.helpers) helpers.add(syntax.helpers[h]);
     return spelling.text
       .replace(/\$#(\d)/g, (_, k) => length(type(i!.args[Number(k)]).shape[0]!))
@@ -518,7 +548,12 @@ export function printProgram(
       : text(i);
 
   /** `waiting`: the asynchronous text (`wait`), at a waiting position. */
-  const body = (r: Region, depth: number, waiting = false): string[] => {
+  const body = (
+    r: Region,
+    depth: number,
+    waiting = false,
+    returnedCall?: Instr
+  ): string[] => {
     const lines: string[] = [];
     // The indentation stops at 16 levels: the text of a nest of depth d
     // would otherwise grow as d^2.
@@ -760,6 +795,8 @@ export function printProgram(
           line('}');
           line(`_run.finishLoop(${pooled.id});`);
         }
+      } else if (i.k === 'call' && i === returnedCall) {
+        line(`return ${callText(i, waiting)};`);
       } else if (i.k === 'call' && i.outs.length === 2) {
         // The list, then its length (`lower-functions.ts`).
         const [n, list] = i.outs.map(name);
@@ -806,6 +843,19 @@ export function printProgram(
     }
     if (f.results.length !== 1)
       throw new Error('slice printer: a function with several results');
+    const last = f.body.body.at(-1);
+    if (
+      syntax.returnEntryCall &&
+      f.name === p.entry &&
+      f.literal !== true &&
+      !waiting &&
+      last?.k === 'call' &&
+      last.outs.length === 1 &&
+      ys[0] === last.outs[0] &&
+      !once?.has(ys[0]) &&
+      type(ys[0]).lane !== 'record'
+    )
+      return body(f.body, 1, false, last);
     const lines = body(f.body, 1, waiting);
     const value = result(ys[0], 0);
     return [...lines, ...named, `  return ${value};`];

@@ -77,6 +77,7 @@ import {
   shadowsLibraryName,
 } from '../../library-shadowing.js';
 import { literalParamsMap, pipeStageAsCall } from '../../library/core.js';
+import { fixedListIntegrals } from '../../library/calculus.js';
 import { colorStringToOklch } from '../../library/colors.js';
 import {
   COLORMAP_NAMES,
@@ -742,6 +743,7 @@ function lowerOnce(
       region: Region;
       reads: [string, V | undefined][];
       tests?: (boolean | undefined)[];
+      seededAt?: number;
     }
   >();
   // The id of a node, and of a definition: equal ids for two nodes of the
@@ -2195,11 +2197,23 @@ function lowerOnce(
       facts(e).writes.size === 0 &&
       !emptyLanes.has(e);
     const id = shared ? idOf(e) : 0;
+    const seededChoice =
+      shared &&
+      options.javascript &&
+      !bigint &&
+      isFunction(e, 'WithRandomSeed') &&
+      e.nops === 2 &&
+      isNumber(e.ops[0]) &&
+      isFunction(e.ops[1], 'RandomChoice') &&
+      isLibrary(e) &&
+      isLibrary(e.ops[1]);
     if (shared) {
       const m = memo.get(id);
       if (
         m !== undefined &&
         b.isOpen(m.region) &&
+        (m.seededAt === undefined ||
+          (m.region === b.current() && m.seededAt === b.effects)) &&
         m.reads.every(([n, v]) => bound(n) === v)
       ) {
         const tests = m.tests;
@@ -2214,6 +2228,7 @@ function lowerOnce(
       }
     }
     const region = b.current();
+    const start = region.body.length;
     const effects = b.effects;
     const scope = isFunction(e) ? e.localScope : undefined;
     if (scope !== undefined) scopes.push(scope);
@@ -2233,7 +2248,29 @@ function lowerOnce(
       );
     if (lane === 'string' && (!options.javascript || bigint))
       decline(e, 'a string: text compiles on javascript only');
-    if (shared && v !== undefined && b.effects === effects) {
+    // A single built-in choice in a literal seed frame draws from a private
+    // stream. Reuse its list in this region after the original choice succeeds.
+    const repeatsChoice =
+      seededChoice &&
+      region.body.slice(start, -1).every((i) => i.k === 'const') &&
+      (() => {
+        const frame = region.body.at(-1);
+        if (frame?.k !== 'region' || frame.op !== 'seeded') return false;
+        const [inner] = frame.regions;
+        const choice = inner.body.at(-1);
+        return (
+          choice?.k === 'region' &&
+          choice.op === 'choice' &&
+          frame.outs.at(-1) === v &&
+          inner.yields.at(-1) === choice.outs.at(-1) &&
+          inner.body.slice(0, -1).every(
+            (i) =>
+              i.k === 'const' ||
+              (i.k === 'op' && rowOfOp(rows, i.op)?.row.effect === 'pure')
+          )
+        );
+      })();
+    if (shared && v !== undefined && (b.effects === effects || repeatsChoice)) {
       const reads = [...facts(e).names].map((n): [string, V | undefined] => [
         n,
         bound(n),
@@ -2244,6 +2281,7 @@ function lowerOnce(
         region,
         reads,
         tests: tests.some((x) => x !== undefined) ? tests : undefined,
+        ...(repeatsChoice ? { seededAt: b.effects } : {}),
       });
     }
     return unlisted(e, v);
@@ -7224,7 +7262,14 @@ function lowerOnce(
    *  value is within the tolerance of the engine's quadrature. The
    *  integrand has no effectful operation: the routine chooses its
    *  samples. */
-  const integral = (e: Fn): V => {
+  const integralBounds = (bounds: readonly Expression[]): V[] =>
+    bounds.map((x) => {
+      const v = scalar(x);
+      if (!isSubLane(type(v).lane, 'real'))
+        decline(x, 'a bound that is not real');
+      return v;
+    });
+  const integral = (e: Fn, suppliedBounds?: V[]): V => {
     const [f, limits] = e.ops;
     // The interval mode: an indefinite integral (no bounds, or a bound
     // `Nothing`) is its closed form, as on the earlier interval target;
@@ -7295,6 +7340,30 @@ function lowerOnce(
         e,
         'an integrand whose parameter is not the variable of the integral'
       );
+    if (
+      suppliedBounds === undefined &&
+      options.javascript &&
+      !interval &&
+      !bigint &&
+      e.operator === 'Integrate' &&
+      literal !== undefined &&
+      inputIR(e.type.type)?.shape.length === 1
+    ) {
+      const parts = fixedListIntegrals(ce, e, literal, name, (leaf) => {
+        const t = inputIR(leaf.type.type);
+        return t?.shape.length === 1 && typeof t.shape[0] === 'number'
+          ? t.shape[0]
+          : undefined;
+      });
+      if (parts !== undefined) {
+        const domain = integralBounds(bounds);
+        const values = parts.map((p) => {
+          if (!isFunction(p, 'Integrate')) decline(e, 'a list integrand');
+          return integral(p, domain);
+        });
+        return b.list(values, { lane: 'real', shape: [values.length] });
+      }
+    }
     // JavaScript and GLSL: the closed form that the engine gives at compile
     // time, with the guards of `closedForm()`; with none, a guard that
     // fails or a closed form that does not lower, the quadrature (which
@@ -7306,6 +7375,7 @@ function lowerOnce(
     // (`∫₀ˣ cos(a·t) dt` is `sin(a·x)/a`).
     if (
       options.closedIntegrals &&
+      suppliedBounds === undefined &&
       e.operator === 'Integrate' &&
       e.isPure &&
       !quadratureOnly.has(e) &&
@@ -7369,12 +7439,7 @@ function lowerOnce(
       if (refusal !== undefined) decline(e, refusal);
       quadrature = { n: size.n, fn: cx.inFunction };
     }
-    const [lo, hi] = bounds.map((x) => {
-      const v = scalar(x);
-      if (!isSubLane(type(v).lane, 'real'))
-        decline(x, 'a bound that is not real');
-      return v;
-    });
+    const [lo, hi] = suppliedBounds ?? integralBounds(bounds);
     const effects = b.effects;
     // The interval mode: a part of the integrand that does not read its
     // variable and is safe to compute early (`speculatable()`) is lowered

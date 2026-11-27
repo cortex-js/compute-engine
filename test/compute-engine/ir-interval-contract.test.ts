@@ -803,7 +803,7 @@ describe('the interval mode: plain integers', () => {
       ['Limits', 'k', 1, ['Floor', 'n']],
     ]);
     // `2k − 1` with number arithmetic, made a point where a kernel reads it.
-    expect(r.code).toMatch(/const (v\d+) = \(\(2 \* (v\d+)\) \+ \(-1\)\);/);
+    expect(r.code).toMatch(/const (v\d+) = \(\(2 \* (v\d+)\) - 1\);/);
     expect(r.code).toMatch(/\{ lo: v\d+, hi: v\d+ \}/);
     expect(r.code).toMatch(/_IA\.number\(_IA\.floor\(_\.n\)\)/);
     expect(r.code).not.toMatch(/_IA\.(add|sub|mul)\(\{ lo: 2/);

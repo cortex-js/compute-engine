@@ -3418,7 +3418,13 @@ const LIST_THREADING_OPERATORS = new Set([
 function threadedListIntegrands(
   ce: ComputeEngine,
   literal: Expression,
-  names: ReadonlyArray<string>
+  names: ReadonlyArray<string>,
+  resolveList: (leaf: Expression) => ReadonlyArray<Expression> | undefined = (
+    leaf
+  ) => {
+    const value = leaf.evaluate();
+    return isFunction(value, 'List') ? value.ops : undefined;
+  }
 ): Expression[] | undefined {
   if (!isFunction(literal, 'Function') || !isTransitivelyPure(literal.op1))
     return undefined;
@@ -3435,15 +3441,15 @@ function threadedListIntegrands(
     const known = leaf.count;
     if (typeof known === 'number' && known > MAX_SIZE_EAGER_COLLECTION)
       return undefined;
-    const value = leaf.evaluate();
+    const value = resolveList(leaf);
     if (
-      !isFunction(value, 'List') ||
-      value.nops === 0 ||
-      value.nops > MAX_SIZE_EAGER_COLLECTION ||
-      value.ops.some((x) => typeCouldBeCollection(x.type.type))
+      value === undefined ||
+      value.length === 0 ||
+      value.length > MAX_SIZE_EAGER_COLLECTION ||
+      value.some((x) => typeCouldBeCollection(x.type.type))
     )
       return undefined;
-    elements.set(leaf, value.ops);
+    elements.set(leaf, value);
   }
   const count = elements.values().next().value!.length;
   for (const xs of elements.values()) if (xs.length !== count) return undefined;
@@ -3462,6 +3468,47 @@ function threadedListIntegrands(
   )
     return undefined;
   return integrands;
+}
+
+/** Split a short, settled list integrand without evaluating a capture. */
+export function fixedListIntegrals(
+  ce: ComputeEngine,
+  integral: Expression,
+  literal: Expression,
+  name: string,
+  length: (leaf: Expression) => number | undefined
+): Expression[] | undefined {
+  if (!isFunction(integral, 'Integrate') || !isFunction(literal, 'Function'))
+    return undefined;
+  const body = literal.op1;
+  const direct = isFunction(body, 'Block') && body.nops === 1 ? body.op1 : body;
+  if (!isTransitivelyPure(body)) return undefined;
+  // Each lane emits a quadrature, so bound the growth of the code.
+  const maxLanes = 16;
+  const integrands =
+    isFunction(direct, 'List') &&
+    isLibraryOperator(direct) &&
+    direct.nops > 0 &&
+    direct.nops <= maxLanes
+      ? direct.ops.map((element) =>
+          rebuildWithBinding(ce, literal, [
+            direct === body ? element : rebuildWithBinding(ce, body, [element]),
+            ...literal.ops.slice(1),
+          ])
+        )
+      : threadedListIntegrands(ce, literal, [name], (leaf) => {
+          const n = length(leaf);
+          if (n === undefined || n < 1 || n > maxLanes) return undefined;
+          if (isFunction(leaf, 'List') && isLibraryOperator(leaf))
+            return leaf.ops;
+          const reads = Array.from({ length: n }, (_, k) =>
+            ce._libraryCall('At', [leaf, ce.number(k + 1)])
+          );
+          return reads.every((read) => read !== undefined) ? reads : undefined;
+        });
+  return integrands?.map((f) =>
+    rebuildWithBinding(ce, integral, [f, ...integral.ops.slice(1)])
+  );
 }
 
 /**

@@ -19,7 +19,7 @@ import {
 } from '../../src/compute-engine/compilation/ir';
 import { compile } from '../../src/compile';
 import type { Expression } from '../../src/compute-engine/global-types';
-import type { ComputeEngine } from '../../src/compute-engine';
+import { ComputeEngine } from '../../src/compute-engine';
 import {
   JS,
   runtimeOf,
@@ -559,6 +559,23 @@ describe('IR slice: random programs against the interpreter', () => {
 });
 
 describe('IR slice: random frames of one draw site', () => {
+  test('two reads share a literal-seeded choice of input-dependent length', () => {
+    const ce = new ComputeEngine();
+    ce.precision = 'machine';
+    ce.declare('n', 'real');
+    ce.assign(
+      'L',
+      ce.box(['WithRandomSeed', 7, ['RandomChoice', ['Interval', 0, ['Open', 1]], ['Multiply', 4, 'n']]])
+    );
+    const e = ce.box(['Add', ['At', 'L', 1], ['At', 'L', 2]]);
+    const result = compile(e, { to: 'javascript', fallback: false });
+    expect(result.code?.match(/_SYS\.randomChoice\(/g)).toHaveLength(1);
+    for (const n of [1, 3, 8]) {
+      ce.assign('n', n);
+      expect(result.run!({ n })).toBe(e.N().re);
+    }
+  });
+
   test('300 programs give the interpreter bits at machine precision', () => {
     const ce = makeEngine();
     const machine = makeMachineEngine();

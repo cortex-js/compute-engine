@@ -270,6 +270,7 @@ function holdsComplex(t: IRType): boolean {
 }
 
 export const JS: Syntax = deepFreeze({
+  returnEntryCall: true,
   ops: {
     ...ARITHMETIC,
     'pow': '_SYS.ir.pow($0, $1)',

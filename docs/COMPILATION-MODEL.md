@@ -2284,7 +2284,10 @@ and `run()` is built by the same loader. `shippable` is `false` for code
 that draws or integrates.
 
 An integral calls the quadrature of the runtime (`_SYS.irIntegrate`) and its
-Monte-Carlo fallback. A sample that is not finite of a product with an exponential
+Monte-Carlo fallback. A JavaScript definite integral with real bounds also
+admits a short literal list or a supported call mapped over a short
+fixed-length numeric list. It reads the bounds once and integrates each
+element separately. A sample that is not finite of a product with an exponential
 factor of the variable is its value in log space when that is finite, as in
 the interpreter: `∫₀^∞ x^100·e^−x dx` (its integrand is `∞·0` past about
 x = 1,200) is 100!. The fallback's estimate changes between runs, as in the

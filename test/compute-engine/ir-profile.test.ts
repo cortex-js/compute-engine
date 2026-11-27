@@ -604,6 +604,36 @@ describe('stored code', () => {
     expect(rt.load(stored(r))({ x: 2 })).toBe(3);
   });
 
+  test('a final function call is stored without a temporary or IIFE', () => {
+    const e = new ComputeEngine();
+    e.parse('f(t) := t^2 + 1').evaluate();
+    const r = compile(e.parse('f(x)'), { ...IR, inputs: { x: 'real' } });
+    expect(r.code).toBe('u0_f(_.x)');
+    expect(rt.load(stored(r))({ x: 3 })).toBe(10);
+    const interval = compile(e.parse('f(x)'), {
+      to: 'interval-js',
+      inputs: { x: 'real' },
+    });
+    expect(interval.code).toBe('u0_f(_.x)');
+    expect(interval.run!({ x: { lo: 3, hi: 3 } })).toEqual({
+      kind: 'interval',
+      value: { lo: 10, hi: 10 },
+    });
+    const constant = compile(e.parse('f(2)'), { to: 'interval-js' });
+    expect(constant.preamblePerCall).toContain('u0_f(');
+  });
+
+  test('adding a negative literal emits subtraction', () => {
+    const e = new ComputeEngine();
+    const expression = e.box(['Add', 'x', -7]);
+    const r = compile(expression, { ...IR, inputs: { x: 'real' } });
+    expect(r.code).toBe('(_.x - 7)');
+    expect(r.run!({ x: 2 })).toBe(-5);
+    expect(
+      compile(expression, { to: 'glsl', inputs: { x: 'real' } }).code
+    ).toBe('(x - 7.0)');
+  });
+
   test('a stored result loads and gives the values of run()', () => {
     const cases: [Json, Record<string, unknown>[]][] = [
       [
@@ -1071,7 +1101,7 @@ describe('a user function that reads an input of the compilation', () => {
       { k: 4, n: 1.5 },
       { k: 0, n: -2 },
     ]);
-    expect(r.preambleOnce).toMatch(/u\d+_R\(\(v\d+ \+ \(-1\)\), v\d+\)/);
+    expect(r.preambleOnce).toMatch(/u\d+_R\(\(v\d+ - 1\), v\d+\)/);
     recursive('R0', 1.5, 2);
     againstInterpreter(e, ['R0', 'k'], [{ k: 4 }, { k: 0 }]);
     // Read after it, through a function called with the recursive call

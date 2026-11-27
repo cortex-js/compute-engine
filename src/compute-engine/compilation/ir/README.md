@@ -3099,8 +3099,10 @@ conditions. Every other held value is lowered as written in place, and of its
 effects only the draws of a random frame that it holds are accepted, when the
 frame has one draw site evaluated once (a frame of the next paragraph that has
 no warning): `H := WithRandomSeed(139128, RandomChoice([0, 1), 4N))`, a seeded
-list whose length reads the input `N`, is that frame at each read of `H`, a
-function of `N` (`drawSites()` of `lower.ts`). The frame starts its draws at its
+list whose length reads the input `N`, is a function of `N`
+(`drawSites()` of `lower.ts`). On JavaScript, a literal-seeded frame around
+one built-in choice can share its list at a second read in the same region
+when its inputs and the effect count are unchanged. The frame starts at its
 seed, so the seed can read an input too (`WithRandomSeed(N, Random())`). A held
 value still declines when it draws outside a frame (`L := Random() + N`), draws
 its seed, reads a name of `vars`, calls a user function that draws, or holds a

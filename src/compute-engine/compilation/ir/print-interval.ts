@@ -120,6 +120,7 @@ const fill =
 /** The syntax of the mode: the statement forms of `JS`, and the kernel of
  *  each operation (README, "The interval mode"). */
 export const JS_INTERVAL: Syntax = Object.freeze({
+  returnEntryCall: true,
   ...JS,
   updateList: undefined,
   shortLoop: undefined,

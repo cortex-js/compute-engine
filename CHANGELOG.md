@@ -1,5 +1,22 @@
 ## [Unreleased]
 
+### Improvements
+
+- **JavaScript compiles definite integrals of short, fixed-length numeric
+  lists.** A literal list or a supported call that maps over a fixed-length
+  list gives one integral per element. For example, integrating
+  `[x, 2x, x^2]` from 0 to 2 gives `[2, 4, 8/3]` to quadrature precision.
+
+### Performance
+
+- **JavaScript and interval-js return a final function call directly.**
+  An expression such as `f(x)` can emit the call without a temporary or an
+  immediately invoked function. JavaScript and GLSL emit subtraction for
+  addition of a negative literal.
+- **JavaScript can reuse a literal-seeded random list.** Two reads of the
+  same seeded `RandomChoice` in one expression can share the list even
+  when the draw count depends on an input.
+
 ### Resolved Issues
 
 - **Compiled JavaScript passes a value of a named tuple type with a list of
