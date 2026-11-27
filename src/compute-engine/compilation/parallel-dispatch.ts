@@ -4,7 +4,7 @@ type Timing = { passes: number; ms: number };
 const SETUP_MS: Record<CallPoolWarmth, number> = {
   'cold-pool': 15,
   'cold-kernel': 0.25,
-  warm: 0.12,
+  'warm': 0.12,
 };
 
 /** History for one loop, pool and input-size band. */

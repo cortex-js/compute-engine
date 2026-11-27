@@ -388,10 +388,18 @@ export function recordLowering(
         'a tagged result with fields re and im, reserved for complex results'
       );
     const values = e.values.map((x) => {
-      if (resultRecord && isFunction(x, 'List') && x.nops === 0 && cx.isLibrary(x))
+      if (
+        resultRecord &&
+        isFunction(x, 'List') &&
+        x.nops === 0 &&
+        cx.isLibrary(x)
+      )
         return cx.emptyList(x, 'real');
       const v = cx.value(x)!;
-      if (resultRecord && (type(v).lane === 'record' || type(v).lane === 'array'))
+      if (
+        resultRecord &&
+        (type(v).lane === 'record' || type(v).lane === 'array')
+      )
         decline(x, 'a record or engine array in a tagged result field');
       return v;
     });

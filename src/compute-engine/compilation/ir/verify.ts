@@ -252,10 +252,7 @@ export function verify(p: Program, rows: readonly OperatorRow[]): void {
             return i.args.forEach((a, k) => {
               const f = t.fields![k];
               const v = type(a);
-              if (
-                v.lane !== f.lane ||
-                v.shape.length !== f.shape.length
-              )
+              if (v.lane !== f.lane || v.shape.length !== f.shape.length)
                 fail(
                   `result record v${i.out}: field ${k} of type ${typeToString(v)}`
                 );
@@ -271,7 +268,9 @@ export function verify(p: Program, rows: readonly OperatorRow[]): void {
             const r = type(a);
             if (t.resultRecord) {
               if (r.lane !== 'record' || !r.resultRecord)
-                fail(`result records v${i.out}: an element of type ${typeToString(r)}`);
+                fail(
+                  `result records v${i.out}: an element of type ${typeToString(r)}`
+                );
               return;
             }
             if (

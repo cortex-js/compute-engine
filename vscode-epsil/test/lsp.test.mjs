@@ -1319,31 +1319,35 @@ await scenario(
   }
 );
 
-await scenario('rename with an early read of a shadowing local', undefined, async (c) => {
-  const block = 'do { let before = x; let x = 2; before }';
-  await c.open(URI, 'let x = 10\n' + block);
-  const definition = await c.request('textDocument/definition', {
-    textDocument: { uri: URI },
-    position: { line: 1, character: block.indexOf('= x') + 2 },
-  });
-  check(
-    'go to definition reaches the uninitialized inner declaration',
-    definition?.range.start.line === 1 &&
-      definition.range.start.character === block.lastIndexOf('x'),
-    JSON.stringify(definition)
-  );
-  const rename = await c.request('textDocument/rename', {
-    textDocument: { uri: URI },
-    position: { line: 0, character: 4 },
-    newName: 'outer',
-  });
-  const edits = rename?.changes?.[URI];
-  check(
-    'renaming the outer variable leaves the inner read alone',
-    edits?.length === 1 && edits[0].range.start.line === 0,
-    JSON.stringify(rename)
-  );
-});
+await scenario(
+  'rename with an early read of a shadowing local',
+  undefined,
+  async (c) => {
+    const block = 'do { let before = x; let x = 2; before }';
+    await c.open(URI, 'let x = 10\n' + block);
+    const definition = await c.request('textDocument/definition', {
+      textDocument: { uri: URI },
+      position: { line: 1, character: block.indexOf('= x') + 2 },
+    });
+    check(
+      'go to definition reaches the uninitialized inner declaration',
+      definition?.range.start.line === 1 &&
+        definition.range.start.character === block.lastIndexOf('x'),
+      JSON.stringify(definition)
+    );
+    const rename = await c.request('textDocument/rename', {
+      textDocument: { uri: URI },
+      position: { line: 0, character: 4 },
+      newName: 'outer',
+    });
+    const edits = rename?.changes?.[URI];
+    check(
+      'renaming the outer variable leaves the inner read alone',
+      edits?.length === 1 && edits[0].range.start.line === 0,
+      JSON.stringify(rename)
+    );
+  }
+);
 
 await scenario('rename on a broken parse', undefined, async (c) => {
   await c.open(URI, 'q = 2\nlet = 1');

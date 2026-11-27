@@ -175,11 +175,7 @@ const builds = (z: Ints, count: Wrap): Syntax['regions'] => {
     `const ${out} = ${filter ? '[]' : `new Array(${toNumber(`${out}_n`)})`};`,
     blocks(z, k, `${out}_n`),
   ];
-  const build: RegionSpelling = ({
-    outs: [out],
-    args: [n],
-    params: [k],
-  }) => ({
+  const build: RegionSpelling = ({ outs: [out], args: [n], params: [k] }) => ({
     open: open(out, n, k, false),
     close: ([y]) => [`  ${out}[${toNumber(k)}] = ${y};`, '}'],
   });
@@ -627,10 +623,12 @@ export const JS: Syntax = deepFreeze({
   part: (tuple, index) => `${tuple}[${index}]`,
   list: (elements, t) =>
     t.lane === 'record' && t.resultRecord
-      ? `{ ${t.names!.map((name, k) => {
-          const value = elements[k];
-          return `${JSON.stringify(name)}: ${holdsComplex(t.fields![k]) ? `_SYS.ir.normalize(${value})` : value}`;
-        }).join(', ')} }`
+      ? `{ ${t
+          .names!.map((name, k) => {
+            const value = elements[k];
+            return `${JSON.stringify(name)}: ${holdsComplex(t.fields![k]) ? `_SYS.ir.normalize(${value})` : value}`;
+          })
+          .join(', ')} }`
       : `[${elements.join(', ')}]`,
   // An array of the length, filled in index order by a `for` loop: an
   // expression, so a function called at once.
@@ -892,10 +890,7 @@ function syncArray(a: unknown): void {
  * tests the inputs and `refs`, and walks the stale arrays when an array
  * entered the call.
  */
-function arraySync(
-  ce: ComputeEngine,
-  p: Program
-): ArraySync | undefined {
+function arraySync(ce: ComputeEngine, p: Program): ArraySync | undefined {
   const entry = entryOf(p);
   const literal = entry.literal === true;
   const positional = argumentIndex(entry, entry.positional ?? 0);

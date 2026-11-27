@@ -390,7 +390,12 @@ export function outline(
             {
               params: [k],
               body: [
-                { k: 'op', op: 'add.int', out: region.params[0], args: [i0, k] },
+                {
+                  k: 'op',
+                  op: 'add.int',
+                  out: region.params[0],
+                  args: [i0, k],
+                },
                 ...region.body,
               ],
               yields: region.yields,

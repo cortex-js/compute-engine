@@ -708,9 +708,7 @@ export function dropCollectedStale(entry: StaleEntry): void {
 
 /** Each stale array, with its entry, until it is no longer stale (the
  * unregister token is its `WeakRef`) or is collected. */
-const staleCollected = new FinalizationRegistry<StaleEntry>(
-  dropCollectedStale
-);
+const staleCollected = new FinalizationRegistry<StaleEntry>(dropCollectedStale);
 
 /**
  * The arrays of the engine `ce` that are stale (`markStale()` with a fetch

@@ -49,7 +49,10 @@ import {
 } from './compute-engine/compilation/javascript-runtime.js';
 import { createIntervalRuntime } from './compute-engine/compilation/interval-runtime.js';
 import { INTERVAL_RUNTIME_VERSION } from './compute-engine/interval/index.js';
-import { checkDeadline, isTimeoutCancellation } from './common/interruptible.js';
+import {
+  checkDeadline,
+  isTimeoutCancellation,
+} from './common/interruptible.js';
 import type {
   BroadcastInputs,
   BroadcastOptions,

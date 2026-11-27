@@ -1776,7 +1776,9 @@ function lowerOnce(
   // The consumer needs these values whole. Lower its later operands in
   // order so a fused build can read the same matrix instead of recomputing it.
   let materializedMatrices = new Set<V>();
-  const withMaterializedMatrices: Lowering['withMaterializedMatrices'] = (f) => {
+  const withMaterializedMatrices: Lowering['withMaterializedMatrices'] = (
+    f
+  ) => {
     const previous = materializedMatrices;
     materializedMatrices = new Set(previous);
     try {
@@ -2560,11 +2562,14 @@ function lowerOnce(
     checkTextDomains(e);
     if (entryResult && javascript) {
       if (e.operator === 'List' && e.nops > 0 && e.ops.every(taggedRecord))
-        return b.list(e.ops.map((op) => value(op, true, true)!), {
-          lane: 'rows',
-          shape: [],
-          resultRecord: true,
-        });
+        return b.list(
+          e.ops.map((op) => value(op, true, true)!),
+          {
+            lane: 'rows',
+            shape: [],
+            resultRecord: true,
+          }
+        );
       const member = e.ops[0];
       if (e.operator === 'Comprehension' && taggedRecord(member))
         return lists.comprehension(e, () => value(member, true, true)!);
@@ -8480,7 +8485,8 @@ function lowerOnce(
     if (used !== undefined) {
       // An array is a reference of the engine, which a pool loop and the
       // result of the code do not hold (spec section 10.6).
-      if (parallel !== undefined) decline(parallel, `an array in a ${parallelKind}`);
+      if (parallel !== undefined)
+        decline(parallel, `an array in a ${parallelKind}`);
       if (
         entryOf(p).literal !== true &&
         used.makers.length > 0 &&

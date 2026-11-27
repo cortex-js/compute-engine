@@ -1295,12 +1295,12 @@ export function listLowering(cx: Lowering) {
         resultRecords
           ? 'records.build'
           : rows === undefined
-          ? filter
-            ? 'filter'
-            : 'build'
-          : filter
-            ? 'rows.filter'
-            : 'rows.build',
+            ? filter
+              ? 'filter'
+              : 'build'
+            : filter
+              ? 'rows.filter'
+              : 'rows.build',
       [s.length],
       [k],
       () =>
@@ -1573,7 +1573,15 @@ export function listLowering(cx: Lowering) {
       s =
         lane === undefined ? listSource(kept) : rowsOf(e, kept, lane).source();
     }
-    const v = over(e, s, name, record ?? e.ops[0], false, e, record !== undefined);
+    const v = over(
+      e,
+      s,
+      name,
+      record ?? e.ops[0],
+      false,
+      e,
+      record !== undefined
+    );
     if (b.changes() > before)
       decline(
         e,
@@ -1604,7 +1612,10 @@ export function listLowering(cx: Lowering) {
         const y = indexed(name, s.at(k), () => cx.value(e.ops[0])!);
         const t = type(y);
         if (t.shape.length !== 0 || (t.lane !== 'real' && t.lane !== 'integer'))
-          decline(e, 'a parallel comprehension whose body is not a real scalar');
+          decline(
+            e,
+            'a parallel comprehension whose body is not a real scalar'
+          );
         return [y];
       },
       e

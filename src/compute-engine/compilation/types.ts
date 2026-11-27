@@ -739,14 +739,13 @@ export type DefaultRunnerResult<T extends string> = T extends 'interval-js'
  */
 export type DefaultRunnerVars<T extends string> = T extends 'interval-js'
   ? IntervalInput
-  :
-      | number
-      | bigint
-      | boolean
-      | string
-      | ComplexResult
-      | RunnerListInput
-      | Readonly<Record<string, number>>;
+  : | number
+    | bigint
+    | boolean
+    | string
+    | ComplexResult
+    | RunnerListInput
+    | Readonly<Record<string, number>>;
 
 /**
  * A list argument of a compiled runner: an array of numbers, of booleans,

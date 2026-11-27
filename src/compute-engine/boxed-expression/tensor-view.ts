@@ -489,7 +489,10 @@ export function absentCellsAsNaN(ce: ComputeEngine, x: Expression): Expression {
 export function packTensor(
   ce: ComputeEngine,
   x: Expression,
-  { numeric = false, boxedBooleans = false }: {
+  {
+    numeric = false,
+    boxedBooleans = false,
+  }: {
     numeric?: boolean;
     boxedBooleans?: boolean;
   } = {}

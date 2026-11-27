@@ -196,7 +196,11 @@ export function makeWillParallelize(
   return (passes, minPasses) => {
     checkMinPasses('willParallelize', minPasses);
     const pool = callPool(spec.engine.workers);
-    if (!spec.loops.length || !pool || hasStepBudget(spec.engine._deadlineFrame))
+    if (
+      !spec.loops.length ||
+      !pool ||
+      hasStepBudget(spec.engine._deadlineFrame)
+    )
       return false;
     if (passes === undefined) return true;
     if (minPasses !== undefined) return passes >= minPasses;
@@ -206,8 +210,14 @@ export function makeWillParallelize(
       const numbers = loop.comprehension ? passes : 0;
       const warmth = pool.callWarmth?.(loop.stored) ?? 'cold-pool';
       const history = historyFor(loop, pool, passes, numbers, parts, false);
-      return history.choose(passes, parts, numbers, loop.workPerPass, warmth, false)
-        .usePool;
+      return history.choose(
+        passes,
+        parts,
+        numbers,
+        loop.workPerPass,
+        warmth,
+        false
+      ).usePool;
     });
   };
 }
@@ -455,7 +465,8 @@ export function makeRunAsync(
             if (failed && deadline !== undefined && Date.now() >= deadline)
               throw deadlineError();
             const timing = timings.get(id);
-            const startedReport = timing && onLoop ? globalThis.performance.now() : undefined;
+            const startedReport =
+              timing && onLoop ? globalThis.performance.now() : undefined;
             report(
               failed ? 'calling-thread' : 'pool',
               failed ? 'pool-declined' : undefined

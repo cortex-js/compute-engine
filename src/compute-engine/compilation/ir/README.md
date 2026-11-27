@@ -1872,9 +1872,9 @@ a value of the lane). A full reverse traversal of a bounded build can forward
 its element computation while preserving the reduction's reverse order.
 
 Before GLSL scalarization, the passes forward a single element read of a bounded
-build or a pure flat element-wise operation. A pure element-wise operation
-of a numeric gather can write its result inside the gather's build when it
-owns the only read and keeps the checked index. A reduction over a pure filter of a
+build or a pure flat element-wise operation. A pure element-wise operation of a
+numeric gather can write its result inside the gather's build when it owns the
+only read and keeps the checked index. A reduction over a pure filter of a
 stated source length visits the source in order and updates the accumulator
 where the predicate holds. Emitting the filtered list itself would require a
 shader value of run-time length, so that form declines. A scalar reduction can
@@ -2744,13 +2744,13 @@ place and on the scalar operands. An operand is read at that place by
 `elementAt()` of `lower.ts`, as for flat lists: an operand that is itself an
 operation on elements (a row that threads, with no effect, of operands of its
 shape) or a build of `elementwise()` is the operation on its elements there, and
-is not built, so `2·A + B` and `(A + B)·2 − C` are one build of builds. If
-an earlier operand of a returned tuple or the left operand of a matrix
-product already uses that matrix whole, a later element-wise operation
-reads the materialized cells. Each of
-the two lengths of the result is the length of two flat lists that an operation
-reads at each index (`agreedLength()` of `lower-lists.ts`, "Lists"): the length
-plus the value 0 of the check `rows.agree`, which throws a `RangeError`
+is not built, so `2·A + B` and `(A + B)·2 − C` are one build of builds. If an
+earlier operand of a returned tuple or the left operand of a matrix product
+already uses that matrix whole, a later element-wise operation reads the
+materialized cells. Each of the two lengths of the result is the length of two
+flat lists that an operation reads at each index (`agreedLength()` of
+`lower-lists.ts`, "Lists"): the length plus the value 0 of the check
+`rows.agree`, which throws a `RangeError`
 (`incompatible-dimensions: lists of lengths …`) where the lengths of the
 operands differ, the interpreter's error. It is made once, before the builds,
 which read it as their length, so `dce` keeps it, and a later operation on the
@@ -2771,28 +2771,26 @@ two sizes joins them as rows, a local holds it and is written again, and an
 element `At(At(A + B, i), j)` is read (`rows.at`). The row `At(A + B, 1)` as the
 value and a matrix operator of such an `If` decline.
 
-The reductions of a matrix (`reduction()` of `lower-lists.ts`; an operand
-whose engine type is a list of lists of numbers, lowered once by
-`gridOf()`). `Sum(m)` and `Product(m)` of a matrix (a list of rank 2 of
-reals or integers, `asMatrix()` of a value of the lane `rows`) are
-`columns()`: the interpreter adds the rows element by element, so the value
-is a build over the columns of the fold over the rows from the identity
-(`0 + m[0][j] + …`), written out for a short constant size. Of no row the
-interpreter's value is the number 0 (or 1), so the number of rows must be
-proved `>= 1` (`positive()` of `lower.ts`: a constant, the number of rows of
-a value of a matrix type, `matrixCounts` for an input of the entry and
-`rows.count` of a parameter or of an input that a user function reads,
-`matrixValues`; the order `rows.order` of a square matrix of such a number of
-rows; and such a value plus the 0 of a check of two lengths); another matrix
-declines ("… of a list of lists that can have no row"). The paths apply on
-JavaScript outside the interval and the bigint modes, which keep their
-declines; GLSL has no list of rank 2. `Max` and `Min` of operands of which
-one is a list of lists are `extremes()`: each such operand is the fold over
-its rows of the fold over each row, also for rows of different lengths, and
-with no scalar operand the value is NaN where no operand holds an element,
-a test of the sum of the lengths that is left out for constant sizes. A
-list of lists that is no matrix under `Sum` keeps its decline ("a term that
-is not a number").
+The reductions of a matrix (`reduction()` of `lower-lists.ts`; an operand whose
+engine type is a list of lists of numbers, lowered once by `gridOf()`). `Sum(m)`
+and `Product(m)` of a matrix (a list of rank 2 of reals or integers,
+`asMatrix()` of a value of the lane `rows`) are `columns()`: the interpreter
+adds the rows element by element, so the value is a build over the columns of
+the fold over the rows from the identity (`0 + m[0][j] + …`), written out for a
+short constant size. Of no row the interpreter's value is the number 0 (or 1),
+so the number of rows must be proved `>= 1` (`positive()` of `lower.ts`: a
+constant, the number of rows of a value of a matrix type, `matrixCounts` for an
+input of the entry and `rows.count` of a parameter or of an input that a user
+function reads, `matrixValues`; the order `rows.order` of a square matrix of
+such a number of rows; and such a value plus the 0 of a check of two lengths);
+another matrix declines ("… of a list of lists that can have no row"). The paths
+apply on JavaScript outside the interval and the bigint modes, which keep their
+declines; GLSL has no list of rank 2. `Max` and `Min` of operands of which one
+is a list of lists are `extremes()`: each such operand is the fold over its rows
+of the fold over each row, also for rows of different lengths, and with no
+scalar operand the value is NaN where no operand holds an element, a test of the
+sum of the lengths that is left out for constant sizes. A list of lists that is
+no matrix under `Sum` keeps its decline ("a term that is not a number").
 
 Two lengths that must be equal (the inner lengths of `MatrixMultiply`, the
 numbers of rows and of columns of `Trace`) and that `same()` does not prove
@@ -3256,27 +3254,26 @@ and a read of its value decline. `facts()` counts the targets of both as writes,
 so a `Loop` carries them.
 
 `ParallelLoop(body, Element(x, coll), …)` (the Epsil `parallel for`) is the
-`Loop` of the same operands on all targets (`parallelLoop()`): the passes run
-in order on one thread, as the interpreter runs them, so a read of an
-accumulator in a pass gives the interpreter's value. It declines when the body
-assigns with `Assign` a name declared outside it (`outerWrite()`; `AddTo` is the
-accumulator: `parallel-outer-write`), when it has a `Break` or a `Continue` of
-its own (`jumps()`, which stops at an inner `Loop` or `ParallelLoop`:
-`parallel-exit`), and when the program has a draw (`draw`, `shuffle`), a
-`choice`, a `sample` or a `seeded` region in any function (`draws()`, checked in
-`program()`): inside a frame the interpreter runs each pass in a random frame of
-its own (`docs/RANDOMNESS-MODEL.md`, "Pass frames of a parallel loop"), which
-compiled code does not have. On JavaScript, the `loop` of its first clause
-is marked `parallel`, which every pass keeps (`cse` keys
-it); `runAsync()` can send such a loop to the worker pool ("Batches and
-`runAsync()`").
+`Loop` of the same operands on all targets (`parallelLoop()`): the passes run in
+order on one thread, as the interpreter runs them, so a read of an accumulator
+in a pass gives the interpreter's value. It declines when the body assigns with
+`Assign` a name declared outside it (`outerWrite()`; `AddTo` is the accumulator:
+`parallel-outer-write`), when it has a `Break` or a `Continue` of its own
+(`jumps()`, which stops at an inner `Loop` or `ParallelLoop`: `parallel-exit`),
+and when the program has a draw (`draw`, `shuffle`), a `choice`, a `sample` or a
+`seeded` region in any function (`draws()`, checked in `program()`): inside a
+frame the interpreter runs each pass in a random frame of its own
+(`docs/RANDOMNESS-MODEL.md`, "Pass frames of a parallel loop"), which compiled
+code does not have. On JavaScript, the `loop` of its first clause is marked
+`parallel`, which every pass keeps (`cse` keys it); `runAsync()` can send such a
+loop to the worker pool ("Batches and `runAsync()`").
 
-A single-clause `ParallelComprehension` with a pure numeric scalar body
-lowers on JavaScript to `parallel.build`. This region uses the same serial
-printer as `build`. The worker outliner gives each worker a build of its
-slice length and adds the slice offset to the body's index. The asynchronous
-printer uses the same driver as a parallel loop and joins the returned
-slices in order. The caller's memory limit includes the output slices.
+A single-clause `ParallelComprehension` with a pure numeric scalar body lowers
+on JavaScript to `parallel.build`. This region uses the same serial printer as
+`build`. The worker outliner gives each worker a build of its slice length and
+adds the slice offset to the body's index. The asynchronous printer uses the
+same driver as a parallel loop and joins the returned slices in order. The
+caller's memory limit includes the output slices.
 
 `Integrate(f, Limits(t, a, b))` and `NIntegrate(f, a, b)` of real bounds
 (infinite ones too) and a real integrand (a function literal of one parameter,
@@ -3901,13 +3898,13 @@ program whose last statement is a definition is `Nothing` and declines.
 
 ## Records
 
-A tagged dictionary at the JavaScript entry result is printed directly as
-an object (CE-1904). The dictionary can come from an operator's `compile`
-handler. Its `__tag` is a literal string, and each field carries its rank
-without exporting its length values from the region that builds it.
-A literal list of these records and a comprehension with a tagged body
-return a list of objects. The comprehension uses `records.build` so
-varying field lengths stay local to the member.
+A tagged dictionary at the JavaScript entry result is printed directly as an
+object (CE-1904). The dictionary can come from an operator's `compile` handler.
+Its `__tag` is a literal string, and each field carries its rank without
+exporting its length values from the region that builds it. A literal list of
+these records and a comprehension with a tagged body return a list of objects.
+The comprehension uses `records.build` so varying field lengths stay local to
+the member.
 
 `lower-records.ts` (CE-1652, step 2; JavaScript only). A record is a value of
 the lane `record` and the shape `[]` whose fields each have a settled shape
@@ -3938,10 +3935,10 @@ equality of the fields of one nominal type, the declines of a record against a
 tuple, the discharges of `absent()`.
 
 - **Host inputs.** `numericRecordInput()` gives a named tuple of two to four
-  numeric fields its settled record type. JavaScript projects the object's
-  names into the internal array at entry. GLSL reads one vector in declared
-  field order. Both keep the nominal type when the value is passed to a
-  function or compared with another record.
+  numeric fields its settled record type. JavaScript projects the object's names
+  into the internal array at entry. GLSL reads one vector in declared field
+  order. Both keep the nominal type when the value is passed to a function or
+  compared with another record.
 
 - **Making a record.** The constructor of a nominal tuple type that
   `type P = tuple<…>` declares (`recordConstructor()`; not a parameterized or an
@@ -4463,25 +4460,25 @@ in `adapter.ts` (JavaScript), `adapter-glsl.ts` and `adapter-interval.ts`, and
   (`StoredJavaScript`): `preambleOnce` (and `preamble`, the same text) holds the
   helpers and the user functions, `code` is the body (an expression of the
   inputs object `_`, or the function of a literal). A body consisting of one
-  return uses the returned expression as `code`. Bodies with statements use
-  an immediately invoked function. `runtimeVersion` is
-  `RUNTIME_VERSION`, and `entryPlan` holds the inputs that a loader checks
-  (`checkEntry()`: the conversion of a number for a complex input, and with
-  `entryChecks` the refusals above; `lists` and the scalar `booleans` tell a
-  batch loader which inputs are shared lists and boolean columns). For a literal
-  with helpers, `code` evaluates them and gives the function, and `callCode` is
-  the function alone, so a lambda loads from `code` alone.
-  `reconstructionDigits` is the count of digits to which the exponent of a
-  negative base is read; a loader sets it around each call, and `run()` reads
-  the engine's current count, the same unless the precision changes between the
-  compilation and the call. `createJavaScriptRuntime().load()` and a worker of
-  the kernel pool load it; `run()` is built as `load()` builds it: the same
-  two-stage runner (`twoStageRunner()`, over the engine's runtime source), the
-  same entry plan (`checkEntry()`) and the same result convention
-  (`normalizeRunResult()`), so `run()` and loaded code agree by construction.
-  `shippable` is false for code that draws or integrates (`isShippableCode()`)
-  and for a `vars` text that is not a read of the inputs object
-  (`readsVarsObject()`: `_.E` is shippable). There is no `pure`.
+  return uses the returned expression as `code`. Bodies with statements use an
+  immediately invoked function. `runtimeVersion` is `RUNTIME_VERSION`, and
+  `entryPlan` holds the inputs that a loader checks (`checkEntry()`: the
+  conversion of a number for a complex input, and with `entryChecks` the
+  refusals above; `lists` and the scalar `booleans` tell a batch loader which
+  inputs are shared lists and boolean columns). For a literal with helpers,
+  `code` evaluates them and gives the function, and `callCode` is the function
+  alone, so a lambda loads from `code` alone. `reconstructionDigits` is the
+  count of digits to which the exponent of a negative base is read; a loader
+  sets it around each call, and `run()` reads the engine's current count, the
+  same unless the precision changes between the compilation and the call.
+  `createJavaScriptRuntime().load()` and a worker of the kernel pool load it;
+  `run()` is built as `load()` builds it: the same two-stage runner
+  (`twoStageRunner()`, over the engine's runtime source), the same entry plan
+  (`checkEntry()`) and the same result convention (`normalizeRunResult()`), so
+  `run()` and loaded code agree by construction. `shippable` is false for code
+  that draws or integrates (`isShippableCode()`) and for a `vars` text that is
+  not a read of the inputs object (`readsVarsObject()`: `_.E` is shippable).
+  There is no `pure`.
 - **The report of the inputs.** The same rule on JavaScript, GLSL and
   interval-js (`inputReport()` of `adapter.ts`). `freeSymbols` holds the names
   that the code reads: the inputs of the entry (a parameter of the entry that is

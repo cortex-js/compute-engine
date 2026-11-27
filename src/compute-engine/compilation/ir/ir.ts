@@ -622,7 +622,9 @@ export function typeToString(
   if (t.array !== undefined) return `array<${t.array.cell}>`;
   // A record: its fields, named or not.
   if (t.lane === 'record')
-    return `${t.resultRecord ? 'result ' : ''}${t.nominal ?? t.head ?? 'record'}(${(t.fields ?? [])
+    return `${t.resultRecord ? 'result ' : ''}${t.nominal ?? t.head ?? 'record'}(${(
+      t.fields ?? []
+    )
       .map(
         (f, j) =>
           `${t.names === undefined ? '' : `${t.names[j]}: `}${typeToString(f, t.marks?.[j] ?? (axis === false ? false : -1))}`
