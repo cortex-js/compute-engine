@@ -493,7 +493,10 @@ export function documentBindings(
    * Bind a `Match` arm's pattern into the arm's scope. The parser adds one
    * underscore to a leaf and three to a rest capture. It keeps call heads
    * as written. The matcher strips all leading underscores from capture
-   * names, including any written in the source.
+   * names, including any written in the source. A call head that is not a
+   * capture (`sin` in `sin(a)`, `set` in `set(a, b)`) is a read of the name
+   * in the enclosing scope, so a library spelling there names the library
+   * operator, as it does in an expression.
    */
   function bindMatchPattern(
     node: MathJsonExpression | null,
@@ -512,9 +515,10 @@ export function documentBindings(
         typeText(operand(node, 2), scope);
         return;
       }
-      if (head.startsWith('_')) {
-        const span = writtenHeadSpan(node, head);
-        if (span !== undefined) bindCapture(head, span, span, scope);
+      const span = writtenHeadSpan(node, head);
+      if (span !== undefined) {
+        if (head.startsWith('_')) bindCapture(head, span, span, scope);
+        else use(head, span, scope.parent ?? scope, 'read');
       }
       for (const op of operands(node)) bindMatchPattern(op, scope);
       return;

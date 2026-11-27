@@ -1,3 +1,24 @@
+## [Unreleased]
+
+### Improvements
+
+- **In Epsil, a library spelling at the head of a call pattern names the
+  library operator.** In `match sin(1) { sin(a) => a }`, the pattern
+  `sin(a)` matches and gives `1`; it matched only a call of an operator named
+  `sin`, and the case fell through. A set pattern is now `set(a, b)`, the
+  spelling of the expression, and the fixit of a brace set pattern writes it.
+  A function of the program with the same name shadows the spelling, as in an
+  expression, and the verbatim form (`` `sin`(a) ``) names the raw symbol.
+
+### Resolved Issues
+
+- **An operand of `Integrate` or `CircularIntegrate` that is not a limit is
+  an error** (CE-1384).
+  `integrate(x, (x, 0, 1, 2))`, a limit with a step, and `integrate(x, x in
+  0..1)`, where `0..1` is the discrete range {0, 1}, gave the indefinite
+  integral `1/2 * x^2`. They now give an `incompatible-type` error, as a set
+  or a number in a limit position does.
+
 ## 0.203.0 _2026-11-27_
 
 ### Breaking Changes

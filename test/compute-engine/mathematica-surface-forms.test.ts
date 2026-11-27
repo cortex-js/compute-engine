@@ -68,16 +68,17 @@ describe('Iterator tuples in the iterator slot', () => {
     ).toBe(3);
   });
 
-  test('a 4-element integration spec goes inert', () => {
-    // Integration bounds have no step slot: the integral stays indefinite
-    // (it once fell through `canonicalLimits`'s arity chain to
-    // `Limits(Nothing, Nothing, lo)` and gave a SIGN-FLIPPED `-1/3`).
+  test('a 4-element integration spec is an error', () => {
+    // Integration bounds have no step slot (it once fell through
+    // `canonicalLimits`'s arity chain to `Limits(Nothing, Nothing, lo)` and
+    // gave a SIGN-FLIPPED `-1/3`; then it was left out, and the integral was
+    // indefinite).
     expect(
       ce
         .box(['Integrate', ['Square', 'x'], ['Tuple', 'x', 0, 1, 5]])
         .evaluate()
         .toString()
-    ).toBe('int(x^2 dx)');
+    ).toContain('incompatible-type');
     expect(
       ce
         .box(['Integrate', ['Square', 'x'], ['Tuple', 'x', 0, 1]])

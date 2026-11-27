@@ -7857,7 +7857,7 @@ volumes
         { description: 'The integrand.', sample: 'z => 1 / z' },
         {
           description:
-            'The variable and the contour, as `(z, contour, Nothing)`; other limits leave the integral unevaluated.',
+            'The variable and the contour, as `(z, contour, Nothing)`; a limit of another shape leaves the integral unevaluated, and an operand that is not a limit is an error.',
         },
       ],
 

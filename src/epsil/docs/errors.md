@@ -186,7 +186,7 @@ Write `{x -> 1}`; the fixit in the diagnostic replaces the `:` by `->`. The entr
 
 Braces make a dictionary: `{x -> 1, y -> 2}`, the empty dictionary `{}`, a merge `{...d1, ...d2}` and a comprehension `{k -> v for k in ks}`. A set is written with its constructor, `set(1, 2, 3)`, so a brace literal never has to wait for its first element to tell a set from a dictionary.
 
-Write `set(1, 2)` for `{1, 2}`, `set(...a, ...b)` for the union of the elements of `a` and `b`, and `setFrom([x^2 for x in xs])` for a set comprehension. In a `match` pattern, a set is the operator pattern `Set(a, b)`. A brace that holds one `name = value`, as the block of another language does (`x => { a = 2 }`), is a block written without `do`: write `do { a = 2 }`. The fixit in the diagnostic makes that rewrite. The literal was read as the set it meant, so any other diagnostic reported here is a separate problem.
+Write `set(1, 2)` for `{1, 2}`, `set(...a, ...b)` for the union of the elements of `a` and `b`, and `setFrom([x^2 for x in xs])` for a set comprehension. In a `match` pattern, a set is `set(a, b)` too. A brace that holds one `name = value`, as the block of another language does (`x => { a = 2 }`), is a block written without `do`: write `do { a = 2 }`. The fixit in the diagnostic makes that rewrite. The literal was read as the set it meant, so any other diagnostic reported here is a separate problem.
 
 ## `chained-assignment`
 

@@ -33,10 +33,47 @@ describe('A SET IS WRITTEN WITH ITS CONSTRUCTOR', () => {
     expect(run('setFrom([x % 3 for x in 1..10])')).toBe('set(0, 1, 2)');
   });
 
-  test('a set pattern is the operator pattern Set(…)', () => {
+  test('a library spelling at a pattern head names the library operator', () => {
+    expect(run('match set(1, 2) {\n  set(a, b) => a + b\n  _ => 0\n}')).toBe(
+      '3'
+    );
+    expect(run('match Sin(1) {\n  sin(a) => a\n  _ => 0\n}')).toBe('1');
+    // The MathJSON name still matches.
     expect(run('match set(1, 2) {\n  Set(a, b) => a + b\n  _ => 0\n}')).toBe(
       '3'
     );
+    // A name of the program shadows the spelling, as in an expression, and
+    // the verbatim form names the raw symbol.
+    expect(
+      run('function sin(x) { x }\nmatch Sin(1) {\n  sin(a) => a\n  _ => 0\n}')
+    ).toBe('0');
+    expect(run('match Set(1, 2) {\n  `set`(a, b) => a + b\n  _ => 0\n}')).toBe(
+      '0'
+    );
+    // A set pattern prints with the spelling, and reads back the same.
+    const source = 'match s {\n  set(a, b) => a + b\n  _ => 0\n}';
+    expect(run(`let s = set(1, 2)\n${source}`)).toBe('3');
+    expect(
+      serializeEpsil([
+        'Match',
+        's',
+        ['MatchCase', ['Set', '_a', '_b'], ['Add', 'a', 'b']],
+      ])
+    ).toContain('set(a, b) =>');
+    // With `set` bound by the program, or MathJSON names asked for, the
+    // pattern keeps the MathJSON name, so it still matches a set.
+    const bound = serializeEpsil([
+      'Block',
+      ['Declare', 'set', "'integer'"],
+      ['Match', 's', ['MatchCase', ['Set', '_a', '_b'], ['Add', 'a', 'b']]],
+    ]);
+    expect(bound).toContain('Set(a, b) =>');
+    expect(
+      serializeEpsil(
+        ['Match', 's', ['MatchCase', ['Set', '_a', '_b'], ['Add', 'a', 'b']]],
+        { libraryNames: 'mathjson' }
+      )
+    ).toContain('Set(a, b) =>');
   });
 
   test('braces make a dictionary: {} is the empty dictionary', () => {

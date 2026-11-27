@@ -857,6 +857,19 @@ match z {
 }
 ```
 
+A call pattern names its operator as an expression does: a library spelling
+is the library operator, so `sin(a)` matches `sin(1)` and `set(a, b)` matches
+a set of two elements, and a function of the program with the same name
+shadows the spelling.
+
+```epsil
+match sin(1) {
+  sin(a) => a
+  _ => 0
+}
+// ➔ 1
+```
+
 This is symbolic destructuring, evaluated by the engine's general pattern
 matcher — it works when evaluating a `match` expression, but such patterns
 are not supported by `compile()`; compiling a `match` with an operator

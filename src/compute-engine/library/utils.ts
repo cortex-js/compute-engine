@@ -76,6 +76,7 @@ import { isFunctionLiteralParameter } from '../boxed-expression/function-literal
 import { checkDeadline, isThenable } from '../../common/interruptible.js';
 import { couldMatch, isSubtype } from '../../common/type/subtype.js';
 import { EXTENDED_REAL_TYPE } from '../../common/type/primitive.js';
+import { parseType } from '../../common/type/parse.js';
 import { MACHINE_PRECISION, MAX_ITERATION } from '../numerics/numeric.js';
 import { extrapolate } from '../numerics/richardson.js';
 import { appliesJumpFunction } from '../jump-functions.js';
@@ -4174,13 +4175,14 @@ export function* indexingSetCartesianProductIterator(
 
 /** Given a sequence of arguments, return an array of Limits:
  *
- * - ["Range", 1, 10] -> ["Limits", "Unknown", 1, 10]
- * - 1, 10 -> ["Limits", "Nothing", 1, 10]
+ * - ["Range", 1, 10] -> ["Limits", "Nothing", 1, 10]
  * - [Tuple, "x", 1, 10] -> ["Limits", "x", 1, 10]
  * - "x", 0, "Pi" -> ["Limits", "x", 0, "Pi"]
  * - "x", 10 -> ["Limits", "x", "Nothing", 10]
  * - "x", "y" -> ["Limits", "x", "Nothing", "Nothing"],
  *   ["Limits", "y", "Nothing", "Nothing"]
+ * - an operand of any other form is an `incompatible-type` error; an
+ *   operand that is already an `Error` is kept as it is.
  *
  */
 export function canonicalLimitsSequence(
@@ -4189,6 +4191,11 @@ export function canonicalLimitsSequence(
 ): Expression[] {
   const ce = options.engine;
   const result: Expression[] = [];
+  // An operand that is not a limit is an error: leaving it out would make the
+  // integral indefinite (`(x, 0, 1, 2)` has a step, which bounds have no
+  // slot for; `x in 0..1` is the discrete range {0, 1}; a set has no order).
+  const notALimit = (op: Expression) =>
+    ce.typeError(parseType('tuple<symbol, any, any>'), undefined, op);
   for (let i = 0; i < ops.length; i++) {
     const op = ops[i];
     // A parenthesized tuple parsed from LaTeX (`\mathrm{Integrate}(x, (x, 0,
@@ -4198,8 +4205,11 @@ export function canonicalLimitsSequence(
     // dropped without a diagnostic: the integral became indefinite.
     const tuple = parenthesizedTupleOperands(op);
     if (tuple !== undefined) {
-      if (tuple.length >= 1 && tuple.length <= 3)
-        result.push(canonicalLimits(tuple, options) ?? ce.error('missing'));
+      result.push(
+        tuple.length >= 1 && tuple.length <= 3
+          ? (canonicalLimits(tuple, options) ?? ce.error('missing'))
+          : notALimit(op)
+      );
       continue;
     }
     if (op.operator === 'Range') {
@@ -4222,17 +4232,15 @@ export function canonicalLimitsSequence(
       const fnOp = op as Expression &
         import('../global-types.js').FunctionInterface;
       // A 4-operand spec `(x, lo, hi, step)` is a *stepped* iterator, and
-      // integration bounds have no step slot. Leave it unrecognized, so the
-      // integral stays indefinite. Without this guard the operand fell
-      // through `canonicalLimits`'s arity chain, which left `index`/`lower` at
-      // `Nothing` and `upper` at its `ops[1]` initializer, yielding the
-      // nonsense `Limits(Nothing, Nothing, lo)` (and a sign-flipped result).
-      if (fnOp.ops.length <= 3)
-        result.push(canonicalLimits(fnOp.ops, options) ?? ce.error('missing'));
-    } else if (op.operator === 'Set') {
-      // A set is not an iterator: its elements have no order. Leaving it
-      // out would make the integral indefinite.
-      result.push(ce.typeError('tuple', undefined, op));
+      // integration bounds have no step slot: it is an error. Read by
+      // `canonicalLimits`'s arity chain, it would leave `index`/`lower` at
+      // `Nothing` and `upper` at its `ops[1]` initializer, the nonsense
+      // `Limits(Nothing, Nothing, lo)` (and a sign-flipped result).
+      result.push(
+        fnOp.ops.length <= 3
+          ? (canonicalLimits(fnOp.ops, options) ?? ce.error('missing'))
+          : notALimit(op)
+      );
     } else if (isSymbol(op)) {
       // The flat spelling: a variable, optionally followed by its bounds.
       // `"x", "y", "z"` is the triple indefinite integral in `x`, `y` and
@@ -4257,7 +4265,7 @@ export function canonicalLimitsSequence(
         // "x"
         result.push(canonicalLimits([op], options) ?? ce.error('missing'));
       }
-    }
+    } else result.push(op.operator === 'Error' ? op : notALimit(op));
   }
 
   return result;

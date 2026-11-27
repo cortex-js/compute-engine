@@ -4853,7 +4853,7 @@ export class Parser {
 
   /** A brace pattern is a dictionary pattern: `{k -> p, …}` → `Dictionary`
    * (keys literal, values patternized); `{}` and `{->}` → the empty
-   * `Dictionary`. A set pattern is the operator pattern `Set(p, …)`: `{p, …}`
+   * `Dictionary`. A set pattern is the call pattern `set(p, …)`: `{p, …}`
    * is a `brace-set-literal` error with that fixit, recovered as the `Set`
    * of patterns. */
   private parseBracePattern(): MathJsonExpression {
@@ -4878,7 +4878,7 @@ export class Parser {
     const { values, open, end } = this.parsePatternElements('CLOSE_BRACE', '}');
     if (values.length > 0 && operator(values[0]) === 'KeyValuePair')
       return this.buildDictionary(values, open.start, end);
-    this.reportBraceSet(open.start, end, 'Set(', ')');
+    this.reportBraceSet(open.start, end, 'set(', ')');
     return this.wrap(
       ['Set', ...values] as MathJsonExpression[],
       open.start,

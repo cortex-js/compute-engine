@@ -1915,12 +1915,13 @@ export function serializeEpsil(
         ')',
         operands(p).map((x) => serializePattern(x, typed))
       );
-    // A set pattern is the operator pattern `Set(p, …)`: a pattern head is
-    // kept as written, so the library spelling `set(…)` would not match a
-    // set.
+    // A set pattern is the call pattern `set(p, …)`: the resolution pass
+    // gives a library spelling at a pattern head its meaning. The naming
+    // policy applies, so `Set` stays when `set` is bound or MathJSON names
+    // are asked for.
     if (h === 'Set')
       return fmt.line(
-        'Set',
+        libraryName('Set'),
         fmt.fencedList(
           '(',
           fmt.separator(','),

@@ -1068,13 +1068,13 @@ export function indefiniteIntegralVariables(
  * rules of `canonicalLimitsSequence()` and `canonicalLimits()`
  * (`library/utils.ts`), without canonicalizing any operand. A clause is a
  * `Limits`, `Tuple`, `Triple`, `Pair`, `Single` or `Hold` of at most three
- * operands, a parenthesized tuple of one to three operands, a `Set` of
- * three operands whose first one is a symbol, or a flat span of operands
+ * operands, a parenthesized tuple of one to three operands, or a flat span of operands
  * that starts with a symbol (`flatLimitsSpan()`). The variable of a clause
  * is its first operand, with one `Hold` around it removed. The integral is
  * indefinite in the variable when the clause has no bounds, or when both of
  * its bounds are `Nothing`. A `Range` clause has no variable, and an
- * operand that is not a clause is ignored, as the canonical form drops it.
+ * operand that is not a clause is ignored: the canonical form makes it an
+ * `incompatible-type` error, which binds no variable.
  * `undefined` when there is no such variable.
  *
  * For example, `Integrate(k, Single(k))`, `Integrate(k, Tuple(Hold(k)))`

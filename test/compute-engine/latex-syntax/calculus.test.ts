@@ -454,12 +454,11 @@ describe('ORDER OF THE LIMITS OF A MULTIPLE INTEGRAL', () => {
   });
 
   test('the plain-text form of an integral with no limit names the parameters of its integrand', () => {
-    // A limit that the canonical form does not recognize (four elements) is
-    // dropped. The plain-text form still writes a differential for each
-    // parameter, innermost (the last parameter) first, as it does for limits
-    // without a variable.
+    // The plain-text form writes a differential for each parameter,
+    // innermost (the last parameter) first, as it does for limits without a
+    // variable.
     expect(
-      ce.box(['Integrate', ['Square', 'x'], ['Tuple', 'x', 0, 1, 5]]).toString()
+      ce.box(['Integrate', ['Function', ['Square', 'x'], 'x']]).toString()
     ).toBe('int(x^2 dx)');
     expect(
       ce
@@ -472,7 +471,7 @@ describe('ORDER OF THE LIMITS OF A MULTIPLE INTEGRAL', () => {
     // One integral sign and one differential for each parameter, innermost
     // (the last parameter) first, so that a parse of the LaTeX gets the
     // variables back.
-    const single = ce.box(['Integrate', ['Square', 'x'], ['Tuple', 'x', 0, 1, 5]]);
+    const single = ce.box(['Integrate', ['Function', ['Square', 'x'], 'x']]);
     expect(single.latex).toMatchInlineSnapshot(`\\int\\!x^2\\, \\mathrm{d}x`);
     expect(JSON.stringify(ce.parse(single.latex).json)).toBe(
       '["Integrate",["Function",["Block",["Power","x",2]],"x"],["Limits","x","Nothing","Nothing"]]'

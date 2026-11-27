@@ -64,7 +64,7 @@ contourIntegrate(1/z, z, circleContour(0, 1, -1))
 MathJSON `CircularIntegrate` · `(function, limits+) -> number`
 
 - argument 1 — The integrand. Sample: `z => 1 / z`.
-- arguments 2, … — The variable and the contour, as `(z, contour, Nothing)`; other limits leave the integral unevaluated.
+- arguments 2, … — The variable and the contour, as `(z, contour, Nothing)`; a limit of another shape leaves the integral unevaluated, and an operand that is not a limit is an error.
 
 Closed-path integral. Evaluates supported explicit contours by the residue theorem.
 
