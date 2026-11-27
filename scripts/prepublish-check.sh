@@ -265,8 +265,15 @@ elif [ "$STATUS" -eq 3 ]; then
     else
       echo ""
       echo "✗ The full test suite did not pass at HEAD, or did not complete."
-      echo "  Fix the cause, commit, and re-run npm publish."
-      echo "  To publish without the full test suite: CE_RELEASE_FORCE=1 npm publish"
+      # scripts/release.sh sets CE_RELEASE_SHA, and resumes its release when
+      # it is run again.
+      if [ -n "${CE_RELEASE_SHA:-}" ]; then
+        echo "  Fix the cause, commit, and run 'npm run release' again, with no version argument: it resumes this release."
+        echo "  To publish without the full test suite: npm run release force"
+      else
+        echo "  Fix the cause, commit, and re-run npm publish."
+        echo "  To publish without the full test suite: CE_RELEASE_FORCE=1 npm publish"
+      fi
       echo ""
       exit 1
     fi

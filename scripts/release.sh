@@ -2,7 +2,8 @@
 
 # Usage: npm run release [-- <patch|minor|major|x.y.z>] [force | remote] [--yes]
 #
-# Without a version argument, the release is a minor release.
+# Without a version argument, the release is a minor release, except when
+# the previous run stopped before the upload (see "Resuming" below).
 #
 # `force` (`npm run release force`, or `npm run release -- patch force`)
 # skips the checks that take the longest: the Prettier step and lint of
@@ -57,15 +58,23 @@
 #   8. Packages the VS Code extension (scripts/package-vsix.sh).
 #
 # When step 5 fails, the release commit stays and nothing is published. Fix
-# the cause, commit, and run `npm publish`, then tag the commit that was
-# published and push it with its tag:
-# `git push --atomic origin <commit>:refs/heads/main refs/tags/v<version>`.
-# Then package the VS Code extension: `bash scripts/package-vsix.sh`.
+# the cause, commit, and run `npm run release` again, with no version
+# argument: it resumes the release.
+#
+# Resuming: with no version argument, the release resumes when the version
+# in package.json was never published. That is the case when HEAD descends
+# from a commit whose message is that version, the tag v<version> does not
+# exist, and the registry answers that the version does not exist. The
+# release then skips step 2 and publishes HEAD under that version. Step 3
+# runs again, and step 4 commits the documentation only when it changed
+# (message "<version>: documentation"). Steps 1 and 5 to 8 run as usual. A
+# version argument always makes a new version.
 
 set -o pipefail
 cd "$(dirname "$0")/.."
 
 BUMP="minor"
+BUMP_GIVEN=0
 YES=1
 FORCE=0
 REMOTE=0
@@ -74,8 +83,8 @@ for arg in "$@"; do
     --yes) YES=1 ;;
     force | --force) FORCE=1 ;;
     remote | --remote) REMOTE=1 ;;
-    patch | minor | major) BUMP="$arg" ;;
-    [0-9]*.[0-9]*.[0-9]*) BUMP="$arg" ;;
+    patch | minor | major) BUMP="$arg" BUMP_GIVEN=1 ;;
+    [0-9]*.[0-9]*.[0-9]*) BUMP="$arg" BUMP_GIVEN=1 ;;
     *)
       echo "Usage: npm run release [-- <patch|minor|major|x.y.z>] [force | remote] [--yes]" >&2
       exit 2
@@ -189,6 +198,36 @@ done
 REGISTRY=$(npm config get registry)
 NPM_USER=$(npm whoami --registry "$REGISTRY" 2>/dev/null) ||
   fail "Not authenticated with $REGISTRY. Run 'npm login', then run the release again."
+# registry_has_version <version>: prints "yes" when the registry has
+# $PACKAGE@<version>, "no" when it answers that the version does not exist
+# (error E404), and "unknown" for any other answer, such as a network error.
+PACKAGE=$(node -pe "require('./package.json').name")
+registry_has_version() {
+  npm view "$PACKAGE@$1" version --json 2>/dev/null | node -e '
+    let s = ""; process.stdin.on("data", (d) => (s += d)).on("end", () => {
+      let v; try { v = JSON.parse(s); } catch { v = undefined; }
+      if (v === process.argv[1]) console.log("yes");
+      else if (v?.error?.code === "E404") console.log("no");
+      else console.log("unknown");
+    });' "$1"
+}
+# Resuming (see the header): the version in package.json has a release
+# commit and was never tagged nor published.
+OLD_VERSION=$(node -pe "require('./package.json').version")
+RESUME=0
+if [ "$BUMP_GIVEN" -eq 0 ] && ! git rev-parse -q --verify "refs/tags/v$OLD_VERSION" > /dev/null; then
+  PENDING_SHA=$(git log --format='%H%x09%s' HEAD | awk -F '\t' -v v="$OLD_VERSION" '$2 == v { print $1; exit }')
+  if [ -n "$PENDING_SHA" ]; then
+    case "$(registry_has_version "$OLD_VERSION")" in
+      no) RESUME=1 ;;
+      yes) ;;
+      *) fail "The registry did not say whether $PACKAGE@$OLD_VERSION exists (network error?), so the release cannot tell whether to resume it. Nothing was changed. Run the release again." ;;
+    esac
+  fi
+fi
+if [ "$RESUME" -eq 1 ]; then
+  echo "→ Resuming $OLD_VERSION: its release commit ${PENDING_SHA:0:9} was never published. HEAD is published as $OLD_VERSION, with no new version. To make a new version instead, name it: npm run release -- minor"
+fi
 # echo "✓ Authenticated with $REGISTRY as $NPM_USER"
 # The checks of `npm run ci` that the full suite does not run, after a
 # Prettier step that formats the source and commits the files that changed
@@ -200,7 +239,9 @@ NPM_USER=$(npm whoami --registry "$REGISTRY" 2>/dev/null) ||
 # board assigned to this version is fixed or closed, and no confirmed P0 is
 # open. The version is computed from $BUMP here, before anything changes, so
 # that a refusal costs nothing. The command prints the open items.
-if [ -d issues ]; then
+if [ "$RESUME" -eq 1 ]; then
+  NEXT_VERSION="$OLD_VERSION"
+else
   NEXT_VERSION=$(node -e '
     const [cur, bump] = process.argv.slice(1);
     const m = /^(\d+)\.(\d+)\.(\d+)/.exec(cur);
@@ -210,7 +251,9 @@ if [ -d issues ]; then
     else if (bump === "patch") patch++;
     else { console.log(bump); process.exit(0); }
     console.log(`${major}.${minor}.${patch}`);
-  ' "$(node -pe "require('./package.json').version")" "$BUMP")
+  ' "$OLD_VERSION" "$BUMP")
+fi
+if [ -d issues ]; then
   ISSUES_STATUS=0
   node scripts/issues.mjs release "$NEXT_VERSION" || ISSUES_STATUS=$?
   case $ISSUES_STATUS in
@@ -229,14 +272,21 @@ fi
 CHECKED_SHA=$(git rev-parse HEAD)
 # scripts/version.sh replaces the "[Unreleased]" heading with the version
 # and date. Without that heading the release has no changelog entry.
-if ! grep -q '\[Unreleased\]' CHANGELOG.md; then
+# A resumed release has its heading already; an "[Unreleased]" heading then
+# holds entries that were added after the release commit.
+if [ "$RESUME" -eq 1 ]; then
+  if grep -q '\[Unreleased\]' CHANGELOG.md; then
+    echo "⚠ CHANGELOG.md has an '## [Unreleased]' heading: its entries stay there, not under $OLD_VERSION."
+  fi
+elif ! grep -q '\[Unreleased\]' CHANGELOG.md; then
   echo "⚠ CHANGELOG.md has no '## [Unreleased]' heading: this release gets no changelog entry."
 fi
 
-# Step 2: the version.
-OLD_VERSION=$(node -pe "require('./package.json').version")
-bash scripts/run-quietly.sh "→ Version ($BUMP)" npm version "$BUMP" --no-git-tag-version ||
-  fail "npm version failed. Restore the changed files listed by 'git status' before running the release again."
+# Step 2: the version. A resumed release keeps its version.
+if [ "$RESUME" -eq 0 ]; then
+  bash scripts/run-quietly.sh "→ Version ($BUMP)" npm version "$BUMP" --no-git-tag-version ||
+    fail "npm version failed. Restore the changed files listed by 'git status' before running the release again."
+fi
 VERSION=$(node -pe "require('./package.json').version")
 TAG="v$VERSION"
 if git rev-parse -q --verify "refs/tags/$TAG" > /dev/null; then
@@ -245,20 +295,7 @@ fi
 # The version must be new on the registry too. Step 5 relies on this: when
 # the upload fails, finding this version on the registry then proves that
 # this release uploaded it.
-# registry_has_version: prints "yes" when the registry has $PACKAGE@$VERSION,
-# "no" when it answers that the version does not exist (error E404), and
-# "unknown" for any other answer, such as a network error.
-PACKAGE=$(node -pe "require('./package.json').name")
-registry_has_version() {
-  npm view "$PACKAGE@$VERSION" version --json 2>/dev/null | node -e '
-    let s = ""; process.stdin.on("data", (d) => (s += d)).on("end", () => {
-      let v; try { v = JSON.parse(s); } catch { v = undefined; }
-      if (v === process.argv[1]) console.log("yes");
-      else if (v?.error?.code === "E404") console.log("no");
-      else console.log("unknown");
-    });' "$VERSION"
-}
-case "$(registry_has_version)" in
+case "$(registry_has_version "$VERSION")" in
   no) ;;
   yes) fail "$PACKAGE@$VERSION is already on the registry. Restore the files changed by 'npm version' (git status lists them), then choose another version." ;;
   *) fail "The registry did not say whether $PACKAGE@$VERSION exists (network error?). Restore the files changed by 'npm version' (git status lists them), then run the release again." ;;
@@ -278,66 +315,82 @@ bash scripts/run-quietly.sh "→ Documentation" npm run doc || {
   exit 1
 }
 
-# Step 4: the release commit.
+# Step 4: the release commit. A resumed release whose documentation did not
+# change has nothing to commit: HEAD is published.
+COMMIT_MESSAGE="$VERSION"
+[ "$RESUME" -eq 1 ] && COMMIT_MESSAGE="$VERSION: documentation"
 # shellcheck disable=SC2086 # The file lists are split on purpose.
-git add -- $VERSION_FILES $DOC_FILES || fail "git add failed."
-echo ""
-echo "  Release $OLD_VERSION → $VERSION. Changes to commit:"
-# shellcheck disable=SC2086 # The file lists are split on purpose.
-git diff --cached --stat -- $VERSION_FILES $DOC_FILES
-echo ""
-# The staged content of the release files, as shown above. It is compared
-# again after the question: another session can stage a change meanwhile.
-# shellcheck disable=SC2086 # The file lists are split on purpose.
-SHOWN_INDEX=$(git ls-files -s -- $VERSION_FILES $DOC_FILES)
-if [ "$YES" -ne 1 ]; then
-  read -r -p "Commit these changes as \"$VERSION\" and publish? [y/N] " answer
-  case "$answer" in
-    y | Y | yes) ;;
-    *)
-      echo ""
-      echo "✗ Stopped. The changes are staged, not committed."
-      undo_hint
-      exit 1
-      ;;
-  esac
-fi
-# `git commit --only` commits the working-tree content of these files, so
-# a file changed after the list above was shown would go in unseen.
-# shellcheck disable=SC2086 # The file lists are split on purpose.
-if [ -n "$(git diff --name-only -- $VERSION_FILES $DOC_FILES)" ] ||
-  [ "$(git ls-files -s -- $VERSION_FILES $DOC_FILES)" != "$SHOWN_INDEX" ] ||
-  [ "$(node -pe "require('./package.json').version")" != "$VERSION" ]; then
-  git diff --stat -- $VERSION_FILES $DOC_FILES
+if [ "$RESUME" -eq 1 ] && [ -z "$(git status --porcelain --untracked-files=all -- $VERSION_FILES $DOC_FILES)" ]; then
+  RELEASE_SHA=$(git rev-parse HEAD)
+  if [ "$RELEASE_SHA" != "$CHECKED_SHA" ]; then
+    fail "HEAD moved from ${CHECKED_SHA:0:9} to ${RELEASE_SHA:0:9} after the release checks. Nothing was published. Run the release again."
+  fi
+  echo "✓ Nothing to commit: HEAD ${RELEASE_SHA:0:9} is published as $VERSION"
+else
+  # shellcheck disable=SC2086 # The file lists are split on purpose.
+  git add -- $VERSION_FILES $DOC_FILES || fail "git add failed."
   echo ""
-  echo "✗ These files changed after the list above was shown. Nothing was committed."
-  undo_hint
-  exit 1
-fi
-# `--only` commits these files and nothing else: another session can stage
-# its own files while the question waits.
-# shellcheck disable=SC2086 # The file lists are split on purpose.
-PARENT_SHA=$(git rev-parse HEAD)
-# Another session can commit after the checks of step 1, for example while
-# the question waited. The release checks did not see that commit, and the
-# publish check does not run them.
-if [ "$PARENT_SHA" != "$CHECKED_SHA" ]; then
+  if [ "$RESUME" -eq 1 ]; then
+    echo "  Release $VERSION, resumed. Documentation changes to commit:"
+  else
+    echo "  Release $OLD_VERSION → $VERSION. Changes to commit:"
+  fi
+  # shellcheck disable=SC2086 # The file lists are split on purpose.
+  git diff --cached --stat -- $VERSION_FILES $DOC_FILES
   echo ""
-  echo "✗ HEAD moved from ${CHECKED_SHA:0:9} to ${PARENT_SHA:0:9} after the release checks. Nothing was committed."
-  undo_hint
-  exit 1
+  # The staged content of the release files, as shown above. It is compared
+  # again after the question: another session can stage a change meanwhile.
+  # shellcheck disable=SC2086 # The file lists are split on purpose.
+  SHOWN_INDEX=$(git ls-files -s -- $VERSION_FILES $DOC_FILES)
+  if [ "$YES" -ne 1 ]; then
+    read -r -p "Commit these changes as \"$COMMIT_MESSAGE\" and publish? [y/N] " answer
+    case "$answer" in
+      y | Y | yes) ;;
+      *)
+        echo ""
+        echo "✗ Stopped. The changes are staged, not committed."
+        undo_hint
+        exit 1
+        ;;
+    esac
+  fi
+  # `git commit --only` commits the working-tree content of these files, so
+  # a file changed after the list above was shown would go in unseen.
+  # shellcheck disable=SC2086 # The file lists are split on purpose.
+  if [ -n "$(git diff --name-only -- $VERSION_FILES $DOC_FILES)" ] ||
+    [ "$(git ls-files -s -- $VERSION_FILES $DOC_FILES)" != "$SHOWN_INDEX" ] ||
+    [ "$(node -pe "require('./package.json').version")" != "$VERSION" ]; then
+    git diff --stat -- $VERSION_FILES $DOC_FILES
+    echo ""
+    echo "✗ These files changed after the list above was shown. Nothing was committed."
+    undo_hint
+    exit 1
+  fi
+  # `--only` commits these files and nothing else: another session can stage
+  # its own files while the question waits.
+  # shellcheck disable=SC2086 # The file lists are split on purpose.
+  PARENT_SHA=$(git rev-parse HEAD)
+  # Another session can commit after the checks of step 1, for example while
+  # the question waited. The release checks did not see that commit, and the
+  # publish check does not run them.
+  if [ "$PARENT_SHA" != "$CHECKED_SHA" ]; then
+    echo ""
+    echo "✗ HEAD moved from ${CHECKED_SHA:0:9} to ${PARENT_SHA:0:9} after the release checks. Nothing was committed."
+    undo_hint
+    exit 1
+  fi
+  git commit -q -m "$COMMIT_MESSAGE" --only -- $VERSION_FILES $DOC_FILES ||
+    fail "git commit failed. The changes are staged."
+  RELEASE_SHA=$(git rev-parse HEAD)
+  # Another session can commit between `git commit` and the line above: HEAD
+  # would then be its commit. The release commit has the version as its
+  # message and the HEAD before the commit as its parent.
+  if [ "$(git log -1 --format=%s "$RELEASE_SHA")" != "$COMMIT_MESSAGE" ] ||
+    [ "$(git rev-parse "$RELEASE_SHA^")" != "$PARENT_SHA" ]; then
+    fail "HEAD moved right after the release commit: ${RELEASE_SHA:0:9} is not it. Nothing was published. Find the commit \"$COMMIT_MESSAGE\" with 'git log', then run 'npm publish' from a tree where it is HEAD."
+  fi
+  echo "✓ Committed ${RELEASE_SHA:0:9} \"$COMMIT_MESSAGE\""
 fi
-git commit -q -m "$VERSION" --only -- $VERSION_FILES $DOC_FILES ||
-  fail "git commit failed. The changes are staged."
-RELEASE_SHA=$(git rev-parse HEAD)
-# Another session can commit between `git commit` and the line above: HEAD
-# would then be its commit. The release commit has the version as its
-# message and the HEAD before the commit as its parent.
-if [ "$(git log -1 --format=%s "$RELEASE_SHA")" != "$VERSION" ] ||
-  [ "$(git rev-parse "$RELEASE_SHA^")" != "$PARENT_SHA" ]; then
-  fail "HEAD moved right after the release commit: ${RELEASE_SHA:0:9} is not it. Nothing was published. Find the commit \"$VERSION\" with 'git log', then run 'npm publish' from a tree where it is HEAD."
-fi
-echo "✓ Committed ${RELEASE_SHA:0:9} \"$VERSION\""
 
 # Step 5: the publish, with the build and test checks of its hooks.
 # CE_RELEASE_SHA makes prepublish-check.sh refuse, before the upload, when
@@ -351,8 +404,8 @@ rm -f "$UPLOAD_MARK"
 if ! CE_RELEASE_SHA="$RELEASE_SHA" CE_RELEASE_UPLOAD_MARK="$UPLOAD_MARK" npm publish; then
   if [ ! -f "$UPLOAD_MARK" ]; then
     echo ""
-    echo "  To publish without the full test suite: CE_RELEASE_FORCE=1 npm publish"
-    fail "npm publish failed before the upload; nothing was published. The release commit ${RELEASE_SHA:0:9} stays. Fix the cause, commit, run 'npm publish', then tag the commit that was published: 'git tag $TAG <commit>', push it: 'git push --atomic origin <commit>:refs/heads/main refs/tags/$TAG', and package the VS Code extension: 'bash scripts/package-vsix.sh'."
+    echo "  To publish without the full test suite: npm run release force"
+    fail "npm publish failed before the upload; nothing was published. The release commit ${RELEASE_SHA:0:9} stays. Fix the cause, commit, then run 'npm run release' again with no version argument: it resumes $VERSION."
   fi
   rm -f "$UPLOAD_MARK"
   # The registry can take several minutes to show a new version: ask every
@@ -361,7 +414,7 @@ if ! CE_RELEASE_SHA="$RELEASE_SHA" CE_RELEASE_UPLOAD_MARK="$UPLOAD_MARK" npm pub
   echo "npm publish failed during the upload. Asking the registry whether $PACKAGE@$VERSION is there (up to 10 minutes)…"
   FOUND=0
   for _ in $(seq 1 20); do
-    if [ "$(registry_has_version)" = "yes" ]; then
+    if [ "$(registry_has_version "$VERSION")" = "yes" ]; then
       FOUND=1
       break
     fi

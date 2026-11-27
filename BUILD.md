@@ -269,10 +269,14 @@ commit afterwards. It combines with a version: `npm run release -- patch force`.
 8. It packages the VS Code extension (`scripts/package-vsix.sh`).
 
 When `npm publish` fails, nothing is published, and the release commit stays
-without a tag. Fix the cause, commit, run `npm publish`, then tag the published
-commit and push it with its tag
-(`git push --atomic origin <commit>:refs/heads/main refs/tags/v<version>`), and
-package the VS Code extension (`bash scripts/package-vsix.sh`). When
+without a tag. Fix the cause, commit, and run `npm run release` again with no
+version argument: it resumes the release. With no version argument, the release
+resumes when HEAD descends from a commit named after the version in
+`package.json`, the tag `v<version>` does not exist, and the registry answers
+that the version does not exist. It then skips step 2, commits the
+documentation only when it changed (as `<version>: documentation`), and
+publishes, tags and pushes HEAD under that version. A version argument always
+makes a new version. When
 only step 7 fails, fix the cause and run the push command that the
 script prints. When only step 8 fails, fix the cause and run
 `bash scripts/package-vsix.sh`.
