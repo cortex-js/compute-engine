@@ -72,6 +72,15 @@
 
 ### Resolved Issues
 
+- **A `Declare` boxed in the structural form evaluates its attributes
+  dictionary again** (CE-1876, a regression of 0.202.0). With the attributes
+  as a function-form `Dictionary`, the form that `parseEpsil("let n: real = 2")`
+  emits, `["Declare", "m", "'real'", ["Dictionary", ["KeyValuePair", "value",
+  3]]]` boxed with `form: "structural"` evaluated to `Nothing` and left `m`
+  with no value, and a key that is not an attribute did not give the error
+  `invalid-declaration-attribute`. The statement now evaluates to `3` and sets
+  `m` to `3`, as in the canonical form.
+
 - **Prepared document field helpers have distinct names across revisions of
   an engine.** A cached call of the helper for `A = x + 1` can no longer
   resolve to the generated helper for `B = x + 10` after rows are reordered.

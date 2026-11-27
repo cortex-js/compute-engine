@@ -712,6 +712,25 @@ describe('REVIEW FIXES OF THE RULES OF BLOCK LOCALS', () => {
         '`holdUntil`'
       );
     });
+
+    // CE-1876: the structural box of a function-form `Dictionary` (the
+    // attributes that `parseEpsil("let n: real = 2")` emits) has the type of
+    // a dictionary but no keys.
+    test('a function-form attributes dictionary in the structural form', () => {
+      const ce = new ComputeEngine();
+      const declare = ce.box(
+        ['Declare', 'm', "'real'", ['Dictionary', ['KeyValuePair', 'value', 3]]],
+        { form: 'structural' }
+      );
+      expect(declare.evaluate().toString()).toBe('3');
+      expect(ce.box('m').value?.toString()).toBe('3');
+
+      const invalid = ce.box(['Declare', 'q', "'unknown'", pair("'a'")], {
+        form: 'structural',
+      });
+      expect(invalid.canonical.isValid).toBe(false);
+      expect(invalid.canonical.toString()).toBe(error);
+    });
   });
 
   test('a static error does not hide a run-time error with the same code in another statement', () => {

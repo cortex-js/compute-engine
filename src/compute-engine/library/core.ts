@@ -4401,22 +4401,28 @@ const DECLARE_ATTRIBUTES: ReadonlySet<string> = new Set([
  * `undefined`. The attributes dictionary is the last operand when it is a
  * dictionary. `Declare` reads no other key, so a dictionary given as the
  * value (`Declare(d, "unknown", {a: 3})`) would leave the name without a
- * value. A dictionary that is not boxed yet is read from its raw pairs, as
- * `declareHasValue()` does.
+ * value. A function-form `Dictionary` (the structural box of the pairs that
+ * `parseEpsil()` emits) is read from its raw pairs, as `declareHasValue()`
+ * does; it is tested first because `isDictionary()` is a type test that it
+ * also passes, and it has no `keys`.
  */
 function invalidDeclareAttribute(
   args: ReadonlyArray<Expression>
 ): string | undefined {
   if (args.length < 2 || args.length > 4) return undefined;
   const attributes = args[args.length - 1];
-  if (isDictionary(attributes))
-    return attributes.keys.find((key) => !DECLARE_ATTRIBUTES.has(key));
-  if (!isFunction(attributes, 'Dictionary')) return undefined;
-  for (const pair of attributes.ops) {
-    if (!isFunction(pair) || pair.ops.length !== 2) continue;
-    const key = isString(pair.ops[0]) ? pair.ops[0].string : sym(pair.ops[0]);
-    if (key !== undefined && !DECLARE_ATTRIBUTES.has(key)) return key;
+  if (isFunction(attributes, 'Dictionary')) {
+    for (const pair of attributes.ops) {
+      if (!isFunction(pair) || pair.ops.length !== 2) continue;
+      const key = isString(pair.ops[0])
+        ? pair.ops[0].string
+        : sym(pair.ops[0]);
+      if (key !== undefined && !DECLARE_ATTRIBUTES.has(key)) return key;
+    }
+    return undefined;
   }
+  if (isDictionary(attributes) && attributes._kind === 'dictionary')
+    return attributes.keys.find((key) => !DECLARE_ATTRIBUTES.has(key));
   return undefined;
 }
 
