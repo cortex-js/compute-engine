@@ -186,6 +186,28 @@ describe('At of a list of indexes into a list of points', () => {
   });
 });
 
+test('a pure map over a gather uses one build', () => {
+  const ce = new ComputeEngine();
+  ce.declare('S', 'list<real>');
+  ce.declare('J', 'list<real>');
+  ce.declare('L', 'real');
+  const compiled = compile(
+    ce.parse(String.raw`\cos(\frac{1}{L}\times2\pi S[J])`),
+    { fallback: false }
+  );
+  expect(compiled.code?.match(/new Array\(/g)).toHaveLength(1);
+  expect(compiled.code).toMatch(/Math\.cos\([^;]+_at\(/);
+  const values = compiled.run!({ S: [1, 2, 3], J: [2, 1, 4, -1, 1.5], L: 3 });
+  const phase = 2 * Math.PI * (1 / 3);
+  expect(values).toEqual([
+    Math.cos(phase * 2),
+    Math.cos(phase),
+    NaN,
+    Math.cos(phase * 3),
+    NaN,
+  ]);
+});
+
 describe('If and Which of a list condition on JavaScript', () => {
   // prettier-ignore
   const PROGRAMS: [string, Json, Point[]][] = [

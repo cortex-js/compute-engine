@@ -966,8 +966,9 @@ compiles with the names in `symbolic` (`withCompileInputs()`,
 declaration and over a stored value, for that compilation only: with
 `n := [1, 2, 3]`, `n x` compiles to a broadcast over the stored list, and
 to `_.n * _.x` with `inputs: { n: 'real' }`. The other names keep the
-definitions they were boxed with. A body that the expression calls reads
-the input too; when the body was written with a declaration of the name, it
+definitions they were boxed with. A free name of an assigned expression that
+had no binding when boxed can take its type from `inputs`. A body that the
+expression calls reads the input too; when the body was written with a declaration of the name, it
 keeps the type of that declaration (a slider declared `real<-10..10>` and
 given as `real` is typed with the range inside the body). When the body
 reads a definition whose type was inferred from its value (a Document row

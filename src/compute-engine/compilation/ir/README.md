@@ -1868,7 +1868,9 @@ a value of the lane). A full reverse traversal of a bounded build can forward
 its element computation while preserving the reduction's reverse order.
 
 Before GLSL scalarization, the passes forward a single element read of a bounded
-build or a pure flat element-wise operation. A reduction over a pure filter of a
+build or a pure flat element-wise operation. A pure element-wise operation
+of a numeric gather can write its result inside the gather's build when it
+owns the only read and keeps the checked index. A reduction over a pure filter of a
 stated source length visits the source in order and updates the accumulator
 where the predicate holds. Emitting the filtered list itself would require a
 shader value of run-time length, so that form declines. A scalar reduction can
@@ -4433,7 +4435,9 @@ in `adapter.ts` (JavaScript), `adapter-glsl.ts` and `adapter-interval.ts`, and
 - **Stored code.** The result has the fields of stored code
   (`StoredJavaScript`): `preambleOnce` (and `preamble`, the same text) holds the
   helpers and the user functions, `code` is the body (an expression of the
-  inputs object `_`, or the function of a literal), `runtimeVersion` is
+  inputs object `_`, or the function of a literal). A body consisting of one
+  return uses the returned expression as `code`. Bodies with statements use
+  an immediately invoked function. `runtimeVersion` is
   `RUNTIME_VERSION`, and `entryPlan` holds the inputs that a loader checks
   (`checkEntry()`: the conversion of a number for a complex input, and with
   `entryChecks` the refusals above; `lists` and the scalar `booleans` tell a

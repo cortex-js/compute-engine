@@ -140,11 +140,9 @@ const COS = ['Apply', ['Derivative', 'Sin'], 'x'];
 
 describe('IR profile, batch G22: derivatives (CE-1354)', () => {
   test('the issue: D(Abs(x), x), D(x·Sin(x), x), Apply(Derivative(Sin), x)', () => {
-    expect(check(ABS).code).toMatch(/return Math\.sign\(_\.x\);/);
-    expect(check(XSIN).code).toMatch(
-      /return \(\(_\.x \* Math\.cos\(_\.x\)\) \+ Math\.sin\(_\.x\)\);/
-    );
-    expect(check(COS).code).toMatch(/return Math\.cos\(_\.x\);/);
+    expect(check(ABS).code).toBe('Math.sign(_.x)');
+    expect(check(XSIN).code).toBe('((_.x * Math.cos(_.x)) + Math.sin(_.x))');
+    expect(check(COS).code).toBe('Math.cos(_.x)');
     expect(glsl(ABS).code).toBe('sign(x)');
     expect(glsl(XSIN).code).toBe('((x * cos(x)) + sin(x))');
     expect(glsl(COS).code).toBe('cos(x)');

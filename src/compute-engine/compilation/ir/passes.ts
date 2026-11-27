@@ -61,6 +61,7 @@ import {
   outsOf,
   recursiveFunctions,
   regionsOf,
+  sameShape,
   scalarType,
   typeToString,
   useIndex,
@@ -173,6 +174,7 @@ export function runPasses(
   const short = options.unrollBuilds ?? 0;
   const has = (test: (i: Instr) => boolean) =>
     p.functions.some((f) => f.body.body.some((i) => some(i, test)));
+  const gatherMaps = options.forward && has(isGather);
   if (
     options.staticForward &&
     has(
@@ -227,6 +229,8 @@ export function runPasses(
           invariants(q, r, options.listLoops !== false)
         ) || changed;
     if (options.forward) changed = run('forward', forward) || changed;
+    if (gatherMaps)
+      changed = run('fuse gather maps', fuseGatherMaps) || changed;
     if (options.forward) changed = run('filters', filters) || changed;
     if (options.fuseLoops) changed = run('fuse loops', fuseLoops) || changed;
     if (options.dce) changed = run('dce', dce) || changed;
@@ -1178,6 +1182,60 @@ const forwardable = (
     r.yields.length === 1 &&
     r.body.every((x) => flat(x) && fx.of(x) === 'pure')
   );
+};
+
+const isGather = (i: Instr): i is Instr & { k: 'region' } =>
+  i.k === 'region' &&
+  i.op === 'build' &&
+  i.regions[0].body.some((x) => x.k === 'op' && x.op === 'at');
+
+/** A pure element-wise consumer can use a gather's checked read in the
+ *  same build. Move the length check only across pure instructions. */
+const fuseGatherMaps: Pass = (p, rows) => {
+  const fx = effects(p, rows);
+  const { uses, def } = useIndex(p);
+  const replacements = new Map<Instr, Instr[]>();
+  const walk = (r: Region) => {
+    const position = new Map(r.body.map((i, k) => [i, k]));
+    let barrier = -1;
+    for (const [k, i] of r.body.entries()) {
+      regionsOf(i).forEach(walk);
+      if (i.k === 'op' && threads(rows, i.op) && fx.speculatable(i)) {
+        const t = p.types[i.out];
+        const lists = i.args.filter((v) => p.types[v].shape.length > 0);
+        const [source] = lists;
+        const build = def.get(source);
+        const start = build === undefined ? undefined : position.get(build);
+        if (
+          lists.length === 1 &&
+          t.shape.length === 1 &&
+          uses.get(source) === 1 &&
+          sameShape(t.shape, p.types[source].shape) &&
+          start !== undefined &&
+          start >= barrier &&
+          build !== undefined &&
+          isGather(build) &&
+          forwardable(fx, build)
+        ) {
+          const [body] = build.regions;
+          const cell = fresh(p, elementType(t));
+          body.body.push({
+            k: 'op',
+            out: cell,
+            op: i.op,
+            args: i.args.map((v) => (v === source ? body.yields[0] : v)),
+          });
+          body.yields = [cell];
+          replacements.set(build, []);
+          replacements.set(i, [{ ...build, outs: [i.out] }]);
+        }
+      }
+      if (fx.of(i) !== 'pure') barrier = k;
+    }
+  };
+  p.functions.forEach((f) => walk(f.body));
+  if (replacements.size === 0) return { changed: false, resolve: (v) => v };
+  return rewrite(p, (i) => replacements.get(i));
 };
 
 /** The instructions of the body `r` of a build at the index `k`, each with

@@ -24,6 +24,33 @@ describe('COMPILE the inputs option', () => {
     expect(ce.lookupDefinition('x')).toBeUndefined();
   });
 
+  test.each(['javascript', 'interval-js', 'glsl'] as const)(
+    'inputs declared for names first read through an assigned list on %s',
+    (to) => {
+      const ce = new ComputeEngine();
+      ce.assign('C', ce.parse('[c_1,c_2,c_3]'));
+      const expr = ce.parse(
+        String.raw`\sum_{i=0}^{\operatorname{Length}(C)-1}C[i+1]x^{i}`
+      );
+      const inputs = { x: 'real', c_1: 'real', c_2: 'real', c_3: 'real' };
+      const result = compile(expr, { to, inputs, fallback: false });
+      expect(result.freeSymbols?.slice().sort()).toEqual(Object.keys(inputs).sort());
+      expect(result.freeSymbolTypes?.c_1).toMatchObject({
+        type: 'real',
+        provenance: 'declared',
+      });
+      const vars = { x: 2, c_1: 1, c_2: 1, c_3: 1 };
+      if (to === 'javascript') expect(run(result, vars)).toBe(7);
+      if (to === 'interval-js')
+        expect(run(result, vars)).toEqual({
+          kind: 'interval',
+          value: { lo: 7, hi: 7 },
+        });
+      expect(ce.lookupDefinition('c_1')).toBeUndefined();
+      expect(() => compile(expr, { to, fallback: false })).toThrow(/no type/);
+    }
+  );
+
   test('the given type wins over a stored value of another shape', () => {
     const ce = new ComputeEngine();
     ce.declare('x', 'real');

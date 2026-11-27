@@ -74,7 +74,7 @@ describe('a result comes back as the code built it, with no copy', () => {
   test('a list of inputs holds the input points', () => {
     const json = ['List', 'A', 'B', 'C', 'D'];
     const r = js(json);
-    expect(r.code).toContain('return [_.A, _.B, _.C, _.D];');
+    expect(r.code).toBe('[_.A, _.B, _.C, _.D]');
     const p = point();
     const value = run(r, p);
     ['A', 'B', 'C', 'D'].forEach((k, i) => expect(value[i]).toBe(p[k]));

@@ -90,7 +90,7 @@ describe('the option selects the IR compiler', () => {
     const ir = compile(expr, IR);
     expect(plain.success && ir.success).toBe(true);
     expect(ir.code).toBe(plain.code);
-    expect(ir.code).toMatch(/^\(\(\) => \{/);
+    expect(ir.code).toBe('(_.x + Math.sin(_.x))');
     expect(ir.profile).toBe('ir');
     expect(plain.profile).toBe('ir');
     expect(ir.run!({ x: 1 })).toBe(plain.run!({ x: 1 }));
@@ -597,6 +597,13 @@ describe('stored code', () => {
       })
     );
   const rt = createJavaScriptRuntime();
+  test('a single-return expression is stored without an IIFE', () => {
+    const r = compile(box(['Add', 'x', 1]), { ...IR, inputs: { x: 'real' } });
+    expect(r.code).toBe('(_.x + 1)');
+    expect(r.run!({ x: 2 })).toBe(3);
+    expect(rt.load(stored(r))({ x: 2 })).toBe(3);
+  });
+
   test('a stored result loads and gives the values of run()', () => {
     const cases: [Json, Record<string, unknown>[]][] = [
       [

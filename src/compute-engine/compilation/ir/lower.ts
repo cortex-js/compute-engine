@@ -181,7 +181,7 @@ import {
 } from '../interval-quadrature.js';
 import { derivativeClosedForm } from '../derivative-closed-form.js';
 import { logSpaceProduct } from '../../symbolic/log-space-product.js';
-import { withVarsValuesHidden } from '../vars-inputs.js';
+import { hasTypedCompileInput, withVarsValuesHidden } from '../vars-inputs.js';
 import { prefersJetDerivative } from '../jet-derivative.js';
 import {
   functionLowering,
@@ -4883,6 +4883,18 @@ function lowerOnce(
       return undefined;
     }
     const known = lookup(name);
+    // The occurrence in an assigned expression can predate the temporary
+    // declaration of `inputs`. Rebind free reads only, using that scope.
+    if (
+      expanding.size > 0 &&
+      (known === undefined || known.binding.role === 'input') &&
+      hasTypedCompileInput(name) &&
+      resolvedValueDefinition(e) === undefined &&
+      isUntyped(e.type.type)
+    ) {
+      const bound = ce.symbol(name);
+      if (isSymbol(bound)) e = bound;
+    }
     // A name whose value is an array (`namedArray()`).
     if (arrays.isNamed(known?.binding)) return known!.binding.v;
     // An input has one type: an occurrence of another type (a body boxed

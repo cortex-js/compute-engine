@@ -25,6 +25,11 @@ import { isSubtype } from '../../common/type/subtype.js';
  */
 let typedInputs: ReadonlyMap<string, Type> | undefined;
 
+/** Whether the host supplies a type for the free name in this compilation. */
+export function hasTypedCompileInput(name: string): boolean {
+  return typedInputs?.has(name) === true;
+}
+
 /**
  * Run `fn` (one compilation) with the names of the `inputs` option and their
  * types in force: a definition of such a name that a called body reads, with

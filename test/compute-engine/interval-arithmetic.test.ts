@@ -230,6 +230,20 @@ describe('INTERVAL ARITHMETIC OPERATIONS', () => {
     expectInterval(mul({ lo: -1, hi: 1 }, { lo: -1, hi: 1 }), -1, 1);
   });
 
+  test('scaling an interval preserves endpoint order and outward rounding', () => {
+    const x = { lo: 1, hi: 3 };
+    expect(getValue(mul(point(-2), x))).toEqual({ lo: -6, hi: -2 });
+    expect(getValue(mul(x, point(-2)))).toEqual({ lo: -6, hi: -2 });
+    expect(getValue(mul(point(0), { lo: -Infinity, hi: Infinity }))).toEqual({
+      lo: 0,
+      hi: 0,
+    });
+    expect(getValue(mul(point(0.1), { lo: 3, hi: 7 }))).toEqual({
+      lo: nextDown(0.1 * 3),
+      hi: nextUp(0.1 * 7),
+    });
+  });
+
   test('division - safe', () => {
     expectInterval(div({ lo: 1, hi: 2 }, { lo: 3, hi: 4 }), 0.25, 2 / 3, 1e-6);
     expectInterval(

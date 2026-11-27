@@ -12,6 +12,11 @@
 
 ### Resolved Issues
 
+- **`compile()` applies `inputs` to free names read through an assigned
+  expression.** A polynomial whose coefficients come from a stored list
+  `C = [c_1, c_2, c_3]` can use input types for those coefficients without
+  declaring them on the engine (CE-1905).
+
 - **An operand of `Integrate` or `CircularIntegrate` that is not a limit is
   an error** (CE-1384).
   `integrate(x, (x, 0, 1, 2))`, a limit with a step, and `integrate(x, x in
@@ -268,6 +273,17 @@
   the `bigint` mode compare no length.
 
 ### Performance
+
+- **Compiled JavaScript emits a single-return body as its expression.**
+  For `x: real`, the code for `x + 1` is `(_.x + 1)`.
+
+- **Compiled JavaScript can combine an indexed gather and element-wise
+  arithmetic in one loop.** A pure expression such as `Cos(2π S[J] / L)`
+  can build only the result array.
+
+- **Interval multiplication uses two endpoint products when one operand
+  is a point.** The specialization keeps outward rounding and the convention
+  that zero times infinity is zero.
 
 - **Compiled JavaScript reuses a shared matrix in a later element-wise
   computation.** With `B = Sin(M + A)`, both `(B, B + Q)` and

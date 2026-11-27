@@ -178,7 +178,7 @@ describe('the passes keep a list with its length', () => {
     ];
     matches(json);
     matches(['Sum', json]);
-    expect(js(['Length', json]).code).toMatch(/return 400;/);
+    expect(js(['Length', json]).code).toBe('400');
   });
 
   test('a list of 2^20 elements in one arm does not hang', () => {

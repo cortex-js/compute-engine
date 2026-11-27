@@ -67,6 +67,7 @@ import {
   calls,
   COMPARISONS,
   LOGIC,
+  expressionOf,
   printProgram,
   type Printed,
   type RegionSpelling,
@@ -1252,9 +1253,13 @@ export function printJavaScript(
     ...(syntax.entry?.(printed.body) ?? printed.body),
   ].join('\n');
   const literal = entry.literal === true;
+  const expression =
+    !literal && !counts && syntax.entry === undefined
+      ? expressionOf(printed.body)
+      : undefined;
   const code = literal
     ? `(${params}) => {\n${body}\n}`
-    : `(() => {\n${body}\n})()`;
+    : (expression ?? `(() => {\n${body}\n})()`);
   // The construction of `load()` of `createJavaScriptRuntime()`.
   const make = (): JavaScriptResult['run'] => {
     try {

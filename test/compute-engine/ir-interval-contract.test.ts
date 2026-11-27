@@ -1551,7 +1551,7 @@ describe('the interval mode: batch 7, the order of a sum', () => {
     // loop.
     const js = compile(ce.box(json as never), { profile: 'ir', fallback: false } as never) as unknown as Result;
     expect(js.code).toContain(
-      'return (((0 + (Math.sin((1 * _.x)) / 1)) + (Math.sin((2 * _.x)) / 2)) + (Math.sin((3 * _.x)) / 3));'
+      '(((0 + (Math.sin((1 * _.x)) / 1)) + (Math.sin((2 * _.x)) / 2)) + (Math.sin((3 * _.x)) / 3))'
     );
     const glsl = compile(ce.box(json as never), { to: 'glsl', profile: 'ir', fallback: false } as never) as unknown as Result;
     expect(glsl.code).toContain('v13 = (v13 + (sin((v6 * x)) / v6));');
@@ -1721,19 +1721,19 @@ describe('the interval mode: a subtraction and a power of a rational exponent', 
   // prettier-ignore
   test.each([
     // A negation read once is the subtrahend of `sub`, in either order.
-    [['Subtract', 'x', 'y'], '_IA.sub(_.x, _.y)', '(() => {\n  return (_.x + (-_.y));\n})()', '(x + (-y))'],
-    [['Add', ['Negate', 'x'], 'y'], '_IA.sub(_.y, _.x)', '(() => {\n  return ((-_.x) + _.y);\n})()', '((-x) + y)'],
-    [['Add', ['Negate', 'x'], ['Negate', 'y']], '_IA.sub(_IA.negate(_.x), _.y)', '(() => {\n  return ((-_.x) + (-_.y));\n})()', '((-x) + (-y))'],
-    [['Add', 'x', 'y', ['Negate', 'n']], '_IA.add(_IA.sub(_.x, _.n), _.y)', '(() => {\n  return (((-_.n) + _.x) + _.y);\n})()', '(((-n) + x) + y)'],
+    [['Subtract', 'x', 'y'], '_IA.sub(_.x, _.y)', '(_.x + (-_.y))', '(x + (-y))'],
+    [['Add', ['Negate', 'x'], 'y'], '_IA.sub(_.y, _.x)', '((-_.x) + _.y)', '((-x) + y)'],
+    [['Add', ['Negate', 'x'], ['Negate', 'y']], '_IA.sub(_IA.negate(_.x), _.y)', '((-_.x) + (-_.y))', '((-x) + (-y))'],
+    [['Add', 'x', 'y', ['Negate', 'n']], '_IA.add(_IA.sub(_.x, _.n), _.y)', '(((-_.n) + _.x) + _.y)', '(((-n) + x) + y)'],
     // A negation read twice stays.
     [['Add', ['Exp', ['Negate', 'x']], ['Negate', 'x']], '(() => {\n  const v1 = _IA.negate(_.x);\n  return _IA.add(v1, _IA.exp(v1));\n})()', '(() => {\n  const v1 = (-_.x);\n  return (v1 + Math.exp(v1));\n})()', 'float v1 = (-x);\nreturn (v1 + exp(v1));'],
     // A denominator that is a power of 2: the principal power of the double.
-    [['Power', ['Power', 'x', 2], ['Rational', 3, 2]], '_IA.pow(_IA.square(_.x), { lo: 1.5, hi: 1.5 }.lo)', '(() => {\n  return _SYS.ir.pow((_.x * _.x), 1.5);\n})()', '_gpu_ir_pow_nonnegative((x * x), 1.5)'],
-    [['Power', 'x', ['Rational', -3, 2]], '_IA.pow(_.x, { lo: -1.5, hi: -1.5 }.lo)', '(() => {\n  return _SYS.ir.pow(_.x, (-1.5));\n})()', '_gpu_ir_pow(x, (-1.5))'],
-    [['Power', 'x', ['Rational', 3, 4]], '_IA.pow(_.x, { lo: 0.75, hi: 0.75 }.lo)', '(() => {\n  return _SYS.ir.pow(_.x, 0.75);\n})()', '_gpu_ir_pow(x, 0.75)'],
+    [['Power', ['Power', 'x', 2], ['Rational', 3, 2]], '_IA.pow(_IA.square(_.x), { lo: 1.5, hi: 1.5 }.lo)', '_SYS.ir.pow((_.x * _.x), 1.5)', '_gpu_ir_pow_nonnegative((x * x), 1.5)'],
+    [['Power', 'x', ['Rational', -3, 2]], '_IA.pow(_.x, { lo: -1.5, hi: -1.5 }.lo)', '_SYS.ir.pow(_.x, (-1.5))', '_gpu_ir_pow(x, (-1.5))'],
+    [['Power', 'x', ['Rational', 3, 4]], '_IA.pow(_.x, { lo: 0.75, hi: 0.75 }.lo)', '_SYS.ir.pow(_.x, 0.75)', '_gpu_ir_pow(x, 0.75)'],
     // Another denominator: the root, then the integer power.
-    [['Power', 'x', ['Rational', 2, 3]], '_IA.pow(_IA.nthRootInterval(_.x, { lo: 3, hi: 3 }), 2)', '(() => {\n  return _SYS.ir.pow(_.x, 0.6666666666666666);\n})()', '_gpu_ir_pow(x, 0.6666667)'],
-    [['Power', 'x', ['Rational', 5, 6]], '_IA.pow(_IA.nthRootInterval(_.x, { lo: 6, hi: 6 }), 5)', '(() => {\n  return _SYS.ir.pow(_.x, 0.8333333333333334);\n})()', '_gpu_ir_pow(x, 0.8333333)'],
+    [['Power', 'x', ['Rational', 2, 3]], '_IA.pow(_IA.nthRootInterval(_.x, { lo: 3, hi: 3 }), 2)', '_SYS.ir.pow(_.x, 0.6666666666666666)', '_gpu_ir_pow(x, 0.6666667)'],
+    [['Power', 'x', ['Rational', 5, 6]], '_IA.pow(_IA.nthRootInterval(_.x, { lo: 6, hi: 6 }), 5)', '_SYS.ir.pow(_.x, 0.8333333333333334)', '_gpu_ir_pow(x, 0.8333333)'],
   ])('%j', (json, interval, js, glsl) => {
     expect(inlined(mode(json))).toBe(interval);
     expect(text(json, 'javascript')).toBe(js);
@@ -1768,7 +1768,7 @@ describe('the interval mode: a subtraction and a power of a rational exponent', 
     );
     expect(ops).toEqual(['neg', 'add']);
     expect(text(['Subtract', 'x', 'y'], 'javascript')).toBe(
-      '(() => {\n  return (_.x + (-_.y));\n})()'
+      '(_.x + (-_.y))'
     );
   });
 

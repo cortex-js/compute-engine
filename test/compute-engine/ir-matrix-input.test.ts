@@ -264,7 +264,7 @@ describe('a matrix input: its two lengths', () => {
 
   test('code that reads no row length has no such statement', () => {
     expect(code(['Length', 'M'])).toBe(
-      ['(() => {', '  return _.M.length;', '})()'].join('\n')
+      '_.M.length'
     );
     expect(code(['At', ['At', 'M', 1], 2])).not.toMatch(/M\[0\]\.length/);
   });
@@ -997,10 +997,10 @@ describe('the kernels of a matrix of run-time size', () => {
     ce.declare('S', 'matrix<real^1x1>');
     const code = (json: Json) => compile(box(json), { fallback: false }).code;
     expect(code(['Determinant', 'S'])).toBe(
-      ['(() => {', '  return _.S[0][0];', '})()'].join('\n')
+      '_.S[0][0]'
     );
     expect(code(['Inverse', 'P'])).toBe(
-      ['(() => {', '  return _SYS.matrixInverse(_.P);', '})()'].join('\n')
+      '_SYS.matrixInverse(_.P)'
     );
   });
 });

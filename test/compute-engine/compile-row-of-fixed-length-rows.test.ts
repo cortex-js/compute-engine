@@ -64,7 +64,7 @@ describe('CE-1540: a row of a list of lists of stated lengths', () => {
       to: 'javascript',
       fallback: false,
     });
-    expect(result.code).toContain('return _atu(_.P, 1);');
+    expect(result.code).toBe('_atu(_.P, 1)');
     expect(result.run!({ P })).toEqual([1, 2]);
     expect(result.run!({ P: [] })).toBeUndefined();
   });

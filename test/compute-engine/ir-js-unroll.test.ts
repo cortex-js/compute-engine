@@ -106,7 +106,7 @@ describe('IR profile, batch G27: sums written out on JavaScript', () => {
     ];
     const r = check(json);
     expect(r.code).toContain(
-      'return (((0 + (Math.sin((1 * _.x)) / 1)) + (Math.sin((2 * _.x)) / 2)) + (Math.sin((3 * _.x)) / 3));'
+      '(((0 + (Math.sin((1 * _.x)) / 1)) + (Math.sin((2 * _.x)) / 2)) + (Math.sin((3 * _.x)) / 3))'
     );
     const [on, off] = [slice(json, true), slice(json, false)];
     expect(on.code).not.toMatch(/for \(/);
@@ -202,10 +202,10 @@ describe('IR profile, batch G27: short lists written out on JavaScript', () => {
 
   test('a Sum of a short list starts from 0, as its loop; Product, Max and Min from the first element', () => {
     expect(check(['Sum', 'L']).code).toContain(
-      'return (((0 + _.L[0]) + _.L[1]) + _.L[2]);'
+      '(((0 + _.L[0]) + _.L[1]) + _.L[2])'
     );
     expect(check(['Max', 'L']).code).toContain(
-      'return Math.max(Math.max(_.L[0], _.L[1]), _.L[2]);'
+      'Math.max(Math.max(_.L[0], _.L[1]), _.L[2])'
     );
     check(['Min', 'L']);
     // `0 + -0` is 0: a Sum of -0 is 0, as the loop and the interpreter.

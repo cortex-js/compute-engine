@@ -69,6 +69,8 @@ function negateRaw(x: Interval | IntervalResult): IntervalResult {
  * Used by div() and other operations that need plain interval results.
  */
 export function _mul(a: Interval, b: Interval): Interval {
+  if (a.lo === a.hi) return scaleEndpoints(a.lo, b);
+  if (b.lo === b.hi) return scaleEndpoints(b.lo, a);
   const products = [
     _prod(a.lo, b.lo),
     _prod(a.lo, b.hi),
@@ -76,6 +78,13 @@ export function _mul(a: Interval, b: Interval): Interval {
     _prod(a.hi, b.hi),
   ];
   return { lo: Math.min(...products), hi: Math.max(...products) };
+}
+
+/** Two corner products suffice when one interval is a point. */
+function scaleEndpoints(k: number, x: Interval): Interval {
+  const lo = _prod(k, x.lo);
+  const hi = _prod(k, x.hi);
+  return { lo: Math.min(lo, hi), hi: Math.max(lo, hi) };
 }
 
 /**
