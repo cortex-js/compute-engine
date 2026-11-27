@@ -93,6 +93,9 @@ export type IRType = {
   readonly marks?: readonly (number | undefined)[];
   readonly nominal?: string;
   readonly names?: readonly string[];
+  /** A JavaScript result object (record) or a collection of those objects
+   *  (rows). These values are produced only on the entry's return path. */
+  readonly resultRecord?: true;
   /** A field of the lane `string` whose value is known when the code is
    *  emitted (CE-1652, step 4c; `README.md`, "Records"): two records whose
    *  constant fields differ are two record types. Only in `fields`: the
@@ -237,9 +240,6 @@ export type Program = {
   types: IRType[];
   readonly functions: IRFunction[];
   readonly entry: string;
-  /** The JavaScript entry returns a flat polygon row or a list of rows.
-   *  The printer attaches the operator tag to each row at return. */
-  readonly polygonResult?: 'single' | 'list';
   /** The names whose engine value the program holds as a literal. */
   readonly captures?: readonly string[];
   /** The names read as inputs (of the entry, lifted into a function,
@@ -502,6 +502,7 @@ export function sameFields(
   b: IRType,
   constants: 'same' | 'sub' | 'loose' = 'same'
 ): boolean {
+  if (a.resultRecord !== b.resultRecord) return false;
   // Two arrays are one type when their cell types are (an array type is
   // invariant in its cell type).
   if (a.lane === 'array' || b.lane === 'array')
@@ -613,7 +614,7 @@ export function typeToString(
   if (t.array !== undefined) return `array<${t.array.cell}>`;
   // A record: its fields, named or not.
   if (t.lane === 'record')
-    return `${t.nominal ?? t.head ?? 'record'}(${(t.fields ?? [])
+    return `${t.resultRecord ? 'result ' : ''}${t.nominal ?? t.head ?? 'record'}(${(t.fields ?? [])
       .map(
         (f, j) =>
           `${t.names === undefined ? '' : `${t.names[j]}: `}${typeToString(f, t.marks?.[j] ?? (axis === false ? false : -1))}`

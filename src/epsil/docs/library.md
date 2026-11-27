@@ -11,7 +11,7 @@ date: Last Modified
 ---
 # Epsil Standard Library
 
-The 750 functions and constants of the standard library, by category.
+The 749 functions and constants of the standard library, by category.
 Each row gives a name, its signature (for a function) or its kind and type
 (for a constant or variable), and the first sentence of its description —
 the same description `epsil doc <name>` prints in full and the editor
@@ -22,7 +22,7 @@ To search the library by concept rather than by name, use
 `epsil doc <keywords>` (see the [CLI](/epsil/cli/)); the
 [guide for agents](/epsil/for-agents/) lists the names most often needed.
 
-- [Core](#core) — 122 definitions · [full reference](/epsil/reference/core/)
+- [Core](#core) — 121 definitions · [full reference](/epsil/reference/core/)
 - [Control structures](#control-structures) — 16 definitions · [full reference](/epsil/reference/control-structures/)
 - [Logic](#logic) — 27 definitions · [full reference](/epsil/reference/logic/)
 - [Collections](#collections) — 127 definitions · [full reference](/epsil/reference/collections/)
@@ -117,7 +117,6 @@ The [Core reference](/epsil/reference/core/) has the full description and the ex
 | `parse` | `Parse` | `(string) any -> any` | Parse a LaTeX string and evaluate to a corresponding expression |
 | `perpendicular` | `Perpendicular` | `(any, any) -> expression` | Perpendicularity relation (`AB \perp CD`) — opaque typed head; not evaluated. |
 | — | `Pipe` | `(value, function) -> unknown` | Apply a function to a value: `Pipe(x, f)` evaluates to `f(x)`. |
-| `polygon` | `Polygon` | `(any+) -> expression` | Polygon primitive — opaque typed head. |
 | `prime` | `Prime` | `(T, integer?) -> T where T` | Derivative or prime notation (`f'`, `f^{(n)}`) — opaque typed head until a derivative library handler runs. |
 | `print` | `Print` | `(any*) console -> nothing` | Print the operands to the host console, separated by spaces and followed by a newline. |
 | `program` | `Program` | `(unknown*) -> unknown` | Evaluate a program in the caller scope, continuing after statement errors, and return the value of its last statement. |

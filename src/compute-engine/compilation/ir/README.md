@@ -3875,12 +3875,13 @@ program whose last statement is a definition is `Nothing` and declines.
 
 ## Records
 
-A built-in `Polygon` at the JavaScript entry result is lowered as a flat numeric
-row of interleaved coordinates (CE-1894). A literal list of polygons or a
-comprehension with a polygon body lowers to numeric rows, one per member, so
-each member can have a different length. The entry printer turns each row into
-`{ __tag: "Polygon", geom }`. The tag is fixed at compile time, including when a
-member has no vertices.
+A tagged dictionary at the JavaScript entry result is printed directly as
+an object (CE-1904). The dictionary can come from an operator's `compile`
+handler. Its `__tag` is a literal string, and each field carries its rank
+without exporting its length values from the region that builds it.
+A literal list of these records and a comprehension with a tagged body
+return a list of objects. The comprehension uses `records.build` so
+varying field lengths stay local to the member.
 
 `lower-records.ts` (CE-1652, step 2; JavaScript only). A record is a value of
 the lane `record` and the shape `[]` whose fields each have a settled shape

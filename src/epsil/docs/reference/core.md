@@ -1269,19 +1269,6 @@ Pipe([3, 1, 2], sort)
 // ➔ 4
 ```
 
-### polygon
-
-MathJSON `Polygon` · `(any+) -> expression`
-
-- arguments 1, … — A vertex of the polygon. Sample: `A`.
-
-Polygon primitive — opaque typed head.
-
-```epsil
-polygon(A, B, C, D)
-// ➔ Polygon(A, B, C, D)
-```
-
 ### prime
 
 MathJSON `Prime` · `(T, integer?) -> T where T`

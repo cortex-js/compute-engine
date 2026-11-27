@@ -1,5 +1,18 @@
 ## [Unreleased]
 
+### Breaking Changes
+
+- **Hosts now declare the `Polygon` drawing operator.** The standard
+  library and LaTeX dictionary no longer register it. A host can use an
+  operator's `compile` handler to specify its JavaScript result and register
+  its LaTeX syntax where needed.
+
+### New Features
+
+- **JavaScript compiles host-declared tagged results.** A `compile` handler
+  can return a dictionary with a literal `__tag` and fields of runtime
+  length. Lists and comprehensions return one object per member, in order.
+
 ### Improvements
 
 - **In Epsil, a library spelling at the head of a call pattern names the

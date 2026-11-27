@@ -52,22 +52,6 @@ describe('Desmos gap fixes', () => {
     });
   });
 
-  describe('Fix 2: inert Polygon head', () => {
-    test('parses to Polygon with tuple args and round-trips', () => {
-      const e = ce.parse(
-        '\\operatorname{polygon}\\left(\\left(0,0\\right),\\left(1,0\\right),\\left(0,1\\right)\\right)'
-      );
-      expect(e.isValid).toBe(true);
-      expect(e.json).toEqual([
-        'Polygon',
-        ['Tuple', 0, 0],
-        ['Tuple', 1, 0],
-        ['Tuple', 0, 1],
-      ]);
-      expect(ce.parse(e.latex).json).toEqual(e.json);
-    });
-  });
-
   describe('Fix 3: lowercase stats parse aliases', () => {
     test('histogram → Histogram, valid', () => {
       const e = ce.parse(

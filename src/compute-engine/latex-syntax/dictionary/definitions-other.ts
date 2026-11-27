@@ -1049,13 +1049,6 @@ export const DEFINITIONS_OTHERS: LatexDictionary = [
     serialize: (serializer, expr) =>
       '\\operatorname{segment}' + serializer.wrapArguments(expr),
   },
-  {
-    name: 'Polygon',
-    latexTrigger: ['\\operatorname{polygon}'],
-    kind: 'function',
-    serialize: (serializer, expr) =>
-      '\\operatorname{polygon}' + serializer.wrapArguments(expr),
-  },
   // Desmos point-list surface form: `PointList(...)` zips collection components
   // into a list of point-tuples. Importers emit `\operatorname{PointList}(...)`;
   // this entry round-trips it (parse at the non-canonical stage too).

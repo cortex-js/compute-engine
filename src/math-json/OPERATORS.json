@@ -6833,21 +6833,6 @@
       ]
     },
     {
-      "name": "Polygon",
-      "category": "Core",
-      "arity": "variadic",
-      "signature": "(any+) -> expression",
-      "associative": false,
-      "commutative": false,
-      "idempotent": false,
-      "lazy": false,
-      "broadcastable": false,
-      "description": "Polygon primitive — opaque typed head.",
-      "examples": [
-        "Polygon(A, B, C, D)"
-      ]
-    },
-    {
       "name": "PolygonContour",
       "category": "Calculus",
       "arity": "optional",

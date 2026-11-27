@@ -163,7 +163,7 @@ const number = (x: number) =>
   Object.is(x, -0) ? '(-0)' : x < 0 ? `(${x})` : String(x);
 
 /** The regions `build` and `filter` of the integers `z`, whose count of
- *  the list `out` is `count(out)`, and `rows.build` and `rows.filter`. A
+ *  the list `out` is `count(out)`, and the row and record builds. A
  *  build fills an array of its length; a filter pushes. */
 const builds = (z: Ints, count: Wrap): Syntax['regions'] => {
   const toNumber = z.toNumber;
@@ -195,6 +195,10 @@ const builds = (z: Ints, count: Wrap): Syntax['regions'] => {
     // A list of lists of run-time length (the lane `rows`): an array whose
     // element `k` is the array of the row `k`.
     'rows.build': ({ outs: [out], args: [n], params: [k] }) => ({
+      open: open(out, n, k, false),
+      close: ([y]) => [`  ${out}[${toNumber(k)}] = ${y};`, '}'],
+    }),
+    'records.build': ({ outs: [out], args: [n], params: [k] }) => ({
       open: open(out, n, k, false),
       close: ([y]) => [`  ${out}[${toNumber(k)}] = ${y};`, '}'],
     }),
@@ -246,7 +250,7 @@ const matrixOfRows: RegionSpelling = ({ outs: [out], args: [g] }) => ({
  *  boundary does not apply inside an object. `undefined` when no record in
  *  `t` has names: the array is the result. */
 function recordResult(value: string, t: IRType): string | undefined {
-  if (t.lane !== 'record') return undefined;
+  if (t.lane !== 'record' || t.resultRecord) return undefined;
   const nested = (t.fields ?? []).map((f, k) =>
     recordResult(`${value}[${k}]`, f)
   );
@@ -619,7 +623,13 @@ export const JS: Syntax = deepFreeze({
   length: (list) => `${list}.length`,
   width: (list) => `(${list}.length === 0 ? 0 : ${list}[0].length)`,
   part: (tuple, index) => `${tuple}[${index}]`,
-  list: (elements) => `[${elements.join(', ')}]`,
+  list: (elements, t) =>
+    t.lane === 'record' && t.resultRecord
+      ? `{ ${t.names!.map((name, k) => {
+          const value = elements[k];
+          return `${JSON.stringify(name)}: ${holdsComplex(t.fields![k]) ? `_SYS.ir.normalize(${value})` : value}`;
+        }).join(', ')} }`
+      : `[${elements.join(', ')}]`,
   // An array of the length, filled in index order by a `for` loop: an
   // expression, so a function called at once.
   map: (lengths, body) => {
@@ -647,10 +657,6 @@ export const JS: Syntax = deepFreeze({
   loopOpen: loopOpen(NUMBERS),
   retTuple: (values) => `return [${values.join(', ')}];`,
   record: recordResult,
-  polygon: (value, kind) =>
-    kind === 'single'
-      ? `{ __tag: "Polygon", geom: ${value} }`
-      : `(${value}).map((geom) => ({ __tag: "Polygon", geom }))`,
   call: (fn, args) => `${fn}(${args.join(', ')})`,
   fn: (name, params, _result, body) =>
     [

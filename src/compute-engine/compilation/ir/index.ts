@@ -412,12 +412,17 @@ function stringListRefusal(p: Program): Refusal | undefined {
         const head = i.op.startsWith('text.joinl') ? 'StringJoin' : 'At';
         return { head, cause: `${head} of a list that is not of strings` };
       }
-      if (argsOf(i).some((v, k) => listOf(v) && !(read && k === 0)))
+      const resultField = i.k === 'list' && p.types[i.out].resultRecord;
+      if (
+        !resultField &&
+        argsOf(i).some((v, k) => listOf(v) && !(read && k === 0))
+      )
         return refusal;
       if (
         argsOf(i).some(
           (v, k) =>
             reads.has(v) &&
+            !resultField &&
             !(i.k === 'op' && i.op === 'text.isundef') &&
             !(i.k === 'op' && i.op === 'text.present' && k === 1)
         )

@@ -2121,7 +2121,7 @@ function lowerOnce(
   };
 
   /** Lower `e`. With `want` false its value is not used (a statement).
-   *  `entryResult` admits the geometry representation at the return site. */
+   *  `entryResult` admits tagged dictionaries at the return site. */
   const value = (
     e: Expression,
     want = true,
@@ -2364,75 +2364,22 @@ function lowerOnce(
     return out;
   };
 
-  let polygonResult: Program['polygonResult'];
-  const isPolygon = (
-    e: Expression | undefined
-  ): e is Fn & { operator: 'Polygon' } =>
-    isFunction(e, 'Polygon') &&
-    options.vars?.includes('Polygon') !== true &&
-    isLibrary(e) &&
-    isLibraryOperator(e as never, 'Polygon', { customLibrary: false });
-
-  /** One flat row of coordinates. The tuple mark establishes that the
-   *  input contains 2-D points. A missing vertex keeps two slots. */
-  const polygonVertices = (e: Fn): V => {
-    if (!e.isValid || e.nops === 0) decline(e, 'Polygon with invalid operands');
-    const missing = (x: Expression) =>
-      isSymbol(x, 'Missing') &&
-      !isShadowedSymbol(x as never) &&
-      held('Missing')?.library === true;
-    const gap = () => b.constant(NaN, 'real');
-    const coordinates = (x: Expression, v: V): V[] => {
-      const t = type(v);
-      if (
-        tuples.get(v) !== 0 ||
-        t.shape.length !== 1 ||
-        t.shape[0] !== 2 ||
-        !isSubLane(t.lane, 'real')
-      )
-        decline(
-          x,
-          'a Polygon vertex that is not a real point of two coordinates'
-        );
-      const point = lists.listSource(v);
-      return [
-        point.at(b.constant(0, 'integer')),
-        point.at(b.constant(1, 'integer')),
-      ];
-    };
-    const point = (x: Expression): V[] => {
-      if (missing(x)) return [gap(), gap()];
-      // Outside geometry, a tuple with a Missing coordinate declines.
-      if (
-        isFunction(x, 'Tuple') &&
-        isLibrary(x) &&
-        x.nops === 2 &&
-        x.ops.some(missing)
-      )
-        return x.ops.map((op) => {
-          const v = scalar(op);
-          if (!isSubLane(type(v).lane, 'real'))
-            decline(op, 'a Polygon coordinate that is not a real number');
-          return v;
-        });
-      return coordinates(x, value(x)!);
-    };
-    const first = e.ops[0];
-    if (e.nops === 1 && isFunction(first, 'List') && isLibrary(first)) {
-      if (first.nops === 0) return emptyList(e, 'real');
-      return list(e, first.ops.flatMap(point));
-    }
-    if (e.nops !== 1 || missing(first)) return list(e, e.ops.flatMap(point));
-    const v = value(first)!;
-    const t = type(v);
+  // A host handler returns an expression. Recognize a tagged dictionary
+  // there just as at a literal return site, without interpreting its tag.
+  const taggedRecord = (e: Expression | undefined): boolean => {
+    if (isDictionary(e)) return isString(e.get('__tag'));
     if (
-      tuples.get(v) === 1 &&
-      t.shape.length === 2 &&
-      t.shape[1] === 2 &&
-      isSubLane(t.lane, 'real')
+      !isFunction(e) ||
+      options.vars?.includes(e.operator) ||
+      userBinding(e) !== undefined
     )
-      return matrices.flatten(e, v);
-    return list(e, coordinates(first, v));
+      return false;
+    const answer = handled(e);
+    return (
+      typeof answer === 'object' &&
+      isDictionary(answer) &&
+      isString(answer.get('__tag'))
+    );
   };
 
   let lowered = 0;
@@ -2453,7 +2400,11 @@ function lowerOnce(
       );
     if (isSymbol(e)) return symbol(e, want);
     if (isString(e)) return b.constant(e.string, 'string');
-    if (isDictionary(e)) return records.dictionary(e);
+    if (isDictionary(e))
+      return records.dictionary(
+        e,
+        entryResult && javascript && taggedRecord(e)
+      );
     // An array that a value of a name holds: a reference of the program.
     if (isMutableArray(e)) return arrays.ref(e);
     if (!isFunction(e))
@@ -2536,7 +2487,8 @@ function lowerOnce(
     // expression is lowered in place of `e`.
     const answer = handled(e);
     if (typeof answer === 'string') decline(e, answer);
-    if (answer !== undefined) return value(answer, want);
+    if (answer !== undefined)
+      return entryResult ? wholeRows(answer, true) : value(answer, want);
     // A closed form is computed with the library's operators.
     if ((e.operator === 'D' || e.operator === 'Integrate') && facts(e).answered)
       decline(e, `${e.operator} of an operator that a compile handler lowers`);
@@ -2557,22 +2509,16 @@ function lowerOnce(
     if (interval && isEnclosureCollection(e.type.type)) decline(e, COLLECTION);
     if (interval && isEnclosureNode(e)) return enclosures(e);
     checkTextDomains(e);
-    // Geometry is opaque to constant folding. Lower the vertex expressions
-    // through their normal numeric paths and tag only the entry result.
     if (entryResult && javascript) {
-      if (isPolygon(e)) {
-        polygonResult = 'single';
-        return polygonVertices(e);
-      }
-      if (e.operator === 'List' && e.nops > 0 && e.ops.every(isPolygon)) {
-        polygonResult = 'list';
-        return lists.rowsList(e, e.ops.map(polygonVertices));
-      }
+      if (e.operator === 'List' && e.nops > 0 && e.ops.every(taggedRecord))
+        return b.list(e.ops.map((op) => value(op, true, true)!), {
+          lane: 'rows',
+          shape: [],
+          resultRecord: true,
+        });
       const member = e.ops[0];
-      if (e.operator === 'Comprehension' && isPolygon(member)) {
-        polygonResult = 'list';
-        return lists.comprehension(e, () => polygonVertices(member));
-      }
+      if (e.operator === 'Comprehension' && taggedRecord(member))
+        return lists.comprehension(e, () => value(member, true, true)!);
     }
     const closed = closedValue(e);
     if (closed !== undefined) return closed;
@@ -5620,7 +5566,10 @@ function lowerOnce(
     const op = typeof which === 'string' ? which : which();
     const r = regionRow(op)!;
     // A list of records, or a record from a region, has no type here.
-    if (body.yields.some((y) => ['record', 'nothing'].includes(type(y).lane)))
+    if (
+      op !== 'records.build' &&
+      body.yields.some((y) => ['record', 'nothing'].includes(type(y).lane))
+    )
       decline(site, 'a record made in a build, a filter or a random frame');
     // The element of a build whose length is a constant value (made in
     // the region, which the result cannot name) has that length.
@@ -8473,7 +8422,6 @@ function lowerOnce(
     return {
       ...p,
       inputs,
-      ...(polygonResult === undefined ? {} : { polygonResult }),
       ...(inputBounds.size > 0 ? { inputBounds } : {}),
       ...(enclosure ? { valueKinds: ['enclosure'] } : {}),
       ...(assigns.length > 0 ? { assigns } : {}),

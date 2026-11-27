@@ -834,6 +834,16 @@ export const REGION_ROWS: readonly RegionRow[] = deepFreeze([
         ? [{ lane: 'rows', shape: [] }]
         : undefined,
   },
+  {
+    op: 'records.build',
+    effect: 'may-fail',
+    args: [I],
+    params: [I],
+    results: (_, ys) =>
+      ys.length === 1 && ys[0].lane === 'record' && ys[0].resultRecord
+        ? [{ lane: 'rows', shape: [], resultRecord: true }]
+        : undefined,
+  },
   // `Flatten(g)` of a value `g` of the lane `rows`, of
   // reals (`rows.flat`) or of integers (`rows.flat.int`): the elements of
   // its rows, in order (its body is empty); the results are the count and

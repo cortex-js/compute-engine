@@ -12993,17 +12993,6 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       ],
       examples: ['Segment(A, B)'],
     },
-    Polygon: {
-      description: 'Polygon primitive — opaque typed head.',
-      signature: '(any+) -> expression',
-      parameters: [
-        {
-          description: 'A vertex of the polygon.',
-          sample: 'A',
-        },
-      ],
-      examples: ['Polygon(A, B, C, D)'],
-    },
 
     // Euclidean-geometry notation, transcribed as inert heads (no evaluator);
     // consumers use the structural parse to render figures. See

@@ -248,6 +248,18 @@ export function verify(p: Program, rows: readonly OperatorRow[]): void {
         if (t.lane === 'record') {
           if (t.fields?.length !== i.args.length)
             fail(`record v${i.out}: ${i.args.length} fields`);
+          if (t.resultRecord)
+            return i.args.forEach((a, k) => {
+              const f = t.fields![k];
+              const v = type(a);
+              if (
+                v.lane !== f.lane ||
+                v.shape.length !== f.shape.length
+              )
+                fail(
+                  `result record v${i.out}: field ${k} of type ${typeToString(v)}`
+                );
+            });
           return i.args.forEach((a, k) =>
             sub(a, t.fields![k], `record v${i.out}`)
           );
@@ -257,6 +269,11 @@ export function verify(p: Program, rows: readonly OperatorRow[]): void {
         if (t.lane === 'rows' && t.shape.length === 0)
           return i.args.forEach((a) => {
             const r = type(a);
+            if (t.resultRecord) {
+              if (r.lane !== 'record' || !r.resultRecord)
+                fail(`result records v${i.out}: an element of type ${typeToString(r)}`);
+              return;
+            }
             if (
               r.shape.length !== 1 ||
               !(r.lane === 'integer' || r.lane === 'real')

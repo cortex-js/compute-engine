@@ -12,7 +12,7 @@ import { sumVariantInfo } from '../../sum-representation.js';
 import { isSubtype } from '../../../common/type/subtype.js';
 import { typeToString as engineTypeToString } from '../../../common/type/serialize.js';
 import { unfoldAliasOnDescent } from '../../../common/type/utils.js';
-import { isSymbol } from '../../boxed-expression/type-guards.js';
+import { isFunction, isSymbol } from '../../boxed-expression/type-guards.js';
 import type { DictionaryInterface, Expression } from '../../global-types.js';
 import {
   decline,
@@ -150,17 +150,22 @@ export function recordLowering(
     values: V[],
     nominal?: { nominal?: string; names?: readonly string[] },
     fields: (IRType | undefined)[] = [],
-    head?: IRType['head']
+    head?: IRType['head'],
+    resultRecord = false
   ): V => {
     const types = values.map((v, k): IRType => {
       const place = `${nominal?.nominal ?? 'record'}.${k}`;
       const t = fields[k] ?? type(v);
       if (t.lane === 'rows')
         decline(e, 'a record with a field of lists of rows of two lengths');
-      const shape = t.shape.map((n) =>
-        typeof n === 'number' ? n : (cx.constant(n.v) ?? n)
-      );
-      if (shape.some((n) => typeof n !== 'number'))
+      // An output object keeps the rank of each field. Its source value
+      // holds the lengths, which can be local to a comprehension.
+      const shape = resultRecord
+        ? t.shape.map(() => 0)
+        : t.shape.map((n) =>
+            typeof n === 'number' ? n : (cx.constant(n.v) ?? n)
+          );
+      if (!resultRecord && shape.some((n) => typeof n !== 'number'))
         decline(e, 'a record with a field of a run-time length');
       // A string of a known value: the field's type holds it (CE-1652,
       // step 4c).
@@ -182,6 +187,7 @@ export function recordLowering(
       ...(nominal?.nominal === undefined ? {} : { nominal: nominal.nominal }),
       ...(nominal?.names === undefined ? {} : { names: nominal.names }),
       ...(head === undefined ? {} : { head }),
+      ...(resultRecord ? { resultRecord: true } : {}),
     });
     parts.set(v, values);
     cx.listed.set(
@@ -324,15 +330,30 @@ export function recordLowering(
    *  dictionary are strings, so each one is known when the code is emitted.
    *  A read of a key (`d.k`, `d["k"]`) is the field of that name; a key
    *  that the literal does not have declines. */
-  const dictionary = (e: Expression & DictionaryInterface): V => {
+  const dictionary = (
+    e: Expression & DictionaryInterface,
+    resultRecord = false
+  ): V => {
     if (!javascript)
       decline(e, 'a dictionary, a record: records compile on javascript only');
     // The result of the code is an object literal of the keys, where
     // `"__proto__"` sets the prototype instead of a key.
     if (e.keys.includes('__proto__'))
       decline(e, 'a dictionary with the key __proto__');
-    const values = e.values.map((x) => cx.value(x)!);
-    return make(e, values, { names: e.keys }, [], 'Dictionary');
+    if (resultRecord && e.hasKey('re') && e.hasKey('im'))
+      decline(
+        e,
+        'a tagged result with fields re and im, reserved for complex results'
+      );
+    const values = e.values.map((x) => {
+      if (resultRecord && isFunction(x, 'List') && x.nops === 0 && cx.isLibrary(x))
+        return cx.emptyList(x, 'real');
+      const v = cx.value(x)!;
+      if (resultRecord && (type(v).lane === 'record' || type(v).lane === 'array'))
+        decline(x, 'a record or engine array in a tagged result field');
+      return v;
+    });
+    return make(e, values, { names: e.keys }, [], 'Dictionary', resultRecord);
   };
 
   /** The field `k` (from 0) of the record `r`: the value it was made of,
