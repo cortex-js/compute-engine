@@ -188,7 +188,7 @@ for setting in ignore-scripts dry-run; do
 done
 REGISTRY=$(npm config get registry)
 NPM_USER=$(npm whoami --registry "$REGISTRY" 2>/dev/null) ||
-  fail "Not authenticated with $REGISTRY. Run 'npm login', then run the release again."
+  fail "Not authenticated with $REGISTRY.\n  Run 'npm login', then run the release again."
 # echo "✓ Authenticated with $REGISTRY as $NPM_USER"
 # The checks of `npm run ci` that the full suite does not run, after a
 # Prettier step that formats the source and commits the files that changed
