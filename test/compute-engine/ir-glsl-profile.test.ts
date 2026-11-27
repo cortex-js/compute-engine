@@ -579,6 +579,31 @@ function interpretG3(json: Json, options: object, point: PointValue): unknown {
 }
 
 describe('IR profile on GLSL: arrays, At, the cap, point parameters', () => {
+  test('sibling scalar sums share an iteration and their phase', () => {
+    const phase = ['Sin', ['Multiply', 'k', 'x']];
+    const limits = ['Limits', 'k', 1, 100];
+    const r = glsl([
+      'PointList',
+      ['Sum', ['Cos', phase], limits],
+      ['Sum', ['Sin', phase], limits],
+    ]);
+    expect(r.code?.match(/for \(int /g)).toHaveLength(1);
+    expect(r.code?.match(/sin\(/g)).toHaveLength(2);
+  });
+
+  test('a scalar sum does not materialize a filter or element-wise addition', () => {
+    ce.declare('A24', 'list<real^24>');
+    ce.declare('B24', 'list<real^24>');
+    const filter = ['Filter', 'A24', ['Function', ['Greater', 'a', 'x'], 'a']];
+    for (const term of [filter, ['Add', 'A24', 'B24']]) {
+      const r = glsl(['Sum', term]);
+      expect(r.code?.match(/for \(int /g)).toHaveLength(1);
+      expect(r.code).not.toContain('float[24](');
+      expect(r.code).toContain('A24[int(');
+    }
+    expect(() => glsl(filter)).toThrow();
+  });
+
   test('an array input is a float[6]; At with a run-time index reads the array in range only', () => {
     const r = glsl(['At', 'L6', 'ix']);
     expect(r.freeSymbolTypes!.L6.lowered).toBe('float[6]');
@@ -631,6 +656,47 @@ describe('IR profile on GLSL: arrays, At, the cap, point parameters', () => {
       driver = await GlslDriver.start();
     }, 60_000);
     afterAll(async () => driver?.stop());
+
+    test('streamed filters and sibling reductions give the scalar results', async () => {
+      const phase = ['Sin', ['Multiply', 'k', 'x']];
+      const limits = ['Limits', 'k', 1, 100];
+      const pair = glsl([
+        'PointList',
+        ['Sum', ['Cos', phase], limits],
+        ['Sum', ['Sin', phase], limits],
+      ]);
+      const x = 0.125;
+      const phases = Array.from({ length: 100 }, (_, i) => Math.sin((i + 1) * x));
+      const ce = makeEngine();
+      ce.declare('A24', 'list<real^24>');
+      const filter = compile(
+        ce.box(['Sum', ['Filter', 'A24', ['Function', ['Greater', 'a', 'x'], 'a']]]),
+        IR
+      );
+      const A24 = Array.from({ length: 24 }, (_, i) => i - 12);
+      const uniforms = Object.fromEntries(A24.map((v, j) => [`u_A24_${j}`, v]));
+      const results = await driver.evaluate([
+        ...pointShaders(pair, {}, [0, 0]).map((source, j) => ({
+          name: `paired sum ${j}`,
+          source,
+          uniforms: { u_x_0: x },
+        })),
+        ...[-20, 0, 20].map((x) => ({
+          name: `filter at ${x}`,
+          source: pointShaders(filter, {}, 0)[0],
+          uniforms: { ...uniforms, u_x_0: x },
+        })),
+      ]);
+      const expected = [
+        phases.reduce((a, b) => a + Math.cos(b), 0),
+        phases.reduce((a, b) => a + Math.sin(b), 0),
+        ...[-20, 0, 20].map((x) => A24.filter((a) => a > x).reduce((a, b) => a + b, 0)),
+      ];
+      results.forEach((result, i) => {
+        if (!result.ok) throw new Error(result.log);
+        expect(result.value).toBeCloseTo(expected[i], 3);
+      });
+    });
 
     test('each component gives the interpreter value (NaN where it is NaN)', async () => {
       const items = G3.flatMap(([label, json, options, points]) => {
@@ -901,22 +967,19 @@ describe('IR profile on GLSL: storage', () => {
       expect(compile(chain(head), { ...IR, ...STORAGE }).success).toBe(true);
   });
 
-  test('an element-wise operation over a list of more than 64 elements declines; of 64, compiles', () => {
-    const sum = (E: string) => ['Sum', ['Add', ['Multiply', 2, E], 'x']];
-    expect(glsl(sum('E64'), { storage: { E64: 'sampler2D' } }).success).toBe(
-      true
-    );
+  test('the 64-element limit applies to materialized operations', () => {
+    const mapped = (E: string) => ['Add', ['Multiply', 2, E], 'x'];
+    expect(glsl(mapped('E64')).success).toBe(true);
     for (const options of [{ storage: { E65: 'sampler2D' } }, {}]) {
-      const d = declined(sum('E65'), options);
+      const d = declined(mapped('E65'), options);
       expect(d?.code).toBe('outside-profile');
       expect(d?.message).toMatch(
         /an element-wise Multiply over a list of more than 64 elements/
       );
+      const r = glsl(['Sum', mapped('E65')], options);
+      expect(r.code).not.toContain('float[65](');
+      expect(r.code?.match(/for \(int /g)).toHaveLength(1);
     }
-    // A reduction and At are a loop and a read.
-    expect(
-      glsl(['Sum', 'E65'], { storage: { E65: 'sampler2D' } }).success
-    ).toBe(true);
   });
 
   test('a function that reads a list input of 6 elements declines on GLSL and compiles on JavaScript', () => {

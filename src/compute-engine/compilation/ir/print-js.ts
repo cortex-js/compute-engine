@@ -621,6 +621,14 @@ export const JS: Syntax = deepFreeze({
       body(index)
     );
   },
+  updateList: (list, length, body) => {
+    const k = `${list}_j`;
+    return [
+      blocks(NUMBERS, k, String(length)),
+      `  ${list}[${k}] = ${body(k)};`,
+      '}',
+    ];
+  },
   declare: (_type, name, value, mutable) =>
     `${mutable ? 'let' : 'const'} ${name}${value === undefined ? '' : ` = ${value}`};`,
   loopOpen: loopOpen(NUMBERS),
@@ -648,6 +656,7 @@ export const JS: Syntax = deepFreeze({
  */
 export const JS_BIGINT: Syntax = deepFreeze({
   ...JS,
+  updateList: undefined,
   ops: {
     'add.int': '($0 + $1)',
     'sub.int': '($0 - $1)',

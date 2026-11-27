@@ -83,6 +83,12 @@ export type Syntax = {
    *  lengths, `body` gives the text of one element from its index
    *  variables. Absent: the target has no element-wise operations. */
   map?(lengths: string[], body: (index: string[]) => string): string;
+  /** Update a private flat list, in the same order as `map`. */
+  updateList?(
+    list: string,
+    length: number,
+    body: (index: string) => string
+  ): string[];
   /** A statement that declares `name` with `value` (or no value).
    *  `mutable`: the name is written again. */
   declare(
@@ -590,11 +596,51 @@ export function printProgram(
         nested(i.else, i.outs.map(name), false);
         line('}');
       } else if (i.k === 'loop') {
+        const result = type(i.outs[0]);
+        const update = index.def.get(i.body.yields[0]);
+        const width = result?.shape[0];
+        const privateList =
+          syntax.updateList !== undefined &&
+          i.outs.length === 1 &&
+          !i.passes &&
+          !i.parallel &&
+          i.exit === undefined &&
+          i.window === undefined &&
+          result?.lane === 'real' &&
+          result.shape.length === 1 &&
+          typeof width === 'number' &&
+          width > 0 &&
+          width < 2 ** 32 &&
+          update?.k === 'op' &&
+          i.body.body.includes(update) &&
+          inlined.has(update.out) &&
+          fuses(rows, p, update, i) &&
+          i.body.body.every((x) => fx.speculatable(x));
+        const initial = index.def.get(i.init[0]);
+        // Take ownership only of a fresh allocation in this region.
+        // Hoisting can give a single-use initializer to an inner loop
+        // that runs repeatedly over the same array.
+        const copyInitial =
+          privateList &&
+          (index.uses.get(i.init[0]) !== 1 ||
+            once?.has(i.init[0]) ||
+            initial === undefined ||
+            !r.body.includes(initial) ||
+            !(initial.k === 'list' ||
+              (initial.k === 'region' && initial.op === 'build')));
         // A carried value has one variable: the result of the loop, which
         // the body reads as its parameter.
         i.outs.forEach((v, j) => {
           names.set(i.body.params[j + 1], name(v));
-          line(syntax.declare(type(v), name(v), use(i.init[j]), true));
+          const initial = use(i.init[j]);
+          line(
+            syntax.declare(
+              type(v),
+              name(v),
+              copyInitial ? `(${initial}).slice()` : initial,
+              !privateList
+            )
+          );
         });
         // A pool loop of the asynchronous text: the driver runs it on the
         // pool, or gives `undefined` and the loop runs in order (README,
@@ -618,7 +664,12 @@ export function printProgram(
               : [use(i.window[0]), use(i.window[1])]
           )
           .forEach((s) => line(s));
-        nested(i.body, i.outs.map(name), true, waiting && !i.parallel);
+        if (privateList) {
+          lines.push(...body(i.body, depth + 1, waiting));
+          syntax
+            .updateList!(name(i.outs[0]), width, (k) => element(update, [k]))
+            .forEach((s) => line(s, depth + 1));
+        } else nested(i.body, i.outs.map(name), true, waiting && !i.parallel);
         line('}');
         if (pooled !== undefined) {
           line('} else {');

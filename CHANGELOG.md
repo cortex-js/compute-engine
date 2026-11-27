@@ -167,6 +167,16 @@
   `2·A[i][j] + B[i][j]` at each element and allocates only the result. So
   do `(A + B)·2 − C` and `Sin(A) + B`. The values are not changed.
 
+- **GLSL compiles scalar reductions over a filtered list of stated length.**
+  For `A: list<real^24>`, `Sum(Filter(A, x => x > threshold))` previously
+  declined. It now scans the input and sums the elements that pass the
+  predicate.
+
+- **Compiled reductions share scans and reuse accumulators.** Independent
+  scalar sums with the same bounds can share a loop on JavaScript and GLSL.
+  On JavaScript, a list-valued sum such as `Sum(A + k, k = 1..n)` with
+  `A: list<real^24>` can update one result array across iterations.
+
 ## 0.202.0 _2026-11-26_
 
 ### Breaking Changes

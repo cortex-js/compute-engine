@@ -881,6 +881,8 @@ export function sliceProgram(
     {
       ...passes,
       scalarize: !profile.elementwise,
+      staticForward: options.target === 'glsl' && passes.forward === true,
+      fuseLoops: passes.fuseLoops && !interval && !bigint,
       ...(bigint
         ? { fold: false, hoist: false, inline: false, invariants: false }
         : {}),

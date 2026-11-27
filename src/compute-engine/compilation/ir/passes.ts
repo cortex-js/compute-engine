@@ -32,9 +32,11 @@
  *   No value is moved.
  * - `invariants`: an instruction of a loop body that reads nothing that the
  *   body computes is computed once, before the loop (`invariants` below).
- * - `forward` (JavaScript, not the bigint and interval modes): a pure build
- *   or filter that one instruction reads is read where it is, with no list
- *   (`forward` and `filters` below).
+ * - `forward`: a pure build or filter that one instruction reads is read
+ *   where it is, with no list. GLSL runs the statically bounded cases
+ *   before scalarization.
+ * - `fuseLoops`: independent scalar reductions with the same bounds use
+ *   one loop, so CSE can share their work at each index.
  * - `dce`: an instruction whose values are not read (by an instruction, a
  *   yield or a type) is removed, when it is removable.
  *
@@ -103,6 +105,10 @@ export type PassOptions = {
   /** `forward`: a pure build that one instruction reads is read where it
    *  is, with no list (`forward` below). */
   forward?: boolean;
+  /** Forward only statically bounded lists before GLSL scalarization. */
+  staticForward?: boolean;
+  /** Combine independent reductions with identical bounds. */
+  fuseLoops?: boolean;
   dce?: boolean;
 };
 
@@ -114,6 +120,7 @@ export const ALL_PASSES: PassOptions = Object.freeze({
   cse: true,
   invariants: true,
   forward: true,
+  fuseLoops: true,
   dce: true,
 });
 
@@ -156,6 +163,25 @@ export function runPasses(
     return changed;
   };
   const short = options.unrollBuilds ?? 0;
+  const has = (test: (i: Instr) => boolean) =>
+    p.functions.some((f) => f.body.body.some((i) => some(i, test)));
+  if (
+    options.staticForward &&
+    has(
+      (i) =>
+        (i.k === 'region' && (i.op === 'build' || i.op === 'filter')) ||
+        (i.k === 'op' && p.types[i.out].shape.length === 1 && threads(rows, i.op))
+    )
+  ) {
+    const hasFilter = has((i) => i.k === 'region' && i.op === 'filter');
+    for (let round = 0; round < 8; round++) {
+      const moved = run('static forward', (q, r) => forward(q, r, true));
+      const filtered =
+        hasFilter && run('static filters', (q, r) => filters(q, r, true));
+      if (!moved && !filtered) break;
+      run('dce', dce);
+    }
+  }
   if (options.scalarize || short > 0)
     run('scalarize', (q, r) =>
       scalarize(q, r, options.scalarize ? SCALARIZE_LIMIT : short)
@@ -187,6 +213,7 @@ export function runPasses(
         ) || changed;
     if (options.forward) changed = run('forward', forward) || changed;
     if (options.forward) changed = run('filters', filters) || changed;
+    if (options.fuseLoops) changed = run('fuse loops', fuseLoops) || changed;
     if (options.dce) changed = run('dce', dce) || changed;
     if (!changed) break;
   }
@@ -1119,6 +1146,94 @@ function siteIndex(p: Program) {
   return { uses, def, constants, readers, sites, only, between };
 }
 
+/** Whether an instruction or any of its regions reads one of the values. */
+function readsValue(p: Program, i: Instr, reads: (v: V) => boolean): boolean {
+  return some(
+    i,
+    (x) =>
+      argsOf(x).some(reads) ||
+      outsOf(x).some((v) => lengthValues(p.types[v]).some(reads)) ||
+      regionsOf(x).some((r) => r.yields.some(reads))
+  );
+}
+
+/** Keep both reduction orders, sharing the index and exposing their common
+ *  calculations to CSE. Move across pure scalar instructions, deferring
+ *  those that read the first reduction until both have finished. The
+ *  second reduction must not read any of those values. */
+const fuseLoops: Pass = (p, rows) => {
+  let fx: ReturnType<typeof effects> | undefined;
+  const pure = (i: Instr) => (fx ??= effects(p, rows)).speculatable(i);
+  type Loop = Extract<Instr, { k: 'loop' }>;
+  const eligible = (i: Instr): i is Loop =>
+    i.k === 'loop' &&
+    !i.passes &&
+    !i.parallel &&
+    i.exit === undefined &&
+    i.window === undefined &&
+    i.outs.length > 0 &&
+    i.outs.every((v) => p.types[v].shape.length === 0) &&
+    i.body.body.every(pure);
+  const replacements = new Map<Instr, Instr[]>();
+  const indices = new Map<V, V>();
+  const walk = (r: Region) => {
+    let first: Loop | undefined;
+    let deferred: Instr[] = [];
+    const unavailable = new Set<V>();
+    const reads = (v: V) => unavailable.has(v);
+    for (const i of r.body) {
+      regionsOf(i).forEach(walk);
+      if (eligible(i)) {
+        if (
+          first !== undefined &&
+          first.lo === i.lo &&
+          first.hi === i.hi &&
+          first.outs.length + i.outs.length <= 4 &&
+          !readsValue(p, i, reads)
+        ) {
+          indices.set(i.body.params[0], first.body.params[0]);
+          const loop: Loop = {
+            ...first,
+            outs: [...first.outs, ...i.outs],
+            init: [...first.init, ...i.init],
+            body: {
+              params: [...first.body.params, ...i.body.params.slice(1)],
+              body: [...first.body.body, ...i.body.body],
+              yields: [...first.body.yields, ...i.body.yields],
+            },
+          };
+          replacements.set(first, []);
+          for (const x of deferred) replacements.set(x, []);
+          replacements.set(i, [loop, ...deferred.map((x) => ({ ...x }))]);
+          first = undefined;
+        } else {
+          first = i;
+          deferred = [];
+          unavailable.clear();
+          i.outs.forEach((v) => unavailable.add(v));
+        }
+      } else if (first !== undefined && i.k !== 'const') {
+        if (i.k !== 'op' || p.types[i.out].shape.length !== 0 || !pure(i)) {
+          first = undefined;
+        } else if (readsValue(p, i, reads)) {
+          deferred.push(i);
+          unavailable.add(i.out);
+        }
+      }
+    }
+  };
+  p.functions.forEach((f) => walk(f.body));
+  if (replacements.size === 0) return { changed: false, resolve: (v) => v };
+  let renamed = false;
+  return rewrite(p, (i, { subst }) => {
+    if (!renamed) {
+      for (const [from, to] of indices) subst.set(from, to);
+      renamed = true;
+    }
+    return replacements.get(i);
+  });
+};
+
 /**
  * The pass `forward` (README, "Lists", where a view is a list): the list of
  * a pure `build` that one instruction reads is not made, and that read
@@ -1145,7 +1260,11 @@ function siteIndex(p: Program) {
  * refuses it itself. An `elem` outside a loop reads no length: no `listlen`
  * is put, as `dce` removes a build that no instruction reads.
  */
-const forward: Pass = (p, rows) => {
+const forward = (
+  p: Program,
+  rows: readonly OperatorRow[],
+  staticOnly = false
+): ReturnType<Pass> => {
   const fx = effects(p, rows);
   const bounded = boundedLengths(p);
   const { constants, def, sites, only, between } = siteIndex(p);
@@ -1174,12 +1293,32 @@ const forward: Pass = (p, rows) => {
     if (loops.length === 0) return true;
     const [x] = loops;
     const body = repeated(x);
-    if (
-      loops.length !== 1 ||
-      body === undefined ||
-      body.params[0] !== i.args[1]
-    )
-      return false;
+    if (loops.length !== 1 || body === undefined) return false;
+    const index = body.params[0];
+    if (index !== i.args[1]) {
+      // Reverse reads each element once, but a shorter scan must still start
+      // at the end of the original list. Require the producer's exact length.
+      const reversed = def.get(i.args[1]);
+      const end = reversed?.k === 'op' ? def.get(reversed.args[0]) : undefined;
+      const length = constants.get(n);
+      const last = constants.get(x.k === 'loop' ? x.hi : n);
+      const sameEnd =
+        (end?.k === 'op' &&
+          end.op === 'sub.int' &&
+          end.args[0] === n &&
+          constants.get(end.args[1]) === 1) ||
+        (typeof length === 'number' && last === length - 1);
+      if (
+        x.k !== 'loop' ||
+        !bounded.has(n) ||
+        reversed?.k !== 'op' ||
+        reversed.op !== 'sub.int' ||
+        reversed.args[1] !== index ||
+        reversed.args[0] !== x.hi ||
+        !sameEnd
+      )
+        return false;
+    }
     if (x.k !== 'loop') return x.k === 'region' && atMost(x.args[0], n);
     // The last index: `m - 1`, or a constant below the constant `n`.
     const last = def.get(x.hi);
@@ -1269,25 +1408,50 @@ const forward: Pass = (p, rows) => {
     return g;
   };
   // The reads to rewrite, each with its build and the length it reads.
-  const plan = new Map<Instr, { build: Instr & { k: 'region' }; n: V }>();
+  const plan = new Map<Instr, { source: Region; n: V }>();
+  const scalar = new Map<Instr, Instr & { k: 'op' }>();
   for (const [i, site] of sites) {
+    if (
+      staticOnly &&
+      i.k === 'op' &&
+      threads(rows, i.op) &&
+      fx.speculatable(i) &&
+      p.types[i.out].shape.length === 1 &&
+      i.args.every((v) => p.types[v].shape.length <= 1)
+    ) {
+      const n = p.types[i.out].shape[0];
+      const readers = only(i.out);
+      const read = readers?.[0];
+      if (
+        typeof n === 'number' &&
+        n > 0 &&
+        readers?.length === 1 &&
+        read?.i.k === 'op' &&
+        read.i.op === 'elem' &&
+        read.i.args[0] === i.out
+      )
+        scalar.set(read.i, i);
+    }
     if (!forwardable(fx, i)) continue;
+    if (staticOnly && !bounded.has(i.args[0])) continue;
     const readers = only(i.outs[0]) ?? [];
     const [read] = readers;
     if (
       read === undefined ||
       read.i.k !== 'op' ||
       (read.i.op !== 'elem' && read.i.op !== 'at') ||
+      (staticOnly && read.i.op !== 'elem') ||
       read.i.args[0] !== i.outs[0] ||
       readers.length !== 1 ||
       !reads(read.i, between(read, site), i.args[0])
     )
       continue;
     const n = bounded.has(i.args[0]) ? i.args[0] : guard(i, site, read);
-    if (n !== false) plan.set(read.i, { build: i, n: n ?? i.args[0] });
+    if (n !== false) plan.set(read.i, { source: i.regions[0], n: n ?? i.args[0] });
   }
   for (const [x, hi] of lasts) x.hi = hi;
-  if (plan.size === 0) return { changed: false, resolve: (v) => v };
+  if (plan.size === 0 && scalar.size === 0)
+    return { changed: false, resolve: (v) => v };
   const done = new Set<Instr>();
   return rewrite(p, (i, { subst }) => {
     const code = guards.get(i);
@@ -1295,9 +1459,21 @@ const forward: Pass = (p, rows) => {
       done.add(i);
       return [...code, i];
     }
+    const op = scalar.get(i);
+    if (op !== undefined && i.k === 'op') {
+      const out: Instr[] = [];
+      const args = op.args.map((v) => {
+        if (p.types[v].shape.length === 0) return v;
+        const elem = fresh(p, elementType(p.types[v]));
+        out.push({ k: 'op', out: elem, op: 'elem', args: [v, i.args[1]] });
+        return elem;
+      });
+      out.push({ k: 'op', out: i.out, op: op.op, args });
+      return out;
+    }
     const planned = plan.get(i);
     if (planned === undefined || i.k !== 'op') return undefined;
-    const [r] = planned.build.regions;
+    const r = planned.source;
     const index = i.args[1];
     if (i.op === 'elem') {
       const { body, y } = copyBody(p, r, index);
@@ -1426,20 +1602,18 @@ function atElement(
  * source, where it is not known to be below 2^32, is a `listlen` where the
  * filter was (`bounds`).
  */
-const filters: Pass = (p, rows) => {
+const filters = (
+  p: Program,
+  rows: readonly OperatorRow[],
+  staticOnly = false
+): ReturnType<Pass> => {
   const fx = effects(p, rows);
   const bounded = boundedLengths(p);
   const { uses, def, constants, readers, sites, only, between } = siteIndex(p);
   /** `x` or an instruction of its regions reads `v`, yields it, or has a
    *  value whose type names it as a length. */
   const mentions = (x: Instr, v: V): boolean =>
-    some(
-      x,
-      (y) =>
-        argsOf(y).includes(v) ||
-        outsOf(y).some((o) => lengthValues(p.types[o]).includes(v)) ||
-        regionsOf(y).some((r) => r.yields.includes(v))
-    );
+    readsValue(p, x, (a) => a === v);
   const op = (i: Instr, name: string): i is Instr & { k: 'op' } =>
     i.k === 'op' && i.op === name;
   // The instructions that replace an instruction (none: it is removed), and
@@ -1471,6 +1645,9 @@ const filters: Pass = (p, rows) => {
       continue;
     const [count, list] = x.outs;
     const [n] = x.args;
+    const length = constants.get(n);
+    if (staticOnly && (typeof length !== 'number' || !bounded.has(n)))
+      continue;
     const [keep, value] = body.yields;
     // A yield of the count reads it as a value (`Length` as the result).
     const counts = readers.get(count) ?? [];
@@ -1497,6 +1674,7 @@ const filters: Pass = (p, rows) => {
             ['real', 'integer', 'boolean'].includes(t.lane) &&
             constants.get(read.i.args[1]) === 0)));
     if (
+      !staticOnly &&
       first &&
       !yielded &&
       counts.every(positive) &&
@@ -1561,7 +1739,7 @@ const filters: Pass = (p, rows) => {
       for (const s of counts) renamed.set(s.i, found);
       continue;
     }
-    if (lists.length === 0 && (counts.length > 0 || yielded)) {
+    if (!staticOnly && lists.length === 0 && (counts.length > 0 || yielded)) {
       // A count.
       const { zero, one, hi } = bounds(n, out);
       const [c, next, more] = [

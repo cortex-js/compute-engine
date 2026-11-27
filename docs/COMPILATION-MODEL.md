@@ -2258,7 +2258,10 @@ boolean inputs and of inputs that are tuples or lists of a stated length
 a result with no `run`: `code` is an expression, or statements that
 end in `return`, in which an input is its bare name, or its `vars` text (a
 name, a member or an element of one, such as `u_x`, `u.P` or `u[0]`; the
-name stays in `freeSymbols`); `preamble` holds the helpers (`_gpu_ir_…`) and
+name stays in `freeSymbols`). A scalar reduction such as `Sum(Filter(L, p))`
+can scan a list of stated length when the predicate and reduction body are
+pure. It updates the accumulator only where the predicate is true.
+`preamble` holds the helpers (`_gpu_ir_…`) and
 the user functions (`_fn_ir_…`); `freeSymbolTypes[name].lowered` is `float`,
 `bool`, `vecN` or `float[n]`. A shader cannot throw, so the pass cap is
 the option `iterationBudget` (10,000 by default), counted
@@ -2274,8 +2277,9 @@ magnitude 1000 or more amplifies a trigonometric value has the warning
 `float32-unsafe-argument`.
 A user function can return a point or a list of a stated length, and read
 an input that is a point, a list in storage or a list of at most 4
-elements; an element-wise operation over a list of more than 64 elements
-declines. A list parameter declared with no length (`list<integer>`) takes
+elements; materializing an element-wise operation over a list of more than
+64 elements declines. A supported reduction can consume its elements
+directly. A list parameter declared with no length (`list<integer>`) takes
 the stated length of the argument of the first call of its function; a call
 whose argument has another length, or no stated length, declines. With `storage: { S: 'sampler2D' }` the list input `S`
 is read from the host's texture (a single-channel float texture, one

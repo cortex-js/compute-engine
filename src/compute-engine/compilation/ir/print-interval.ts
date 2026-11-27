@@ -121,6 +121,7 @@ const fill =
  *  each operation (README, "The interval mode"). */
 export const JS_INTERVAL: Syntax = Object.freeze({
   ...JS,
+  updateList: undefined,
   // A list of two or more points is the array of their numbers, made into
   // points once (`_IA.points()`): a list of constants is about as long as
   // on JavaScript (Tycho row 368).

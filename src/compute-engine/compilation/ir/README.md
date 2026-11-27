@@ -1819,8 +1819,8 @@ Where a view is a list (CE-1806). A `Map` or a `Filter` is an array in the code
 only where the program needs the list: the result of the program, an argument of
 a function of the host (`hostCall()` of `lower.ts`), an element of a list or a
 tuple, a view read more than once (a local read twice), and a reader that the
-pass `forward` of `passes.ts` does not rewrite. The pass runs on JavaScript, not
-in the bigint and interval modes. It takes a build whose body is pure
+pass `forward` of `passes.ts` does not rewrite. On JavaScript outside bigint
+and interval modes it takes a build whose body is pure
 (operations, conditionals and calls with no effect and no failure) and that one
 instruction reads: an `elem` at the index of the one loop, build or filter
 between them (the loop of `Sum`, `Product`, `Max`, `Min`, `Mean`, `Reduce`; a
@@ -1861,9 +1861,22 @@ is removed, so a build that stays keeps its own guard. Only the passes put
 `listlen`, and only on JavaScript, so GLSL, the interval mode and the bigint
 mode have no spelling of it. A callback with an effect (a draw, a call of a
 function of the host) or that can fail (`AssertPresent`) keeps the array, and so
-do a reader at another index (the loop of `Sum` over a `Reverse`) and an `At` of
+do a reader at an index the pass cannot prove is visited at most once and an `At` of
 integers or booleans (its value out of range, NaN or `undefined`, is not a value
-of the lane).
+of the lane). A full reverse traversal of a bounded build can forward its
+element computation while preserving the reduction's reverse order.
+
+Before GLSL scalarization, the passes forward a single element read of a
+bounded build or a pure flat element-wise operation. A reduction over a pure
+filter of a stated source length visits the source in order and updates the
+accumulator where the predicate holds. Emitting the filtered list itself would
+require a shader value of run-time length, so that form declines.
+
+On JavaScript and GLSL, independent scalar reductions over the same bounds
+can share a loop and the per-index calculations that CSE finds in it. Each
+accumulator still receives its terms in order. On JavaScript a loop whose
+single result is a fixed-length list of reals can update its private
+accumulator in place when the next value is a pure element-wise operation.
 
 A `Sum` or a `Product` with `Limits` whose term is a flat list of numbers adds
 or multiplies the terms element by element, as the interpreter does (CE-1470):
