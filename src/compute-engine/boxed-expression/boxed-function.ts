@@ -4918,6 +4918,11 @@ export class BoxedFunction
     return effects;
   }
 
+  /** The layout of a tuple that carries field names in its value. */
+  protected get _tupleLayout(): BoxedType | undefined {
+    return undefined;
+  }
+
   /** The type of the value of the function */
   get type(): BoxedType {
     // Keyed on `_typeCacheGeneration()`, which only a declaration, a
@@ -5721,9 +5726,9 @@ export class BoxedFunction
    * structure and nothing else that the evaluation reads differs:
    *
    * - a function node: the same operator name and binding record, the same
-   *   overload arm, the same numeric store, and operands that are the same
-   *   in turn. A node that the evaluation reads more of than its structure
-   *   is the same only as itself: a node with a local scope (each copy of a
+   *   overload arm, the same numeric store, the same tuple layout, and
+   *   operands that are the same in turn. A node that the evaluation reads
+   *   more of than its structure is the same only as itself: a node with a local scope (each copy of a
    *   `Block`, `Function` or `Sum` binds its own locals), a call that
    *   records its callee (`_calleeStamp`: a call of a user function, boxed
    *   again in the scope where it was written), a call that its handler
@@ -5808,6 +5813,7 @@ export class BoxedFunction
     if (
       a._operator !== b._operator ||
       a._def !== b._def ||
+      (a._operator === 'Tuple' && a._tupleLayout !== b._tupleLayout) ||
       a._operator === 'Error' ||
       !a.isCanonical ||
       !b.isCanonical ||

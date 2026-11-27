@@ -25,10 +25,12 @@ import {
 import { isSubtype, resolveTypeReference } from '../../common/type/subtype.js';
 import { stripMissingFromType } from '../../common/type/utils.js';
 import { nanPoint, pointArity } from '../collection-utils.js';
+import { isLibraryOperator } from '../library-shadowing.js';
 import {
   _BoxedExpression,
   hasSymbolOrOperator,
 } from './abstract-boxed-expression.js';
+import { BoxedFunction } from './boxed-function.js';
 import {
   COUNTER_LIMIT,
   detachNominalType,
@@ -62,7 +64,36 @@ type CellSpec = {
   readonly tag: string | undefined;
   /** For a tuple cell: the type of each of its four elements. */
   readonly elements: readonly Type[] | undefined;
+  /** The field names of a structural tuple are also available out of range. */
+  readonly absentTupleType?: BoxedType;
 };
+
+/** A structural tuple read from an array keeps its cell layout as a value. */
+class NamedArrayTuple extends BoxedFunction {
+  constructor(
+    ce: ComputeEngine,
+    ops: readonly Expression[],
+    private readonly tupleType: BoxedType
+  ) {
+    super(ce, 'Tuple', ops, { canonical: true });
+  }
+
+  override get type(): BoxedType {
+    return this.tupleType;
+  }
+
+  protected override get _tupleLayout(): BoxedType {
+    return this.tupleType;
+  }
+
+  override evaluate(options?: Partial<EvaluateOptions>): Expression {
+    // The four coordinates are already evaluated. Rebuilding the tuple
+    // would discard the field names of its layout.
+    if (!options?.signal?.aborted && isLibraryOperator(this, 'Tuple'))
+      return this;
+    return super.evaluate(options);
+  }
+}
 
 /**
  * Where the cells of a new array come from (`makeArray()`):
@@ -349,12 +380,15 @@ export class BoxedArray extends _BoxedExpression implements ArrayInterface {
     if (spec.tuple) {
       const bytes = cells as Uint8Array;
       const at = 4 * i;
-      return ce._fn(spec.tag!, [
+      const elements = [
         ce.number(bytes[at]),
         ce.number(bytes[at + 1]),
         ce.number(bytes[at + 2]),
         ce.number(bytes[at + 3]),
-      ]);
+      ];
+      if (spec.absentTupleType !== undefined)
+        return new NamedArrayTuple(ce, elements, spec.cellType);
+      return ce._fn(spec.tag!, elements);
     }
     return ce.number((cells as Float64Array)[i]);
   }
@@ -633,7 +667,21 @@ function cellSpec(cellType: BoxedType): CellSpec {
     typeof t === 'object' && t.kind === 'tuple'
       ? t.elements.map((e) => throughTransparentAliases(e.type) ?? e.type)
       : undefined;
-  return { cellType, storage, tuple, tag: tupleTag(cellType.type), elements };
+  const tag = tupleTag(cellType.type);
+  const absentTupleType =
+    tag === 'Tuple' &&
+    typeof t === 'object' &&
+    t.kind === 'tuple' &&
+    t.elements.some((e) => e.name !== undefined)
+      ? new BoxedType(
+          {
+            kind: 'tuple',
+            elements: t.elements.map((e) => ({ ...e, type: 'nan' })),
+          },
+          cellType.typeResolver
+        )
+      : undefined;
+  return { cellType, storage, tuple, tag, elements, absentTupleType };
 }
 
 /** The head of the value of a tuple cell: the name of the nominal type that
@@ -684,6 +732,12 @@ function outOfRange(
  * `NaN`, also when its type is nominal (spec section 3, "Tuple cells").
  */
 function absentCell(ce: ComputeEngine, spec: CellSpec): Expression {
+  if (spec.absentTupleType !== undefined)
+    return new NamedArrayTuple(
+      ce,
+      [ce.NaN, ce.NaN, ce.NaN, ce.NaN],
+      spec.absentTupleType
+    );
   if (spec.tuple) return nanPoint(ce, 4);
   if (spec.storage !== 'expression') return ce.NaN;
   const t = stripMissingFromType(spec.cellType.type);

@@ -72,6 +72,12 @@
 
 ### Behavior Changes
 
+- **Reads of structural pixel cells keep their field names.** For an array
+  whose cell type is an alias of `tuple<r: Byte, g: Byte, b: Byte, a: Byte>`,
+  `img[2].g` now reads the same byte as `img[2][2]`, where it previously gave
+  an `incompatible-type` error. The names are kept when the pixel is saved
+  in a variable.
+
 - **Epsil reports `dictionary-entry-expected` at an unfinished dictionary
   entry.** `plot(sin(x), {` and `{a -> 1,` now expect a dictionary entry.
   `f(1,` and the empty value in `{a -> ▮` still report
@@ -86,6 +92,21 @@
   In `match 5 { _k => k }`, `epsilProgramSites` now reports `k` as local
   to the arm. Rest captures such as `..._t` and wildcard call heads such as
   `_f(x)` also get local definition sites.
+
+- **Compiled JavaScript publishes executed assignments before calling the
+  host.** With `s = Pi`, a host callback before `s = n` now sees the exact
+  value of `s`. If an `ArrayFrom` creation hook replaces an array binding,
+  subsequent reads in the function see the replacement.
+
+- **Compiled JavaScript checks which engine owns an array.** Passing an
+  array from a second engine to a compiled store throws a `TypeError`
+  before changing its cells, including with `entryChecks: false`.
+
+- **Interpreter fallback honors explicit compiler inputs.** An override
+  such as `inputs: { a: 'real' }` stays in `freeSymbols` and reaches each
+  binding of `a` read by the expression and the functions it calls.
+  Assigned Boolean inputs on the interval target accept `'false'` and
+  `'true'` on fallback too.
 
 ### Resolved Issues
 

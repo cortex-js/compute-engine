@@ -441,6 +441,10 @@ img[2] = Pixel(255, 128, 0, 255)
 A tuple is a value, so `img[2].r = 9` is the error
 `immutable-value-assignment`: store a whole tuple in the cell.
 
+A transparent alias of the same four-byte tuple takes plain tuples such as
+`(255, 128, 0, 255)` as cell values. Reads keep the field names from the
+cell type. Both `img[2].g` and `img[2][2]` read the second byte.
+
 ### Reading an array
 
 An array is read as a list is: `a[i]` from 1, `a[-1]` the last cell, a range

@@ -348,6 +348,39 @@ a[1] = 7
   });
 });
 
+test('a structural pixel cell keeps its field names when read and saved', () => {
+  expect(
+    show(`type alias Byte = integer<0..255>
+type alias Rgba = tuple<r: Byte, g: Byte, b: Byte, a: Byte>
+let img = arrayFrom(repeat((0, 0, 0, 255), 2), "Rgba")
+img[2] = (9, 8, 7, 6)
+let savedPixel = img[2]
+(img[2].g, img[2][2], savedPixel.g, img[3].g)`)
+  ).toBe('(8, 8, 8, NaN)');
+  const saved = ce.box('savedPixel').evaluate({ materialization: true });
+  expect(
+    ce.function('Field', [saved, ce.string('g')]).evaluate().json
+  ).toBe(8);
+});
+
+test('equal bytes can have different field layouts in the same evaluation', () => {
+  ce.declareType('Byte', 'integer<0..255>', { alias: true });
+  ce.declareType('Rgba', 'tuple<r: Byte, g: Byte, b: Byte, a: Byte>', {
+    alias: true,
+  });
+  ce.declareType('Grba', 'tuple<g: Byte, r: Byte, b: Byte, a: Byte>', {
+    alias: true,
+  });
+  const green = (type: string) => {
+    const array = ce.array(new Uint8Array([9, 8, 7, 6]), type);
+    const cell = ce.function('At', [array, ce.One]).evaluate();
+    return ce.function('Field', [cell, ce.string('g')]);
+  };
+  expect(
+    ce.function('Tuple', [green('Rgba'), green('Grba')]).evaluate().json
+  ).toEqual(['Tuple', 8, 9]);
+});
+
 describe('ACCEPTANCE 4a: A RANGE AS THE INDEX', () => {
   const A = 'let a = arrayFrom([10, 20, 30, 40, 50])\n';
 
