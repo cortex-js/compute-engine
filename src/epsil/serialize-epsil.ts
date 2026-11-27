@@ -369,6 +369,19 @@ export function serializeEpsil(
    * so concurrent serializations cannot see each other's depth.
    */
   let loopDepth = 0;
+  // The node being serialized as a direct argument of a call (by
+  // `serializeGenericFunction`), where a guarded indexing set may print as
+  // `k in xs if cond`.
+  let callArgument: MathJsonExpression | null = null;
+  const serializeCallArgument = (x: MathJsonExpression): FormattingBlock => {
+    const saved = callArgument;
+    callArgument = x;
+    try {
+      return serializeExpression(x);
+    } finally {
+      callArgument = saved;
+    }
+  };
 
   /** Serialize with the `break`/`continue` context set to `depth`: one deeper
    * for a loop body, zero for a function-literal body (the boundary a `break`
@@ -868,6 +881,32 @@ export function serializeEpsil(
     // `setFrom([body for …])`. Any other shape — a clause that is not an
     // `Element` — falls back to the call form, which re-parses faithfully.
     //
+    // `["Element", k, xs, cond]` is the guarded indexing set of a big
+    // operator or of a table, `k in xs if cond`. The parser reads that
+    // spelling only as a whole argument of a call
+    // (`sum(k, k in 1..10 if isPrime(k))`); elsewhere a guarded `Element`
+    // prints as its call. The other shapes keep the infix `in`.
+    Element: (expr: MathJsonExpression): FormattingBlock => {
+      const index = symbol(operand(expr, 1));
+      if (nops(expr) === 3 && index !== null && callArgument !== expr)
+        return serializeGenericFunction(expr);
+      if (nops(expr) === 3 && index !== null)
+        return fmt.line(
+          escapeSymbol(index),
+          ' in ',
+          serializeConditionalOperand(
+            operand(expr, 2),
+            CONDITIONAL_PRECEDENCE + 1
+          ),
+          ' if ',
+          serializeConditionalOperand(
+            operand(expr, 3),
+            CONDITIONAL_PRECEDENCE + 1
+          )
+        );
+      return serializeOperator(expr) ?? serializeGenericFunction(expr);
+    },
+
     Comprehension: (expr: MathJsonExpression): FormattingBlock =>
       serializeComprehension(expr, '[', ']') ?? serializeGenericFunction(expr),
 
@@ -2520,7 +2559,7 @@ export function serializeEpsil(
           '(',
           fmt.separator(','),
           ')',
-          mapArgs<FormattingBlock>(expr, serializeExpression)
+          mapArgs<FormattingBlock>(expr, serializeCallArgument)
         )
       );
     }

@@ -66,7 +66,7 @@ let double = x => 2x
 | `[1, 2, 3]` | `[1, 2, 3]` |
 | `{1, 2, 3}` (set) | `set(1, 2, 3)` |
 | `(1, 2)` (tuple) | `(1, 2)` |
-| `{"a": 1}` (dict) | `{"a" -> 1}`; empty dictionary is `{}` |
+| `{"a": 1}` (dict) | `{"a" -> 1}`; empty dictionary is `{}`; `{"a": 1}` is an error whose fixit writes the `->` |
 | `d["a"]` | `d["a"]`, or `d.a` when the key is an identifier |
 | `xs[0]` | `xs[1]` — **1-based** |
 | `xs[-1]` | `xs[-1]` |
@@ -129,7 +129,8 @@ setFrom([n % 3 for n in 1..10])            // ➔ Set(0, 1, 2)
 ```
 
 There is no bare generator expression: `sum(n**2 for n in …)` is written with
-brackets, `sum([n^2 for n in 1..10 if n % 2 == 1])`, or as a pipeline. A list
+brackets, `sum([n^2 for n in 1..10 if n % 2 == 1])`, with an indexing set,
+`sum(n^2, n in 1..10 if n % 2 == 1)`, or as a pipeline. A list
 comprehension is lazy like a Python generator, so the brackets cost nothing
 until the list is read. The pipeline operator `|>` with `filter`/`map` remains
 available; `_` is the placeholder for the piped value.

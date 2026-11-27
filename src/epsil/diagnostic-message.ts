@@ -161,6 +161,8 @@ export function epsilDiagnosticMessage(diagnostic: ParsingDiagnostic): string {
       if (args.length >= 2)
         return `"->" builds a key-value pair, but argument ${args[1]} of "${args[0]}" must be a function; to write a function, use the mapsto arrow "=>"`;
       return `"->" pairs a key with a value (and the key must be a string); to write a function, use the mapsto arrow "=>"`;
+    case 'dictionary-arrow-expected':
+      return 'A dictionary entry is written "key -> value", not "key: value"';
     case 'brace-set-literal':
       return args[0] === 'setFrom(['
         ? 'Braces make a dictionary; write a set comprehension as "setFrom([… for …])"'

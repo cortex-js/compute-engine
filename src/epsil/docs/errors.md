@@ -172,6 +172,12 @@ In a call, `name -> value` is a rule argument — a key-value pair whose key is 
 
 Write `x => x + 1`; the fixit in the diagnostic replaces the arrow for you. The expression was parsed as the function it was meant to be, so any other diagnostic reported here is a separate problem. (Function TYPES and dictionary entries are unaffected: they keep `->`, as in `(number) -> number` and `{k -> v}`.)
 
+## `dictionary-arrow-expected`
+
+A dictionary entry pairs a key with a value with `->`: `{x -> 1, y -> 2}`. The `:` of JSON and Python (`{"x": 1}`) is not an Epsil operator; in Epsil, `name: value` is a named argument of a call (`f(x: 1)`) or a type annotation (`let x: real`).
+
+Write `{x -> 1}`; the fixit in the diagnostic replaces the `:` by `->`. The entry was read as the pair it meant, so any other diagnostic reported here is a separate problem. A key written as a bare name is a string (`{x -> 1}` has the key "x"), the same as `{"x" -> 1}`.
+
 ## `brace-set-literal`
 
 Braces make a dictionary: `{x -> 1, y -> 2}`, the empty dictionary `{}`, a merge `{...d1, ...d2}` and a comprehension `{k -> v for k in ks}`. A set is written with its constructor, `set(1, 2, 3)`, so a brace literal never has to wait for its first element to tell a set from a dictionary.

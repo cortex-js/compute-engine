@@ -537,6 +537,9 @@ export class Parser {
    * call's `(` is the key of a rule argument (`f(GridLines -> [10, 10])`),
    * not a lambda parameter. */
   private callArgumentOpens = new Set<number>();
+  /** The local start of the argument being parsed, for each call argument
+   * list, by the offset of its `(`. */
+  private callArgumentStarts = new Map<number, number>();
 
   /** Implicit guards accumulated while patternizing a single `match` case:
    * one `Element(name, type)` per type-annotated binding (`n: integer`). Reset
@@ -7370,7 +7373,9 @@ export class Parser {
   /**
    * The tail of a conditional expression — `if cond else alternative`, with
    * the already-parsed `consequent` to its left and the `if` current —
-   * yielding `["If", cond, consequent, alternative]`.
+   * yielding `["If", cond, consequent, alternative]`. In a call argument, an
+   * indexing set with no `else` (`k in xs if cond`) is the guarded clause
+   * `["Element", k, xs, cond]`.
    *
    * Unlike the block form (`parseIf`), both branches are plain **expressions**,
    * never `Block`s, so the conditional introduces no scope and no statement can
@@ -7393,6 +7398,33 @@ export class Parser {
     this.checkConditionAssign(cond);
 
     if (!(this.check('SYMBOL') && this.current.text === 'else')) {
+      // `k in xs if cond` as an argument of a call is an indexing set with a
+      // condition (`sum(k, k in 1..10 if isPrime(k))`), the clause of a
+      // comprehension: `["Element", k, xs, cond]`.
+      // The conditional is the whole argument: it starts the argument and a
+      // `,` or the `)` follows it, so a lambda body (`map(xs, x => x in s if
+      // c)`) or a named argument keeps needing its `else`.
+      const top = this.brackets[this.brackets.length - 1];
+      if (
+        top !== undefined &&
+        this.callArgumentOpens.has(top.start) &&
+        this.callArgumentStarts.get(top.start) ===
+          this.outerStart(consequent) &&
+        (this.check('COMMA') || this.check('CLOSE_PAREN')) &&
+        operator(consequent) === 'Element' &&
+        operands(consequent).length === 2 &&
+        symbol(operand(consequent, 1)) !== null
+      )
+        return this.wrap(
+          [
+            'Element',
+            operand(consequent, 1)!,
+            operand(consequent, 2)!,
+            cond,
+          ] as MathJsonExpression[],
+          this.outerStart(consequent) ?? kw.start,
+          this.outerEnd(cond) ?? this.previousEnd()
+        );
       this.error(
         ['conditional-else-expected'],
         this.current.start,
@@ -10127,11 +10159,81 @@ export class Parser {
           if (this.check(closeType)) break; // trailing comma
           continue;
         }
-        const expr = this.parseExpression(0);
+        if (allowNamedArgs)
+          this.callArgumentStarts.set(open.start, this.current.start);
+        let expr = this.parseExpression(0);
         if (expr === null) {
           this.reportUnexpected(this.current);
           this.recoverInBracket();
           break;
+        }
+        // `key: value` in a brace literal, the spelling of JSON and Python: a
+        // `dictionary-arrow-expected` error with a fixit to `key -> value`,
+        // read as that pair. As for a named argument, a token that starts
+        // with `:` opens it (`{a:-1}`), but not `:=` or `::`.
+        if (
+          allowDictionaryMarker &&
+          this.check('OPERATOR') &&
+          this.current.text.startsWith(':') &&
+          !this.current.text.startsWith(':=') &&
+          !this.current.text.startsWith('::')
+        ) {
+          const colon = this.current;
+          // `->` is spaced on both sides, as an infix operator must be.
+          const arrow =
+            (colon.precededByWhitespace ? '' : ' ') +
+            '->' +
+            (/\s/.test(this.source[colon.start + 1] ?? ' ') ? '' : ' ');
+          const fixits: Fixit[] = [
+            [
+              this.baseOffset + colon.start,
+              this.baseOffset + colon.start + 1,
+              arrow,
+            ],
+          ];
+          this.diagnostics.push({
+            severity: 'error',
+            message: ['dictionary-arrow-expected'],
+            range: [
+              this.baseOffset + colon.start,
+              this.baseOffset + colon.start + 1,
+            ],
+            fixits,
+          });
+          this.consumeNamedArgumentColon();
+          const value = this.parseExpression(0);
+          if (value === null) {
+            this.reportUnexpected(this.current);
+            this.recoverInBracket();
+            break;
+          }
+          // A value that binds as loosely as `->` or more (`x => x + 1`,
+          // `xs |> sort`) is parenthesized by the fixit: `{"f" -> x => x}`
+          // would read the pair as the parameters of the lambda.
+          const valueStart = this.outerStart(value);
+          const valueEnd = this.outerEnd(value);
+          const looseness = operatorDefByName(
+            operator(value) === 'Function' ? 'MapsTo' : operator(value)
+          )?.precedence;
+          if (
+            valueStart === this.localStart(value) &&
+            valueStart !== undefined &&
+            valueEnd !== undefined &&
+            looseness !== undefined &&
+            looseness <= operatorDefByName('KeyValuePair')!.precedence
+          )
+            fixits.push(
+              [this.baseOffset + valueStart, this.baseOffset + valueStart, '('],
+              [this.baseOffset + valueEnd, this.baseOffset + valueEnd, ')']
+            );
+          // The pair is the element, and the body of a comprehension that
+          // follows (`{k: v for k in ks}`, Python's dictionary
+          // comprehension).
+          expr = this.wrap(
+            ['KeyValuePair', expr, value] as MathJsonExpression[],
+            this.outerStart(expr) ?? colon.start,
+            this.outerEnd(value) ?? this.previousEnd()
+          );
         }
         // `body for binding in collection …` — a comprehension. Only a first
         // plain element can be a body; the clauses run to the closer.

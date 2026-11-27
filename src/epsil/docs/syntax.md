@@ -167,7 +167,7 @@ _do-block_ | _if-expression_ | _match-expression_
 
 _call-clause_ → **`(`** \[(_argument_)#**`,`**\] **`)`**
 
-_argument_ → \[**`...`**\] _expression_
+_argument_ → \[**`...`**\] _expression_ | _symbol_ **`in`** _expression_ **`if`** _expression_
 
 _index-clause_ → **`[`** (_expression_)#**`,`** **`]`**
 
@@ -335,13 +335,23 @@ f()
 ```
 
 An argument may be prefixed with `...` to spread a tuple's elements into the
-call's arguments (`...` is also valid in list, set, and dictionary
-literals, where it splices non-tuple collections — see
+call's arguments (`...` is also valid in list and dictionary literals and in
+`set(…)`, where it splices non-tuple collections — see
 [Spread](/epsil/operators/#spread)):
 
 ```epsil
 f(...p)
 f(1, ...p)
+```
+
+An argument `k in xs if cond` is an indexing set with a condition, as the
+clause of a comprehension is: `sum`, `product` and `table` take the values of
+`xs` for which `cond` is true. Elsewhere, a conditional `a if c` needs its
+`else`.
+
+```epsil
+sum(k, k in 1..10 if isPrime(k))
+// ➔ 17
 ```
 
 The callee does not have to be a bare symbol. A parenthesized expression, or
@@ -505,7 +515,9 @@ on the same line (`p .x`) is still a diagnosed stray token.
   (`expression-expected`) — there is no empty tuple — **except** immediately
   before a mapsto arrow, where `() => expr` is a zero-parameter lambda.
 - **Dictionary**: `{k -> v}`; an unquoted key becomes a string key. The empty
-  dictionary is spelled `{}`. (`{->}` is still accepted.)
+  dictionary is spelled `{}`. (`{->}` is still accepted.) The `key: value` of
+  JSON and Python (`{"a": 1}`) is a `dictionary-arrow-expected` error, with a
+  fixit to `{"a" -> 1}`.
 
 A `{ … }` that is not a block holds `key -> value` pairs, and every element
 must be such a pair (or a `...` spread of a dictionary): `{...d1, ...d2}` is a

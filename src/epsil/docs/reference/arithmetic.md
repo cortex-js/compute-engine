@@ -246,6 +246,14 @@ accepted:
 // ➔ [65, 39916800]
 ```
 
+An `if` after the index keeps the values for which the condition is true, as in
+the clause of a comprehension:
+
+```epsil
+[sum(k, k in 1..10 if isPrime(k)), product(k, k in 1..10 if k % 3 == 0)]
+// ➔ [17, 162]
+```
+
 With a body and an indexing set `k in S`, the index takes each value of the
 set:
 

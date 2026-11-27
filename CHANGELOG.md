@@ -43,7 +43,18 @@
   an `in` iterator and an iterator tuple can be mixed. Such a table compiles to
   JavaScript.
 
+- **An indexing set of `sum`, `product` and `table` takes a condition in
+  Epsil.** `sum(k, k in 1..10 if isPrime(k))` is `17` and
+  `table(k^2, k in 1..10 if k > 7)` is `[64, 81, 100]`, where the `if` was a
+  `conditional-else-expected` error. The condition is written as in a
+  comprehension clause, and the clause prints back the same way.
+
 ### Improvements
+
+- **`{key: value}` in Epsil is an error with a fixit to `{key -> value}`.**
+  `{"a": 1}`, the spelling of JSON and Python, gave three unrelated errors; it
+  now gives the error `dictionary-arrow-expected`, whose fixit replaces the
+  `:` by `->`, and the entry is read as `"a" -> 1`.
 
 - **Epsil completion at a dictionary key and value.** At a key of a dictionary
   literal (`plot(x^2, {▮`), completion offers the keys that the expected

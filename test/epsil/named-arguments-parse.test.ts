@@ -144,12 +144,8 @@ describe('what the named-argument production does NOT claim', () => {
     ]);
   });
 
-  test('a brace literal rejects `a: 1` as before', () => {
-    expect(codes('{a: 1}')).toEqual([
-      'closing-bracket-expected',
-      'brace-set-literal',
-      'unexpected-symbol',
-    ]);
+  test('a brace literal reads `a: 1` as the entry `a -> 1`, with an error', () => {
+    expect(codes('{a: 1}')).toEqual(['dictionary-arrow-expected']);
   });
 });
 
