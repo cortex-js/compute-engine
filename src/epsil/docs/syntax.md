@@ -393,6 +393,11 @@ names from the expression itself — `((x: number) => x + 1)(x: 5)` is
 `6`, and unannotated parameters work there too,
 `((x, y) => x - y)(y: 2, x: 10)` is `8`.
 
+A function definition that shadows a library operator uses the names of
+its own parameters. For example, after
+`function Max(a: number, b: number) { a - b }`, the call
+`Max(b: 1, a: 5)` gives `4`.
+
 A function stored in a field of a record or a dictionary takes names in
 two cases. When the record is a `const`, its field cannot change, so the
 call is the same as a call of the function in the field: its names, and

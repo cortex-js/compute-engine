@@ -86,6 +86,10 @@
   In `let h = () => mean(3)` above `let mean = (x) => x + 4`, hover and
   go-to-definition find the local variable, and renaming it updates the call.
 
+- **Named calls use the parameters of a function that shadows a library operator.**
+  After `function Max(a: number, b: number) { a - b }`, calling
+  `Max(b: 1, a: 5)` gives `4`.
+
 - **Reads of structural pixel cells keep their field names.** For an array
   whose cell type is an alias of `tuple<r: Byte, g: Byte, b: Byte, a: Byte>`,
   `img[2].g` now reads the same byte as `img[2][2]`, where it previously gave

@@ -134,6 +134,21 @@ describe('Program uses one sequence on every execution route', () => {
     }
   });
 
+  test.each(['Max', 'Divide', 'Complex'])(
+    'a function that shadows %s keeps its parameter names',
+    (name) => {
+      const ce = new ComputeEngine();
+      const source = `function ${name}(a: number, b: number) { a - b }`;
+      const call = `${name}(b: 1, a: 5)`;
+      const inProgram = executeEpsil(ce, `${source}\n${call}`);
+      expect(inProgram.diagnostics).toEqual([]);
+      expect(inProgram.value.json).toBe(4);
+      const afterProgram = executeEpsil(ce, call);
+      expect(afterProgram.diagnostics).toEqual([]);
+      expect(afterProgram.value.json).toBe(4);
+    }
+  );
+
   test('hoisted function constant-write diagnostics retain original source sites', () => {
     for (const source of ['const c=1; function f(x) scope {c=x}; f(2)', 'function f(x) scope {c=x}; const c=1; f(2)']) {
       const result = executeEpsil(new ComputeEngine(), source);
