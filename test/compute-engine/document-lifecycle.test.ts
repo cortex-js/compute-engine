@@ -1967,6 +1967,49 @@ describe('rows given as the JSON of their bodies, over the axes x and y', () => 
     recursive,
   ];
 
+  test('a cached field call cannot resolve to a different generated helper in a later revision', () => {
+    const first = prepare({
+      A: [[], ['Add', 'x', 1]],
+      B: [[], ['Add', 'x', 10]],
+    });
+    const firstHead = ce.expr('A', { scope: first.scope }).operator;
+    try {
+      expect(errors(first)).toBe('[]');
+      expect(first.definitions[0]).toMatchObject({
+        name: 'A',
+        fieldHelper: firstHead,
+        fieldParameters: ['x'],
+      });
+      const cachedCall = ce.expr([firstHead, 3], { scope: first.scope });
+      const second = prepare({
+        B: [[], ['Add', 'x', 20]],
+        A: [[], ['Add', 'x', 2]],
+        c: [[], 1],
+      });
+      try {
+        expect(errors(second)).toBe('[]');
+        const secondHead = ce.expr('B', { scope: second.scope }).operator;
+        expect(second.definitions[0].fieldHelper).toBe(secondHead);
+        expect(second.definitions[2].fieldHelper).toBeUndefined();
+        expect(second.scope.bindings.has(firstHead)).toBe(false);
+        expect(cachedCall.evaluate().json).toBe(4);
+        expect(value(second, [secondHead, 3])).toBe('23');
+      } finally {
+        second.dispose();
+      }
+    } finally {
+      first.dispose();
+    }
+    const third = prepare({ C: [[], ['Add', 'x', 30]] });
+    try {
+      expect(errors(third)).toBe('[]');
+      expect(third.scope.bindings.has(firstHead)).toBe(false);
+      expect(third.definitions[0].fieldHelper).toBeDefined();
+    } finally {
+      third.dispose();
+    }
+  });
+
   describe('a recursive function with no stated types', () => {
     test('binds when the body narrows a parameter (CE-1692)', () => {
       const revision = prepare({

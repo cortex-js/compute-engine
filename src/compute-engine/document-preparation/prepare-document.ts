@@ -73,6 +73,12 @@ export interface PreparedDocumentDefinition {
   readonly body: Expression;
   readonly references: readonly string[];
   readonly fieldParameters?: readonly string[];
+  /** The generated callable of a field row, with arguments in
+   * `fieldParameters` order. CE gives each generated field binding a
+   * distinct name within an engine. The callable belongs to the revision
+   * that prepared it. Treat its name as opaque and resolve it in that
+   * revision's scope while the revision is open. */
+  readonly fieldHelper?: string;
   /**
    * Advisory argument types of a function row, one entry per parameter: the
    * join of the static types of the arguments at that position in every call
@@ -149,7 +155,10 @@ export interface PreparedDocumentRevision {
    * a new revision to change definitions.
    */
   readonly scope: InspectableScope;
-  /** The parsed entry of every input row, by row ID. A rejected row keeps
+  /** The parsed entry of every input row, by row ID. Use this with the
+   * current revision when rebuilding a consumer expression after an edit.
+   * Boxed expressions and serialized calls of generated helpers belong to
+   * the revision whose bindings they use. A rejected row keeps
    * its parsed entry when it has one, and otherwise has its diagnostic.
    * `rowErrors` holds the diagnostic of each rejected row. */
   readonly rawRows: ReadonlyMap<string, MathJsonExpression>;
@@ -775,6 +784,21 @@ function callSiteTypes(
   return result;
 }
 
+const lastFieldHelper = new WeakMap<IComputeEngine, number>();
+
+function nextFieldHelper(
+  ce: IComputeEngine,
+  rowNames: ReadonlySet<string>
+): string {
+  let index = lastFieldHelper.get(ce) ?? 0;
+  let name: string;
+  do {
+    name = `cePreparedField_tmp${++index}`;
+  } while (rowNames.has(name) || ce.lookupDefinition(name) !== undefined);
+  lastFieldHelper.set(ce, index);
+  return name;
+}
+
 export function prepareDocument(
   ce: IComputeEngine,
   parent: Scope,
@@ -813,7 +837,10 @@ export function prepareDocument(
       const rawRows = new Map<string, MathJsonExpression>();
       const unparsedEntries: DraftRow[] = [];
       const bodies = new Map<string, ReturnType<typeof ce.box>>();
-      const fieldParameters = new Map<string, readonly string[]>();
+      const fields = new Map<
+        string,
+        { fieldHelper: string; fieldParameters: readonly string[] }
+      >();
       const rowReferences = new Map<string, readonly string[]>();
       const rowErrors = new Map<string, Expression>();
       // The document values that a row asked for as indexed bases and that
@@ -1241,11 +1268,6 @@ export function prepareDocument(
               const parameters = [...fieldAxes].filter((axis) =>
                 axes.has(axis)
               );
-              const helper = ce.temporaryName(
-                'cePreparedField',
-                names.values,
-                names.callables
-              );
               const literal = ce.box([
                 'Function',
                 body,
@@ -1271,6 +1293,7 @@ export function prepareDocument(
                     name + ': initializer does not match ' + first.row.valueType
                   )
                 );
+              const helper = nextFieldHelper(ce, names.values);
               const helperBinding = installClosedType(
                 helper,
                 literal.type,
@@ -1279,7 +1302,10 @@ export function prepareDocument(
               preparedCalls.set(helperBinding.value, null);
               ce.assign(helper, literal);
               ce.declare(name, { macro: [helper, ...parameters] });
-              fieldParameters.set(name, parameters);
+              fields.set(name, {
+                fieldHelper: helper,
+                fieldParameters: parameters,
+              });
               bodies.set(name, ce.box(body, { form: 'raw' }));
               return;
             }
@@ -1801,7 +1827,7 @@ export function prepareDocument(
         [...declarations]
           .filter(
             ([name, { row }]) =>
-              !rowErrors.has(row.id) && !fieldParameters.has(name)
+              !rowErrors.has(row.id) && !fields.has(name)
           )
           .map(([name]) => bodies.get(name)!),
         arities,
@@ -1821,12 +1847,12 @@ export function prepareDocument(
         if (isSymbol(expr))
           return (
             !bound.has(expr.symbol) &&
-            (fieldAxes.has(expr.symbol) || fieldParameters.has(expr.symbol))
+            (fieldAxes.has(expr.symbol) || fields.has(expr.symbol))
           );
         if (isDictionary(expr))
           return expr.values.some((value) => readsField(value, bound));
         if (!isFunction(expr)) return false;
-        if (!bound.has(expr.operator) && fieldParameters.has(expr.operator))
+        if (!bound.has(expr.operator) && fields.has(expr.operator))
           return true;
         const names = boundNames(ce, expr);
         const inner =
@@ -1871,9 +1897,7 @@ export function prepareDocument(
         rawBody: parsed.get(item.row.id)!,
         body: bodies.get(name)!,
         references: references.get(name)!,
-        ...(fieldParameters.has(name)
-          ? { fieldParameters: fieldParameters.get(name)! }
-          : {}),
+        ...fields.get(name),
         ...(item.row.role === 'function'
           ? { callSiteTypes: callSites.get(name)! }
           : {}),
@@ -1884,7 +1908,7 @@ export function prepareDocument(
           row?.role === 'value' &&
           writableSlots?.has(name) === true &&
           !rowErrors.has(row.id) &&
-          !fieldParameters.has(name)
+          !fields.has(name)
         );
       }
       checkDeadline(ce._deadlineFrame);

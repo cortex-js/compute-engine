@@ -66,6 +66,13 @@
 
 ### Resolved Issues
 
+- **Prepared document field helpers have distinct names across revisions of
+  an engine.** A cached call of the helper for `A = x + 1` can no longer
+  resolve to the generated helper for `B = x + 10` after rows are reordered.
+  `PreparedDocumentDefinition.fieldHelper` gives the callable's opaque name,
+  with arguments in `fieldParameters` order. Use it in its own revision's
+  scope.
+
 - **Compiled JavaScript compares the length of the mask of a selection at
   each position with its list arms.** With `L, N: list<real>`,
   `If(N > 0, L, 0)` at `N = [1, -1, 1]`, `L = [1, 2]` gave
