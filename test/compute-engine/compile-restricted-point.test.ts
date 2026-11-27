@@ -214,7 +214,7 @@ describe('A point with an undecided component type beside a list', () => {
     [
       'a point times a list',
       ['Multiply', ['Tuple', 'x', 1], ['List', 1, 2]],
-      /^float (v\d+) = vec2\(x, 1\.0\)\[int\(1\.0\)\];\nreturn vec2\[2\]\(vec2\(\(x \* 1\.0\), \(\1 \* 1\.0\)\), vec2\(\(x \* 2\.0\), \(\1 \* 2\.0\)\)\);$/,
+      /^vec2 (v\d+) = vec2\(x, 1\.0\);\nreturn vec2\[2\]\(\(\1 \* 1\.0\), \(\1 \* 2\.0\)\);$/,
     ],
     [
       'a point divided by a list',
