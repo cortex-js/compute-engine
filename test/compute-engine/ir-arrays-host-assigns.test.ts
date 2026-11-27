@@ -653,3 +653,61 @@ let f = (t: real) => sum(g(k), k, 1, 3) + t`
     expect(compiled(ce, 'f').run(1)).toBe(13);
   });
 });
+
+test('a callback before the first assignment observes the original exact value', () => {
+  const ce = new ComputeEngine();
+  ce.declare('s', 'real');
+  const pi = ce.box('Pi');
+  ce.assign('s', pi);
+  ce.declare('hostProbe', {
+    signature: '() -> real',
+    evaluate: () => ce.number(ce.box('s').evaluate().isSame(pi) ? 1 : 0),
+  });
+  executeEpsil(ce, `let f = (n: integer) => do {
+    let observed = hostProbe()
+    if n > 0 { s = n }
+    observed
+  }`);
+  const run = compile(ce.box('f').evaluate(), { fallback: false }).run as Run;
+
+  expect(run(0)).toBe(1);
+  expect(ce.box('s').evaluate().isSame(pi)).toBe(true);
+  expect(run(2)).toBe(1);
+  expect(ce.box('s').evaluate().json).toBe(2);
+});
+
+test.each(['arrayAllocation', 'arrayCreated'] as const)(
+  '%s observes earlier stores and can replace an array used later',
+  (hook) => {
+    const { ce } = engine(`let board = arrayFrom([1], "integer<0..255>")
+      let replacement = arrayFrom([9], "integer<0..255>")
+      let f = (n: integer) => do {
+        board[1] = 4
+        let copy = arrayFrom(repeat(2, n), "integer<0..255>")
+        length(copy) + board[1]
+      }`);
+    const run = compile(ce.box('f').evaluate(), { fallback: false }).run as Run;
+    const replacement = ce.box('replacement').evaluate();
+    const seen: unknown[] = [];
+    const epoch = ce._objectStoreEpoch;
+    ce[hook] = () => {
+      seen.push([ce.box(['At', 'board', 1]).evaluate().json, ce._objectStoreEpoch]);
+      ce.assign('board', replacement);
+      return true;
+    };
+    expect(run(2)).toBe(11);
+    expect(seen).toEqual([[4, epoch + 1]]);
+  }
+);
+
+test('an allocation cannot replace a parameter with a helper’s global array', () => {
+  const { ce } = engine(`let board = arrayFrom([1], "integer<0..255>")
+    let readGlobal = () => board[1]
+    let f = (board: array<integer<0..255>>) => do {
+      let copy = arrayFrom([0], "integer<0..255>")
+      board[1] + readGlobal()
+    }`);
+  expect(() => compile(ce.box('f').evaluate(), { fallback: false })).toThrow(
+    /parameter that hides the engine variable board/
+  );
+});

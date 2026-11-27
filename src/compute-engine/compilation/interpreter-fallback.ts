@@ -9,6 +9,7 @@ import { isOperatorDef, isValueDef } from '../boxed-expression/utils.js';
 import { rewriteWithBinders } from '../boxed-expression/binders.js';
 import { withBindingValuesFn } from '../engine-declarations.js';
 import {
+  isSealedImportValue,
   isSealedPreparedNamespace,
   withoutAdmittedValueWrites,
 } from '../boxed-expression/prepared-import-binding.js';
@@ -91,10 +92,13 @@ export function callerScopeOf(ce: { context: { lexicalScope: Scope } }): Scope {
  * head that the caller of `compile()` implements with its `functions`
  * option).
  */
+type SymbolOccurrence = Expression & { symbol: string; _homeScope?: Scope };
+
 export function namesRead(
   expr: Expression,
-  skipBodies?: (name: string) => boolean
-): Map<string, Expression & { symbol: string }> {
+  skipBodies?: (name: string) => boolean,
+  visitSymbol?: (sym: SymbolOccurrence) => void
+): Map<string, SymbolOccurrence> {
   const freeOccurrences = new Map<string, Expression & { symbol: string }>();
   // A held occurrence (not canonical) is bound to no definition: the
   // interpreter reads the definition of its name in the scope of the call
@@ -120,6 +124,7 @@ export function namesRead(
       e,
       (sym, shadowed) => {
         if (shadowed?.has(sym.symbol)) return sym;
+        visitSymbol?.(sym);
         const seen = freeOccurrences.get(sym.symbol);
         if (seen === undefined || (!seen.isCanonical && sym.isCanonical))
           freeOccurrences.set(sym.symbol, sym);
@@ -190,7 +195,8 @@ export function inputNamesRead(
   varsKeys?: ReadonlySet<string>,
   skipBodies?: (name: string) => boolean
 ): string[] {
-  return inputsRead(expr, varsKeys, skipBodies).map((x) => x.name);
+  const explicit = varsKeys && new Map([...varsKeys].map((name) => [name, undefined]));
+  return inputsRead(expr, explicit, skipBodies).map((x) => x.name);
 }
 
 /**
@@ -199,14 +205,19 @@ export function inputNamesRead(
  */
 function inputsRead(
   expr: Expression,
-  varsKeys?: ReadonlySet<string>,
-  skipBodies?: (name: string) => boolean
+  explicitTypes?: ReadonlyMap<string, Type | undefined>,
+  skipBodies?: (name: string) => boolean,
+  inferExplicitType = false
 ): { name: string; type?: Type }[] {
   const scope = callerScopeOf(expr.engine);
   const result: { name: string; type?: Type }[] = [];
   for (const [name, sym] of namesRead(expr, skipBodies)) {
-    if (varsKeys?.has(name)) {
-      result.push({ name });
+    if (explicitTypes?.has(name)) {
+      const def = inferExplicitType ? definitionRead(sym, name, scope) : undefined;
+      result.push({
+        name,
+        type: explicitTypes?.get(name) ?? (isValueDef(def) ? def.value.type.type : undefined),
+      });
       continue;
     }
     const def = definitionRead(sym, name, scope);
@@ -219,6 +230,14 @@ function inputsRead(
       result.push({ name, type: sym.type.type });
   }
   return result;
+}
+
+/** Types of the inputs the fallback runner accepts, including explicit overrides. */
+export function fallbackInputsRead(
+  expr: Expression,
+  explicit: ReadonlyMap<string, Type | undefined>
+): { name: string; type?: Type }[] {
+  return inputsRead(expr, explicit, undefined, true);
 }
 
 /**
@@ -257,7 +276,8 @@ function interpreterRun(
   expr: Expression,
   absence: { objectNull: boolean; writtenNumeric: boolean },
   observe?: (value: Expression) => void,
-  callable = false
+  callable = false,
+  explicitInputs?: ReadonlyMap<string, Type | undefined>
 ): { calling: 'lambda' | 'expression'; run: CompiledRunner } {
   const ce = expr.engine;
   // The color value of an evaluated color node, or `undefined` when `e` is
@@ -552,7 +572,14 @@ function interpreterRun(
   };
   // The inputs of `run` below are given to the definitions that the
   // occurrences of `namesRead()` are bound to.
-  const freeOccurrences = namesRead(expr);
+  const explicitOccurrences = new Map<string, Set<SymbolOccurrence>>();
+  const freeOccurrences = namesRead(expr, undefined, (sym) => {
+    if (!explicitInputs?.has(sym.symbol)) return;
+    let occurrences = explicitOccurrences.get(sym.symbol);
+    if (occurrences === undefined)
+      explicitOccurrences.set(sym.symbol, (occurrences = new Set()));
+    occurrences.add(sym);
+  });
   // The scope that a name of a held operand resolves from: a held operand
   // is bound when it is evaluated, and `run` evaluates `expr` in the scope
   // that is current when the fallback is built, the scope `compile()` is
@@ -571,18 +598,12 @@ function interpreterRun(
   // (`fallbackRun` substitutes its value); otherwise it is ignored, as a
   // name that the expression does not read.
   const bindingOf = (
-    k: string,
+    sym: SymbolOccurrence | undefined,
     declare: boolean,
     sealed?: Set<string>
   ): BoxedDefinition | undefined => {
-    const sym = freeOccurrences.get(k) as
-      | (Expression & {
-          symbol: string;
-          _resolvedDefinition(): BoxedDefinition | undefined;
-          _homeScope?: Scope;
-        })
-      | undefined;
     if (sym === undefined) return undefined;
+    const k = sym.symbol;
     const resolve = (): BoxedDefinition | undefined =>
       definitionRead(sym, k, buildScope);
     const found = resolve();
@@ -616,10 +637,11 @@ function interpreterRun(
   // value given by `run` below must admit the argument value under that
   // declaration's shape.
   const declaredTypeOf = (k: string): Type | undefined => {
-    const def = bindingOf(k, false);
-    if (!isValueDef(def)) return undefined;
-    const t = def.value.type.type;
-    return t === 'unknown' || t === 'any' ? undefined : t;
+    const def = bindingOf(freeOccurrences.get(k), false);
+    const type = isValueDef(def) ? def.value.type.type : undefined;
+    return type === undefined || type === 'unknown' || type === 'any'
+      ? explicitInputs?.get(k)
+      : type;
   };
 
   // A function literal (lambda) uses the positional `lambda` calling
@@ -654,7 +676,7 @@ function interpreterRun(
     // a color, a list, a string and a boolean are boxed as such, and any
     // other argument is a number. An input that the expression does not
     // read is ignored.
-    const values: Record<string, Expression> = {};
+    const values: Record<string, Expression | undefined> = Object.create(null);
     const bindings: { name: string; record: BoxedDefinition }[] = [];
     // The inputs with no definition whose declaration a sealed namespace
     // refuses: their values are substituted in `expr` (`subs()` leaves a
@@ -669,23 +691,55 @@ function interpreterRun(
     const substituted: Record<string, Expression> = Object.create(null);
     if (vars && typeof vars === 'object')
       for (const [k, v] of Object.entries(vars)) {
-        const record = bindingOf(k, true, sealed);
-        if (record === undefined && !sealed.has(k)) continue;
-        if (record !== undefined) bindings.push({ name: k, record });
-        const target = record === undefined ? substituted : values;
-        target[k] = isComplexArg(v)
-          ? ce.number(ce.complex(v.re, v.im))
-          : isColorArg(v)
-            ? boxArg(v)
-            : Array.isArray(v)
-              ? boxArg(v, declaredTypeOf(k))
-              : typeof v === 'string'
-                ? ce.string(v)
-                : typeof v === 'boolean'
-                  ? v
-                    ? ce.True
-                    : ce.False
-                  : ce.number(v as number);
+        const preferred = freeOccurrences.get(k);
+        if (preferred === undefined) continue;
+        const records = new Set<object>();
+        const occurrences = explicitOccurrences.get(k) ?? [preferred];
+        const givenType = explicitInputs?.get(k);
+        const value =
+          v === undefined
+            ? undefined
+            : isComplexArg(v)
+              ? ce.number(ce.complex(v.re, v.im))
+              : isColorArg(v)
+                ? boxArg(v)
+                : Array.isArray(v)
+                  ? boxArg(v, declaredTypeOf(k))
+                  : typeof v === 'string'
+                    ? ce.string(v)
+                    : typeof v === 'boolean'
+                      ? v
+                        ? ce.True
+                        : ce.False
+                      : ce.number(v as number);
+        for (const sym of occurrences) {
+          const record = bindingOf(sym, value !== undefined, sealed);
+          if (record === undefined) continue;
+          // A decline still permits the ordinary caller binding. A called
+          // body can read a different, unassignable definition of its name.
+          if (sym !== preferred) {
+            if (!isValueDef(record) || record.value.isConstant) continue;
+            const def = record.value;
+            const contract = def._placeholderSkeleton ?? def.type.type;
+            if (
+              isSealedImportValue(def) &&
+              (givenType === undefined || !isSubtype(givenType, contract))
+            )
+              continue;
+            if (
+              value !== undefined &&
+              !def.inferredType &&
+              provablyDisjoint(value._literalType ?? value.type.type, contract)
+            )
+              continue;
+          }
+          const definition = isValueDef(record) ? record.value : record;
+          if (records.has(definition)) continue;
+          records.add(definition);
+          bindings.push({ name: k, record });
+        }
+        if (records.size > 0) values[k] = value;
+        if (sealed.has(k) && value !== undefined) substituted[k] = value;
       }
     return ce._inScope(buildScope, () =>
       withBindingValuesFn(ce, bindings, values, () =>
@@ -737,7 +791,7 @@ export function interpreterFallback(
   expr: Expression,
   error: string,
   diagnostic: CompileDiagnostic,
-  varsKeys?: ReadonlySet<string>,
+  explicitInputs?: ReadonlyMap<string, Type | undefined>,
   observe?: (value: Expression) => void,
   callable = true
 ): CompilationResult<'javascript'> {
@@ -748,7 +802,8 @@ export function interpreterFallback(
       writtenNumeric: false,
     },
     observe,
-    callable
+    callable,
+    explicitInputs
   );
   const unsupported: string[] = [];
   if (diagnostic.operator !== undefined) unsupported.push(diagnostic.operator);
@@ -774,7 +829,7 @@ export function interpreterFallback(
     x.ops.forEach(declared);
   };
   declared(expr);
-  const inputs = inputsRead(expr, varsKeys);
+  const inputs = inputsRead(expr, explicitInputs);
   for (const { name, type } of inputs) {
     const t = type === undefined ? undefined : resolveTypeAlias(type);
     if ((t === 'unknown' || t === 'any') && !locals.has(name))

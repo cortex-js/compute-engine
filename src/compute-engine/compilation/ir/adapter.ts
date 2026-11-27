@@ -394,6 +394,7 @@ function assigningRun(
   expr: Expression,
   assigns: readonly Assigned[],
   arity: number,
+  stagedAssignments: boolean,
   call: (args: unknown[]) => unknown,
   inDigits: <T>(g: () => T) => T
 ): (...args: unknown[]) => unknown {
@@ -401,11 +402,12 @@ function assigningRun(
   return (...args: unknown[]) =>
     inDigits(() => {
       const given = Array.from({ length: arity }, (_, k) => args[k]);
-      const r = call([...given, ...assigns.map(readAssigned)]) as unknown[];
+      const r = call([...given, ...assigns.map((x) => readAssigned(ce, x))]) as unknown[];
       // A name that the code only reads is not written back.
-      assigns.forEach((x, k) => {
-        if (!x.read) writeAssigned(ce, x, r[k + 1]);
-      });
+      if (!stagedAssignments)
+        assigns.forEach((x, k) => {
+          if (!x.read) writeAssigned(ce, x, r[k + 1]);
+        });
       return normalizeRunResult(r[0]);
     });
 }
@@ -491,6 +493,8 @@ function compileIr(
       'a record of fields named re and im as the result, which the result convention reads as a complex number'
     );
   const literal = entry.literal === true;
+  const positional = argumentIndex(entry, entry.positional ?? 0);
+  const arity = positional - (p.assigns?.length ?? 0);
   // The names whose value is an array, which `run()` gives the code from
   // the engine at each call (`ArrayUse.names`): not inputs of the host.
   const arrays = p.arrays;
@@ -546,16 +550,16 @@ function compileIr(
     if (entry.lengthOf[k]) return;
     if (t.lane === 'array') {
       // An assigned variable is checked by its read (`readAssigned()`).
-      if (arrayNames.has(name) || p.assigns?.some((x) => x.name === name))
+      if (
+        (literal && i >= arity && i < positional) ||
+        ((!literal || i >= positional) && arrayNames.has(name))
+      )
         return;
-      if (checks)
-        plan.kinds.set(key, {
-          label: literal ? `argument ${i + 1}` : `"${name}"`,
-          check: arrayEntryCheck(
-            t.array!,
-            literal ? `argument ${i + 1}` : `"${name}"`
-          ),
-        });
+      const label = literal ? `argument ${i + 1}` : `"${name}"`;
+      plan.kinds.set(key, {
+        label,
+        check: arrayEntryCheck(expr.engine, t.array!, label),
+      });
       return;
     }
     // A tuple read part by part (`partOf`) is an array input, checked once,
@@ -609,7 +613,7 @@ function compileIr(
   const note = arrays?.stores === true ? arrayNote(expr.engine) : undefined;
   const named = (arrays?.names ?? []).map((x) => ({
     ...x,
-    check: arrayEntryCheck(x.cells, `The variable "${x.name}"`),
+    check: arrayEntryCheck(expr.engine, x.cells, `The variable "${x.name}"`),
   }));
   const f: (...args: unknown[]) => unknown =
     arrays === undefined
@@ -624,8 +628,7 @@ function compileIr(
               given[x.name] = v;
             }
             if (literal) {
-              const n = argumentIndex(entry, entry.positional ?? 0);
-              return raw(...args.slice(0, n), given);
+              return raw(...args.slice(0, positional), given);
             }
             const vars = args[0];
             return raw(
@@ -709,7 +712,8 @@ function compileIr(
       ? assigningRun(
           expr,
           assigns,
-          argumentIndex(entry, entry.positional ?? 0) - assigns.length,
+          arity,
+          p.stagedAssignments === true,
           (args) => f(...(unchecked ? args : checkEntry(entryPlan, args))),
           inDigits
         )

@@ -208,3 +208,135 @@ describe('COMPILE the inputs option', () => {
     expect(ce.lookupDefinition('w')).toBeUndefined();
   });
 });
+
+describe('explicit inputs on interpreter fallback', () => {
+  const engine = () => {
+    const ce = new ComputeEngine();
+    ce.declare('HostDouble', {
+      signature: '(real) -> any',
+      evaluate: ([value]) => value.mul(ce.number(2)),
+    });
+    return ce;
+  };
+
+  test.each(['javascript', 'glsl', 'interval-js'] as const)(
+    'an assigned typed input stays in the %s report after a decline',
+    (to) => {
+      const ce = engine();
+      ce.declare('a', 'real');
+      ce.assign('a', 4);
+      const result = compile(ce.box(['HostDouble', 'a']), {
+        to,
+        inputs: { a: 'real' },
+      });
+      expect(result.success).toBe(false);
+      expect(result.freeSymbols).toEqual(['a']);
+    }
+  );
+
+  test('a valid storage hint survives typed-input fallback', () => {
+    const ce = engine();
+    ce.declare('S', 'list<real^3>');
+    ce.assign('S', ce.box(['List', 10, 20, 30]));
+    ce.declare('i', 'integer');
+    const result = compile(ce.box(['HostDouble', ['At', 'S', 'i']]), {
+      to: 'glsl',
+      inputs: { S: 'list<real^3>' },
+      storage: { S: 'sampler2D' },
+    });
+    expect(result.success).toBe(false);
+    expect(run(result, { S: [1, 2, 3], i: 2 })).toBe(4);
+  });
+
+  test('fallback boxes array arguments for the original binding', () => {
+    const ce = engine();
+    ce.declare('L', 'list<real>');
+    ce.assign('L', ce.box(['List', 1, 2]));
+    const result = compile(ce.box(['HostDouble', ['At', 'L', 1]]), {
+      inputs: { L: 'tuple<real, real>' },
+    });
+    expect(result.success).toBe(false);
+    expect(run(result, { L: [3, 4] })).toBe(6);
+  });
+
+  test('interval fallback reads a string Boolean for an assigned input', () => {
+    const ce = engine();
+    ce.declare('b', 'boolean');
+    ce.assign('b', true);
+    const result = compile(ce.box(['If', 'b', 1, ['HostDouble', 3]]), {
+      to: 'interval-js',
+      inputs: { b: 'boolean' },
+    });
+    expect(result.success).toBe(false);
+    expect(run(result, { b: 'false' })).toEqual(run(result, { b: false }));
+    expect(run(result, { b: 'false' })).toEqual({
+      kind: 'interval',
+      value: { lo: 6, hi: 6 },
+    });
+  });
+
+  test('an undecided interval Boolean hides the stored choice during fallback', () => {
+    const ce = engine();
+    ce.declare('b', 'boolean');
+    ce.assign('b', true);
+    let calls = 0;
+    ce.declare('HostProbe', {
+      signature: '() -> real',
+      evaluate: () => {
+        calls++;
+        return ce.number(1);
+      },
+    });
+    const result = compile(ce.box(['If', 'b', ['HostProbe'], 0]), {
+      to: 'interval-js',
+      inputs: { b: 'boolean' },
+    });
+    expect(result.success).toBe(false);
+    run(result, { b: 'maybe' });
+    expect(calls).toBe(0);
+    expect(ce.box('b').evaluate().json).toBe('True');
+  });
+
+  test.each([
+    { inputs: { a: 'real' } },
+    { symbolic: ['a'] },
+    { vars: { a: '_.a' } },
+  ])('an override reaches both lexical bindings with %o', (options) => {
+    const ce = engine();
+    ce.declare('x', 'real');
+    ce.declare('a', 'real');
+    ce.assign('a', 10);
+    ce.parse('f(x) := a x').evaluate();
+    ce.pushScope();
+    try {
+      ce.declare('a', 'real');
+      ce.assign('a', 100);
+      const expr = ce.box(['Add', ['f', 'x'], ['HostDouble', 'a']]);
+      const result = compile(expr, options);
+      expect(result.success).toBe(false);
+      expect(run(result, { a: 3, x: 2 })).toBe(12);
+      expect(ce.box('a').evaluate().json).toBe(100);
+    } finally {
+      ce.popScope();
+    }
+    expect(ce.box('a').evaluate().json).toBe(10);
+  });
+
+  test('a refused override keeps the caller binding and the called constant', () => {
+    const ce = engine();
+    ce.declare('x', 'real');
+    ce.declare('a', { type: 'real', value: 10, isConstant: true });
+    ce.parse('f(x) := a x').evaluate();
+    ce.pushScope();
+    try {
+      ce.declare('a', 'real');
+      ce.assign('a', 100);
+      const expr = ce.box(['Add', ['f', 'x'], ['HostDouble', 'a']]);
+      const result = compile(expr, { inputs: { a: 'real' } });
+      expect(result.success).toBe(false);
+      expect(run(result, { a: 3, x: 2 })).toBe(26);
+    } finally {
+      ce.popScope();
+    }
+  });
+});

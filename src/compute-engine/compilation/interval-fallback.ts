@@ -24,12 +24,11 @@ import { kindTypeNames } from '../boxed-expression/value-kinds.js';
 import type { Type } from '../../common/type/types.js';
 import { isSubtype } from '../../common/type/subtype.js';
 import { isBooleanBindingType } from './type-facts.js';
-import { interpreterFallback } from './interpreter-fallback.js';
+import { fallbackInputsRead, interpreterFallback } from './interpreter-fallback.js';
 import { compileDiagnosticOf } from './diagnostics.js';
 import { isRecord, hasIntervalBounds } from '../interval/run-support.js';
 import type {
   CompileDiagnostic,
-  CompilationOptions,
   CompilationResult,
   CompiledRunner,
   IntervalInput,
@@ -239,21 +238,14 @@ function hasWideIntervalInput(value: unknown): boolean {
   return false;
 }
 
-/** The free variables of `expr` whose type is `boolean` or
- * `boolean | missing` (`isBooleanBindingType`). */
-function declaredBooleanNames(expr: Expression): string[] {
-  return expr.unknowns.filter((name) =>
-    isBooleanBindingType(expr.engine.symbol(name).type?.type)
-  );
-}
 
 /**
  * The arguments of the interpreter fallback with the boolean variables
  * (`names`, declared `boolean`) of a vars object read as the interpreter
  * reads them: `'true'` is `true` and `'false'` is `false`, the strings the
  * compiled code of this target tests (`IntervalInput`). `'maybe'` says the
- * value can be either one: the variable is left out, so a condition on it
- * has no value, and `maybe` is true, which makes the call wide (a boolean
+ * value can be either one: the variable's value is cleared for the run, so
+ * a condition on it has no value, and `maybe` is true, which makes the call wide (a boolean
  * result is then `'maybe'`, as over an interval wider than a point). A
  * JavaScript boolean passes as it is. The caller's object is not changed.
  */
@@ -275,7 +267,7 @@ function booleanFallbackInputs(
       unknown
     >;
     if (v === 'maybe') {
-      delete copy[name];
+      copy[name] = undefined;
       maybe = true;
     } else copy[name] = v === 'true';
   }
@@ -339,15 +331,12 @@ function varsEntries(value: unknown): unknown {
 export function buildIntervalFallback(
   expr: Expression,
   error: string,
-  options: Pick<CompilationOptions, 'vars'>,
+  inputs: ReadonlyMap<string, Type | undefined>,
   diagnostic?: CompileDiagnostic
 ): CompilationResult<'interval-js', IntervalValue> {
   console.warn(
     `Compilation fallback for "${expr.operator}" (target: interval-js): ${error}`
   );
-  const varsKeys = options.vars
-    ? new Set(Object.keys(options.vars))
-    : undefined;
   // Whether the numbers of the value of the last run are exactly doubles,
   // read while the run's inputs are bound (a lazy collection reads them).
   let exact: Exactness | undefined;
@@ -363,7 +352,7 @@ export function buildIntervalFallback(
         e,
         error,
         diagnostic ?? compileDiagnosticOf(undefined, error),
-        varsKeys,
+        inputs,
         (value) => {
           if (!wantExact) return;
           exact = exactnessOf(value);
@@ -403,7 +392,11 @@ export function buildIntervalFallback(
   // `'maybe'`, and the interpreter reads a boolean: the strings are
   // converted for them, and for no other variable (a `string` variable
   // keeps its text).
-  const booleanNames = new Set(declaredBooleanNames(expr));
+  const booleanNames = new Set(
+    fallbackInputsRead(expr, inputs)
+      .filter(({ type }) => isBooleanBindingType(type))
+      .map(({ name }) => name)
+  );
   const draws = drawsRandom(expr);
   const run: CompiledRunner<IntervalValue, IntervalInput> = (
     ...args: unknown[]

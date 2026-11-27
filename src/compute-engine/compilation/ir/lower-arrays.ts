@@ -141,12 +141,17 @@ export function holdsArray(t: IRType): boolean {
  *  cell types of two arrays (one storage, one cell type). It throws the
  *  `TypeError` of the entry for another value. */
 export function arrayEntryCheck(
+  engine: ComputeEngine,
   cells: ArrayCells,
   label: string
 ): (x: unknown) => boolean {
   const kind = arrayStorageKind(cells.type);
   return (x) => {
     const a = x as Expression | undefined;
+    if (isMutableArray(a) && a.engine !== engine)
+      throw new TypeError(
+        `object-foreign-engine: ${label} belongs to a different engine.`
+      );
     if (
       isMutableArray(a) &&
       a._storage === kind.storage &&
@@ -738,7 +743,7 @@ export function arrayLowering(
 
     /** `ArrayFrom(xs, type)`: one call of the engine (`ArrayUse.makers`), of
      *  a list of numbers that the code holds, a `Repeat(v, n)` or an array. */
-    from: (e: Fn): V => {
+    from: (e: Fn, after?: () => void): V => {
       readOnly(e, 'ArrayFrom (a construction)');
       const cells = cellsOf(e, e.type.type);
       if (cells === undefined)
@@ -771,6 +776,7 @@ export function arrayLowering(
           t
         );
         makers.push({ call: e, source: 'fill', value: vt });
+        after?.();
         return out;
       }
       const x = cx.value(xs)!;
@@ -778,6 +784,7 @@ export function arrayLowering(
       if (xt.lane === 'array') {
         const out = b.op('arr.from.copy', [x, k()], t);
         makers.push({ call: e, source: 'copy' });
+        after?.();
         return out;
       }
       if (
@@ -791,6 +798,7 @@ export function arrayLowering(
         );
       const out = b.op('arr.from.list', [x, k()], t);
       makers.push({ call: e, source: 'list' });
+      after?.();
       return out;
     },
   };

@@ -4165,11 +4165,11 @@ How an array reaches the code (`lower-arrays.ts`, `adapter.ts`):
   itself or through a user function: a name of `Program.assigns`
   (`Assigned.array`), not of `arrays`, which `run()` reads and writes back
   (`assigningRun()`) and the code writes and reads around each call of the host
-  (`state.put.arr`, `state.get.arr`);
+  (`state.stage.arr`, `state.get.arr`);
 - in a program that calls the host, itself or through a user function, a name
   whose value is an array and that the program reads: a name of
   `Program.assigns` with `Assigned.read`, reported in `arrays`, which the code
-  reads again after each call of the host (`state.get.arr`, no `state.put`) and
+  reads again after each call of the host (`state.get.arr`, no `state.stage`) and
   `run()` does not write back;
 - an array inside a value that a name holds (a named tuple):
   `_SYS.arrays.refs[k]`, bound in `runtimeOf()` as `_SYS.hosts` is, with the
@@ -4367,14 +4367,13 @@ in `adapter.ts` (JavaScript), `adapter-glsl.ts` and `adapter-interval.ts`, and
   cells is such a name too (`Assigned.array`): a positional parameter of its
   array type, a local that an `Assign` binds to another array of the same cells,
   whose reference the entry returns and `run()` writes back. A call of a
-  function of the host in such a literal (`hostCall()`) reads and writes every
-  name of `assigns`: before the `call.host<k>`, one `state.put` of the index `j`
-  and the value of each name (`_SYS.state.put(j, v)`, `writeAssigned()` of
-  `print-js.ts`, the write of `run()`), and after it one `state.get` of each, on
-  the lane of the name (`_SYS.state.get(j)`, `readAssigned()`, the read of
-  `run()`, which throws its `TypeError`), which rebinds the name
-  (`Lowering.stateWrite()`). Both operations are effectful, so they keep their
-  place around the call. The `facts()` of the call count every name, so a `Loop`
+  function of the host or an array allocation in such a literal publishes
+  earlier assignments. Each executed assignment stages its value with
+  `state.stage`. The runner publishes the staged values before the host
+  call and publishes any remaining values at successful return. After the
+  call, `state.get` reloads each value that the host could have changed
+  (`readAssigned()`). The staging and reload operations are effectful so
+  they execute in program order. The `facts()` of the call count every name, so a `Loop`
   carries them and the arms of an `If` give them; a user function that calls the
   host, itself or through its calls (`assignedNames()` records it as `host` of
   `stateOf()`), reads and writes every name that is not a list. A list name, and

@@ -441,6 +441,13 @@ describe('a matrix input: operations on its elements', () => {
   ])('one build: %s', (_, json) => {
     const { r, errors } = check(json);
     expect(errors).toBeGreaterThan(0);
+    const point = {
+      ...POINTS[3],
+      Q: [[1, 2, 3], [4, 5, 6], [7, 8, 9]],
+    };
+    const expected = interpreted(json, point);
+    expect(expected).not.toBe('error');
+    expect(agree(r.run!(point as never), expected)).toBe(true);
     expect(r.code.match(/new Array\(/g)).toHaveLength(2);
   });
 

@@ -988,3 +988,21 @@ let f = (i: integer) => invert(px[i]).r
     expect(interpreted(engine(source).ce, 'f', 1)).toBe(254);
   });
 });
+
+test.each([true, false])('array identity is checked across engines with entryChecks=%s', (entryChecks) => {
+  const ce = new ComputeEngine();
+  executeEpsil(ce, `let put = (a: array<integer<0..255>>, x: integer) => do {
+    a[1] = x
+    a[1]
+  }`);
+  const run = compile(ce.box('put').evaluate(), {
+    fallback: false,
+    entryChecks,
+  }).run as Run;
+  const other = new ComputeEngine();
+  const cells = new Uint8Array([9]);
+  expect(() => run(other.array(cells), 5)).toThrow(/object-foreign-engine/);
+  expect(cells[0]).toBe(9);
+  const local = ce.array(new Uint8Array([9]));
+  expect(run(local, 5)).toBe(5);
+});

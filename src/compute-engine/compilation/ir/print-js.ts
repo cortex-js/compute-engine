@@ -339,9 +339,9 @@ export const JS: Syntax = deepFreeze({
     'arr.from.fill': '_SYS.arrays.make[$2]($0, $1)',
     'arr.from.fillrec': '_SYS.arrays.make[$2]($0, $1)',
     // A variable of the engine around a call of the host (`operators.ts`).
-    'state.put': '_SYS.state.put($0, $1)',
-    'state.put.bool': '_SYS.state.put($0, $1)',
-    'state.put.arr': '_SYS.state.put($0, $1)',
+    'state.stage': '_SYS.state.stage($0, $1)',
+    'state.stage.bool': '_SYS.state.stage($0, $1)',
+    'state.stage.arr': '_SYS.state.stage($0, $1)',
     'state.get': '_SYS.state.get($0)',
     'state.get.int': '_SYS.state.get($0)',
     'state.get.bool': '_SYS.state.get($0)',
@@ -738,7 +738,8 @@ export function runtimeOf(
   ce?: ComputeEngine,
   hosts?: readonly HostCall[],
   arrays?: ArrayUse,
-  assigns?: readonly Assigned[]
+  assigns?: readonly Assigned[],
+  pending?: ReturnType<typeof assignmentState>
 ): SysHelpers {
   if (ce === undefined) {
     if (hosts !== undefined)
@@ -749,28 +750,68 @@ export function runtimeOf(
   }
   const sys = makeSysHelpers(engineRuntimeSource(ce));
   const note = arrays?.stores === true ? arrayNote(ce) : undefined;
+  const before = pending === undefined
+    ? note
+    : () => {
+        pending.flush();
+        note?.();
+      };
   if (hosts !== undefined)
     Object.defineProperty(sys, 'hosts', {
-      value: Object.freeze(hosts.map((h) => hostCaller(ce, h, note))),
+      value: Object.freeze(hosts.map((h) => hostCaller(ce, h, before))),
     });
-  if (hosts !== undefined && assigns !== undefined)
+  if (assigns !== undefined && (pending !== undefined || hosts !== undefined || (arrays?.makers.length ?? 0) > 0))
     Object.defineProperty(sys, 'state', {
       value: Object.freeze({
-        put: (j: number, y: unknown) => {
-          writeAssigned(ce, assigns[j], y);
+        stage: (j: number, y: unknown) => {
+          pending!.put(j, y);
           return NaN;
         },
-        get: (j: number) => readAssigned(assigns[j]),
+        get: (j: number) => readAssigned(ce, assigns[j]),
       }),
     });
   if (arrays !== undefined)
     Object.defineProperty(sys, 'arrays', {
       value: Object.freeze({
         refs: Object.freeze([...arrays.refs]),
-        make: Object.freeze(arrays.makers.map((m) => arrayMaker(ce, m))),
+        make: Object.freeze(arrays.makers.map((m) => {
+          const make = arrayMaker(ce, m);
+          return (...args: unknown[]) => {
+            before?.();
+            return make(...args);
+          };
+        })),
       }),
     });
   return sys;
+}
+
+/** Actual writes of the current call. Recursive entry from a host callback
+ *  starts a fresh frame and restores the caller's frame on exit. */
+function assignmentState(ce: ComputeEngine, assigns: readonly Assigned[]) {
+  let writes: Map<number, unknown> | undefined;
+  const flush = (): void => {
+    if (writes === undefined) return;
+    for (const [index, value] of writes) writeAssigned(ce, assigns[index], value);
+    writes.clear();
+  };
+  return {
+    put: (index: number, value: unknown) => writes!.set(index, value),
+    flush,
+    run(body: JavaScriptResult['run']): JavaScriptResult['run'] {
+      return (...args) => {
+        const caller = writes;
+        writes = new Map();
+        try {
+          const result = body(...args);
+          flush();
+          return result;
+        } finally {
+          writes = caller;
+        }
+      };
+    },
+  };
 }
 
 /** What a store of the interpreter does after its write
@@ -953,6 +994,7 @@ function hostCaller(
  * cells) throws a `TypeError`.
  */
 export function readAssigned(
+  ce: ComputeEngine,
   x: Assigned
 ):
   | number
@@ -962,7 +1004,7 @@ export function readAssigned(
   | (number | boolean)[][] {
   const v = x.definition.value;
   if (x.array !== undefined) {
-    arrayEntryCheck(x.array, `The variable "${x.name}"`)(v);
+    arrayEntryCheck(ce, x.array, `The variable "${x.name}"`)(v);
     return v!;
   }
   // The machine value of the element `y` of the lane of `x`, or `undefined`.
@@ -1181,12 +1223,17 @@ export function printJavaScript(
   // The construction of `load()` of `createJavaScriptRuntime()`.
   const make = (): JavaScriptResult['run'] => {
     try {
-      const sys = runtimeOf(ce, p.hosts, p.arrays, p.assigns);
-      return (
+      const pending =
+        ce !== undefined && p.stagedAssignments
+          ? assignmentState(ce, p.assigns!)
+          : undefined;
+      const sys = runtimeOf(ce, p.hosts, p.arrays, p.assigns, pending);
+      const run = (
         literal
           ? twoStageRunner(sys, preambleOnce, [], `return (${code});`)()
           : twoStageRunner(sys, preambleOnce, ['_'], `return ${code};`)
       ) as JavaScriptResult['run'];
+      return pending?.run(run) ?? run;
     } catch (e) {
       // A deadline that expires while the values computed once are computed.
       if (isCancellationError(e)) throw e;

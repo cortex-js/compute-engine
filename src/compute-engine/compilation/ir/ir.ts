@@ -257,6 +257,8 @@ export type Program = {
    *  after the arguments, and returns the value of the body followed by the
    *  value of each one after the body (`assignedNames()` of `lower.ts`). */
   readonly assigns?: readonly Assigned[];
+  /** Actual engine writes are published around host calls and at return. */
+  readonly stagedAssignments?: true;
   /** The functions of the host that the program calls, by index: the
    *  operation `hostCallOp(k)` of `lower.ts` calls the entry `k`
    *  (`hostCall()` of `lower.ts`). */

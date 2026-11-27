@@ -1294,6 +1294,9 @@ function lowerOnce(
     isLibraryOperator(e as never, e.operator) &&
     handled(e) === undefined;
 
+  const isHostBoundary = (e: Fn): boolean =>
+    isHostDefinition(e) || (e.operator === 'ArrayFrom' && isLibrary(e));
+
   /** The names that the pattern `p` of a `Declare` or of a `Loop` index
    *  binds: `p` itself, or the names in a `Tuple` of patterns; `_` binds
    *  nothing. */
@@ -1379,7 +1382,7 @@ function lowerOnce(
     }
     // A call of a function of the host reads and writes each variable of
     // `assigns` (`hostCall()`).
-    if (!user && assigns.length > 0 && isHostDefinition(e))
+    if (!user && assigns.length > 0 && isHostBoundary(e))
       for (const x of assigns) {
         info.names.add(x.name);
         info.writes.add(x.name);
@@ -3909,7 +3912,7 @@ function lowerOnce(
         return want ? v : undefined;
       }
       case 'ArrayFrom':
-        return arrays.from(e);
+        return arrays.from(e, refreshState(e, 'an allocation of ArrayFrom'));
       case 'Match':
         return matches.match(e, want);
       case 'Declare':
@@ -7305,6 +7308,18 @@ function lowerOnce(
     return home;
   };
 
+  const stageWrite = (name: Expression, binding: Binding): void => {
+    if (!stagedAssignments || !isSymbol(name)) return;
+    if (frames[0].names.get(name.symbol) !== binding) return;
+    const index = assigns.findIndex((x) => !x.read && x.name === name.symbol);
+    if (index < 0) return;
+    b.op(
+      `state.stage${stateSuffix(assigns[index].lane)}`,
+      [b.constant(index, 'integer'), binding.v],
+      scalarType('real')
+    );
+  };
+
   const assign = (e: Fn, want: boolean): V | undefined => {
     const name = e.ops[0];
     if (isFunction(name, 'Tuple')) return parallelAssign(e, name, want);
@@ -7386,6 +7401,7 @@ function lowerOnce(
           LANE_MISMATCH
         );
       binding.v = x;
+      stageWrite(name, binding);
       return x;
     }
     // The rows of `Chunk` or `Partition` are the result only.
@@ -7396,6 +7412,7 @@ function lowerOnce(
       );
     const v = local(e, scalar(e.ops[1]), binding.lane!);
     binding.v = v;
+    stageWrite(name, binding);
     return v;
   };
 
@@ -7422,7 +7439,10 @@ function lowerOnce(
         );
     });
     const vs = values.ops.map((x, k) => local(e, scalar(x), bindings[k].lane!));
-    bindings.forEach((x, k) => (x.v = vs[k]));
+    bindings.forEach((x, k) => {
+      x.v = vs[k];
+      stageWrite(names.ops[k], x);
+    });
     if (want) decline(e, 'the value of a parallel assignment');
     return undefined;
   };
@@ -7482,6 +7502,7 @@ function lowerOnce(
       binding.lane!
     );
     binding.v = v;
+    stageWrite(target, binding);
     return v;
   };
 
@@ -8242,6 +8263,12 @@ function lowerOnce(
       // result of the code do not hold (spec section 10.6).
       if (parallel !== undefined)
         decline(parallel, 'an array in a parallel for');
+      if (
+        entryOf(p).literal !== true &&
+        used.makers.length > 0 &&
+        used.names.some(({ definition }) => !definition.isConstant)
+      )
+        decline(root, 'an expression with an array allocation and a mutable array binding');
       // The value of an assigned variable after the body is not a result
       // of the code: `run()` writes it to the engine (`assigningRun()`).
       const results = entryOf(p).results;
@@ -8256,6 +8283,7 @@ function lowerOnce(
       inputs,
       ...(enclosure ? { valueKinds: ['enclosure'] } : {}),
       ...(assigns.length > 0 ? { assigns } : {}),
+      ...(stagedAssignments ? { stagedAssignments: true as const } : {}),
       ...(hosts.length > 0 ? { hosts } : {}),
       ...(used !== undefined ? { arrays: used } : {}),
     };
@@ -8263,6 +8291,7 @@ function lowerOnce(
   // The names of the scope of the compilation that a root function literal
   // assigns (`assignedNames()`).
   let assigns: Assigned[] = [];
+  let stagedAssignments = false;
   // The functions of the host that the program calls (`hostCall()`).
   const hosts: HostCall[] = [];
 
@@ -8363,6 +8392,29 @@ function lowerOnce(
     return length !== undefined && length <= op.engine.maxCollectionSize;
   };
 
+  const stateSuffix = (lane: Lane): string =>
+    lane === 'array' ? '.arr' : lane === 'boolean' ? '.bool' : '';
+
+  const refreshState = (e: Fn, what: string): (() => void) => {
+    const list = assigns.find((s) => s.list || s.rows);
+    if (list !== undefined)
+      decline(e, `${what}, in a function that assigns the list variable ${list.name} of the engine (a list is not carried to the host)`);
+    for (const s of assigns)
+      if (lookup(s.name)?.outer)
+        decline(e, `${what}, in a body that is evaluated several times (a Sum, a callback of Map or Filter), in a function that assigns the variable ${s.name} of the engine: the body carries no variable`);
+    const state = assigns.map((s) => stateWrite(e, s.name));
+    return () => {
+      state.forEach((x, j) => {
+        const lane = assigns[j].lane;
+        x.v = b.op(
+          `state.get${lane === 'integer' ? '.int' : stateSuffix(lane)}`,
+          [b.constant(j, 'integer')],
+          lane === 'array' ? type(x.v) : scalarType(lane)
+        );
+      });
+    };
+  };
+
   /** The value of `e`, a call of a function that the host declared with an
    *  `evaluate` function (`isHostDefinition()`, CE-1621): an effectful
    *  operation that calls the interpreter for the call at run time
@@ -8377,8 +8429,8 @@ function lowerOnce(
    *  `Nothing` is). Plain JavaScript only: the shader targets cannot call the host,
    *  the interval and `bigint` modes have no lane of its values. In a
    *  function that assigns variables of the engine (`assignedNames()`), the
-   *  code writes the value of each one to the engine before the call and
-   *  reads it again after it (`state.put`, `state.get`), since the host
+   *  code publishes executed assignments before the call and reloads each
+   *  variable afterward (`state.stage`, `state.get`), since the host
    *  function can read and assign it; the call rebinds each one, as a call
    *  of a user function that writes it does (`stateWrite()`). A list
    *  variable declines, and so does a call in a body that is evaluated
@@ -8389,17 +8441,7 @@ function lowerOnce(
     const why = (reason: string, code?: DeclineReason): never =>
       decline(e, `a call of the function ${name} of the host, ${reason}`, code);
     if (!options.javascript || interval || bigint) why('on this target');
-    const list = assigns.find((s) => s.list || s.rows);
-    if (list !== undefined)
-      why(
-        `in a function that assigns the list variable ${list.name} of the engine (a list is not carried to the host)`
-      );
-    for (const s of assigns)
-      if (lookup(s.name)?.outer)
-        why(
-          `in a body that is evaluated several times (a Sum, a callback of Map or Filter), in a function that assigns the variable ${s.name} of the engine: the body carries no variable`
-        );
-    const state = assigns.map((s) => stateWrite(e, s.name));
+    const refresh = refreshState(e, `a call of the function ${name} of the host`);
     if (e.nops > MAX_HOST_ARGUMENTS)
       why(`with more than ${MAX_HOST_ARGUMENTS} arguments`);
     const t = e.type.type;
@@ -8490,33 +8532,13 @@ function lowerOnce(
         result: result!,
       });
     }
-    // Each variable of `assigns`, by its index `j`: its value to the
-    // engine before the call, and the value of the engine after it, of
-    // the lane of the variable.
-    const suffix = (l: Lane) =>
-      l === 'array' ? '.arr' : l === 'boolean' ? '.bool' : '';
-    // A name that the code only reads (`Assigned.read`) is not written.
-    state.forEach((x, j) => {
-      if (!assigns[j].read)
-        b.op(
-          `state.put${suffix(assigns[j].lane)}`,
-          [b.constant(j, 'integer'), x.v],
-          scalarType('real')
-        );
-    });
+
     const v = b.op(
       hostCallOp(k),
       args,
       scalarType(result === 'nothing' ? 'real' : result!)
     );
-    state.forEach((x, j) => {
-      const l = assigns[j].lane;
-      x.v = b.op(
-        `state.get${l === 'integer' ? '.int' : suffix(l)}`,
-        [b.constant(j, 'integer')],
-        l === 'array' ? type(x.v) : scalarType(l)
-      );
-    });
+    refresh();
     return result === 'nothing' && !want ? undefined : v;
   };
 
@@ -8584,7 +8606,7 @@ function lowerOnce(
         if (engineName(x, outer)) helper.reads.add(x.symbol);
       if (isSymbol(x) && helper === undefined && !bound.has(x.symbol))
         rootReads.add(x.symbol);
-      if (helper === undefined && isFunction(x) && isHostDefinition(x))
+      if (helper === undefined && isFunction(x) && isHostBoundary(x))
         rootHost = true;
       // A user function named as an operand (`Map(f, L)`): its body, as
       // for a call.
@@ -8600,7 +8622,7 @@ function lowerOnce(
         helper !== undefined &&
         user === undefined &&
         isFunction(x) &&
-        isHostDefinition(x)
+        isHostBoundary(x)
       )
         helper.host ??= x.operator;
       if (user !== undefined) {
@@ -8745,7 +8767,9 @@ function lowerOnce(
     // In a program that calls the host, itself or through a user function,
     // each name that holds an array and that the program reads: the host
     // function can assign the name another array (`hostCall()`).
-    if (rootHost || [...touched.values()].some((t) => t.host !== undefined))
+    const callsHost =
+      rootHost || [...touched.values()].some((t) => t.host !== undefined);
+    if (callsHost)
       for (const name of [
         ...rootReads,
         ...[...touched.values()].flatMap((t) => [...t.reads]),
@@ -8768,6 +8792,8 @@ function lowerOnce(
           read: true,
         });
       }
+    stagedAssignments =
+      callsHost && out.some((s) => !s.read) && !out.some((s) => s.list || s.rows);
     // The variables that each function reads and writes, through its
     // calls too.
     const closure = (key: object) => {
@@ -8888,6 +8914,9 @@ function lowerOnce(
         input(p, name, declared, true);
       });
       const states = assignedNames(root);
+      const hiddenState = states.find((state) => frames[0].names.has(state.name));
+      if (hiddenState !== undefined)
+        decline(root, `a parameter that hides the engine variable ${hiddenState.name}`);
       // A body that is a Loop, or a block that ends in a Loop, an assignment
       // or a declaration, is `Nothing`, which the code gives as NaN
       // (`nothingPlace()`): `do { s = s + 1 }`, `do { a[k] = t }`,

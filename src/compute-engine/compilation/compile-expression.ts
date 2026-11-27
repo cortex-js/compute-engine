@@ -222,7 +222,7 @@ function compileExpression<
       inCallerScope(expr, () => {
         const result = compileInScope<T, R>(
           expr,
-          { ...options, inputs: undefined },
+          options,
           decline
         );
         const rows = sealedInputDefinitions(expr, inputs);
@@ -316,7 +316,7 @@ function withCompileInputs<O extends CompileExpressionOptions, X>(
   const runWithInputs = (): X | CompileDeclineError => {
     ce.pushScope();
     try {
-      const occurrences: Record<string, Expression> = {};
+      const occurrences: Record<string, Expression> = Object.create(null);
       for (const name of names) {
         ce.declare(name, inputs[name]);
         occurrences[name] = ce.symbol(name);
@@ -368,7 +368,7 @@ function compileInScope<
   // (`resolveStorageHintsOfInputs()`).
   if (options?.storage !== undefined)
     resolveStorageHintsOfInputs(options.storage, expr, {
-      vars: options.vars,
+      vars: compileInputNames(options),
     });
 
   try {
@@ -432,6 +432,15 @@ function compileInScope<
     if (options?.fallback ?? true) {
       const error = (e as Error).message;
       const target = targetName;
+      const inputNames = compileInputNames(options);
+      const inputs = new Map(
+        Object.keys(inputNames ?? {}).map((name) => [
+          name,
+          options?.inputs && Object.hasOwn(options.inputs, name)
+            ? expr.engine.type(options.inputs[name]).type
+            : undefined,
+        ])
+      );
       // The fallback of `interval-js` gives an interval-shaped `run`
       // (`buildIntervalFallback()`, which warns); the generic interpreter
       // fallback below returns plain numbers, which would violate the
@@ -445,7 +454,7 @@ function compileInScope<
         return buildIntervalFallback(
           expr,
           error,
-          { vars: options?.vars },
+          inputs,
           compileDiagnosticOf(e, error)
         ) as unknown as CompilationResult<T, R>;
       }
@@ -460,7 +469,7 @@ function compileInScope<
           expr,
           error,
           compileDiagnosticOf(e, error),
-          options?.vars ? new Set(Object.keys(options.vars)) : undefined
+          inputs
         ),
         target,
       } as unknown as CompilationResult<T, R>;

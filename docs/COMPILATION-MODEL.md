@@ -3020,10 +3020,10 @@ These decline:
   literal (`[hostDraw(t)]`, `'possible-nothing'`); a statement is not read.
 
 A call in a function that assigns variables of the engine ("Variables that a
-function assigns") reads and writes each one: the code writes the value of
-each variable to the engine before the call, as `run()` does when it
-returns, and reads it again after the call, since the host function can
-assign it. A variable that then holds no value of its lane throws the
+function assigns") publishes the assignments that have executed since the
+previous call. After the call, the code reloads each variable because the host
+function can assign it. At successful return, it publishes any remaining
+assignments. A variable that then holds no value of its lane throws the
 `TypeError` of `run()`. So a `Loop` around the call carries each variable,
 the two arms of an `If` give each one, and a user function that calls the
 host, itself or through its calls, takes and returns each one:
@@ -3639,8 +3639,9 @@ of two storages (`Swap`, the host's `swapCells()`) between two uses is seen.
 **How an array reaches the code.**
 
 - A parameter of the root function literal declared `array<T>`: the host
-  passes the engine's array value. The entry refuses another value with a
-  `TypeError`.
+  passes an array owned by the engine that compiled the function. The
+  entry refuses another value with a `TypeError`. Array entry checks also
+  run with `entryChecks: false`.
 - A name whose value is an array: `run()` reads the array that the name
   holds at each call, so an assignment of the name between two calls needs
   no new compilation. The name is in `arrays`, not in `symbolDeps`.
@@ -3665,8 +3666,14 @@ of two storages (`Swap`, the host's `swapCells()`) between two uses is seen.
 - A parameter declared `array<T>` of a user function called by its name, a
   field of a record, a block local, and the two arms of an `If` of one cell
   type. An array is one shape whatever its length.
-- `ArrayFrom(xs, type)`: one call into the engine, which makes the engine's
-  array, so the allocation function of the host is asked.
+- `ArrayFrom(xs, type)` calls the engine to make the array. The allocation
+  and creation hooks see earlier writes. The compiled function reloads its
+  array bindings afterward. An expression entry that allocates an array
+  and also reads a mutable array binding declines. A root function literal
+  can carry the binding across the allocation. The restrictions for host
+  calls apply to list variables and to repeated bodies such as a `Sum`
+  that cannot carry a binding across the allocation. A parameter that hides
+  an engine binding read by a called function also causes a decline.
 
 **What compiles.** `At(a, i)`, the store `Assign(At(a, i), v)`,
 `AddTo(At(a, i), e)`, `Swap(a, b)`, `Length(a)`, `ListFrom(a)`, `At` with a
@@ -3690,8 +3697,8 @@ tuple that the code builds, with no allocation.
   so a helper that stores its parameter in integer cells declares it
   (`p: integer`).
 - Each store increments the version of its array. A unit that stores
-  registers one state event before each call of a function of the host and
-  when `run()` returns or throws.
+  registers one state event before each call of a function of the host or
+  array allocation and when `run()` returns or throws.
 
 A root function literal whose body ends in a store or in a loop
 (`t => do { for k in 1..n { screen[k] = t } }`) compiles, and `run()` gives
