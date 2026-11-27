@@ -56,9 +56,20 @@ runner counts neither the sessions nor the areas of another runner. When three
 other sessions already run and the user wants progress anyway, add
 `--one-at-a-time`: the script then runs one session at a time, also when the
 others run (the exception in §9), and does not read the areas. The script ends
-when every item has ended. Wait for its end notice; do not poll. Each session
-marks its item `in-progress` with `issues.mjs start` and removes it (or sets
-`fixed` for a Tycho issue) in its commit.
+when every item has ended. Wait for its end notice; do not poll. When the user
+asks to stop the batch, run `node scripts/roadmap-batch.mjs --stop`: the batch
+starts no other session, the sessions that run end on their own, and the runner
+exits with code 4. Do not stop the process of the runner, because its sessions
+then stop in the middle of an item. Each session marks its item `in-progress`
+with `issues.mjs start` and removes it (or sets `fixed` for a Tycho issue) in
+its commit.
+
+The sessions of the items do not run the full suite. The runner starts a session
+of its own (`suite-<n>` in the summary, brief
+`scripts/roadmap-batch-suite-brief.md`) after each five items that committed and
+after the last item: it runs `npm test` on HEAD and fixes and commits the
+failures that those commits cause. `--suite-every <n>` changes the five; 0 turns
+the suite off.
 
 ## 3. The report
 
@@ -79,11 +90,20 @@ Read `<out>/summary.md` and each `<out>/<id>.report.md`. Then:
   When the runner exits with code 3, a usage limit stopped the batch: the
   summary marks the item that hit it `stopped: usage limit` and the items after
   it `not run (usage limit)`. Report the reset time of the limit and offer to
-  run the items that were not run in a new batch after it.
+  run the items that were not run in a new batch after it. When the runner exits
+  with code 4, a stop on request ended the batch: the summary marks the items
+  that did not start `not run (stopped on request)`, and they are still in the
+  backlog.
+- **The full suite.** Read each `<out>/suite-<n>.report.md`. A `fixed` run made
+  commits: review them as "Review gaps" says. When the runner exits with code 5,
+  a run of the suite ended `red` or with no report, and the batch started no
+  other item: read its `Failures:` line and the issue file it added, fix the
+  failure or tell the user why you cannot, and run `npm test` under the box lock
+  before you start a new batch.
 - **Report to the user**, in this order:
-  1. a table: item, result, minutes, the API-price equivalent (the sessions run
-     on the user's subscription; the amount is what the tokens would cost at API
-     list prices, not a charge);
+  1. a table: item or run of the suite, result, minutes, the API-price
+     equivalent (the sessions run on the user's subscription; the amount is what
+     the tokens would cost at API list prices, not a charge);
   2. the items that now wait for the board (`needs-decision`), with their `ask`
      line each;
   3. the issue files that the sessions added, and what is still open in a partly

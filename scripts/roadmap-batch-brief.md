@@ -61,9 +61,6 @@ a pipe such as `| head -1` ends the wait before the lock is held.
 Release the lock only after the harness's completion notice of the run or the
 exit code in its log, never on a line you wrote yourself, because a run that
 is still going without the lock competes with the next holder.
-Give `npm test` a Jest option only in its long form (`npm test -- --maxWorkers=4`),
-because `scripts/test.sh` reads a short one such as `-w 4` as a test path and
-then runs only the files whose path matches it.
 
 ## Steps
 
@@ -96,38 +93,44 @@ then runs only the files whose path matches it.
    earlier session stopped there, and the "State of the work" paragraph of
    the issue says what remains: do not make a new worktree; read its
    `git -C /tmp/wt-{{NAME}} diff HEAD` and do only the steps that remain. Its
-   base can be older than HEAD; step 7 reconciles the patch. Do the fix and its tests there: give
-   every Edit and Write a path under `/tmp/wt-{{NAME}}`, never under
+   base can be older than HEAD; step 8 reconciles the patch. Do the fix and
+   its tests there: give every Edit and Write a path under `/tmp/wt-{{NAME}}`, never under
    `{{REPO}}`, because an edit in the main tree enters the tests and commits
    of the other sessions before your checks. Do the work
    yourself; use a subagent only for the review.
-5. Run the checks of `BUILD.md` "Completing delegated tasks" item 1 in the
+5. Before the checks and the review, add in the worktree a `CHANGELOG.md`
+   item under `[Unreleased]` when users can see the change (the rules are in
+   `CODING-STYLEGUIDE.md`), because the reviewers read the item with the
+   change, and an item added after the review has no review. Do not edit
+   `src/api.md` by hand: it is generated from the doc comments of the
+   source, so change the doc comment and leave `src/api.md` to
+   `npm run doc`, which the release runs. Update the pages of
+   `~/dev/cortexjs.io/docs/compute-engine/` as `AGENTS.md` says when public
+   behavior changes.
+6. Run the checks of `BUILD.md` "Completing delegated tasks" item 1 in the
    worktree: the test files of the change, the test files that contain a
    fragment of emitted code that the change alters, and `npx oxlint` on the
    changed source files.
-6. Review the change as the protocol §5.2 chooses for its risk. A change to
+7. Review the change as the protocol §5.2 chooses for its risk. A change to
    the logic of `src/` of more than about five lines gets a dual review: a
    new test file does not replace it, because the reviewers look for the
    cases that the tests do not hold. Use the `review-files` skill on the
    changed files in the worktree.
    At most two review rounds. If the Codex reviewer fails on a usage limit,
    finish the Claude review and say so in the report.
-7. Deliver: `git -C /tmp/wt-{{NAME}} diff HEAD > /tmp/{{NAME}}.patch` (copy
+8. Deliver: `git -C /tmp/wt-{{NAME}} diff HEAD > /tmp/{{NAME}}.patch` (copy
    new untracked files by hand), then `git apply --check` and `git apply` in
    the main tree. If the check fails, reconcile with the Edit tool. Then run
    in the main tree the targeted tests again and `npm run test:core`, and
-   `npm run check:deps` when imports changed. When the change is in `src/`,
-   also take the box lock and run `npm test` in the main tree before you
-   stage, because the batch commits before the nightly run, and the nearby
-   test files and `test:core` do not hold every caller of a source file: a
-   change of the effects code or of the compiler breaks tests far from it.
-8. Add a `CHANGELOG.md` item under `[Unreleased]` when users can see the
-   change (the rules are in `CODING-STYLEGUIDE.md`). Do not edit
-   `src/api.md` by hand: it is generated from the doc comments of the
-   source, so change the doc comment and leave `src/api.md` to
-   `npm run doc`, which the release runs. Update the pages of
-   `~/dev/cortexjs.io/docs/compute-engine/` as `AGENTS.md` says when public
-   behavior changes.
+   `npm run check:deps` when imports changed. Do not run the full suite
+   (`npm test`): the runner of the batch runs it once for each group of
+   committed items, in a session of its own that also fixes its failures,
+   because a full run for each item took about 10 minutes under the box lock
+   and found a cause in the item's change in about one item of eleven. For
+   the same reason, search `test/` for each value, message or fragment of
+   emitted code that your change alters on purpose, and run and update the
+   test files that pin it: a pinned test far from the change is the usual
+   failure of the full run.
 9. Commit with
    `node ~/.claude/scripts/stage-helper.mjs prepare {{NAME}} --commit --files <f>... --patch <file> --message "{{ID}}: …"`,
    read the patches it prints, then

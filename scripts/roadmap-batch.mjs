@@ -51,9 +51,37 @@
  * The sessions that run end on their own. The summary marks the items that
  * did not start `not run (usage limit)`, and the script exits with code 3.
  *
+ * The full suite. A session of an item runs its targeted tests and
+ * `npm run test:core`, not the full suite: in 130 earlier sessions the full
+ * run found a cause in the session's change 12 times, and took about 10
+ * minutes of each item under the box lock. The runner starts instead one
+ * session (`cebatch-suite-<pid>-<n>`, brief
+ * `scripts/roadmap-batch-suite-brief.md`) after each `--suite-every` items
+ * that committed (default 5), and after the last item. It starts when no
+ * session of the batch runs, and no item starts while it runs. The session
+ * runs `npm test` in a worktree at HEAD under the box lock, and fixes and
+ * commits each failure that a commit since the last suite causes. Its report
+ * says `green`, `fixed` or `red`. After `red`, or with no report, the batch
+ * starts no other item, the summary marks the rest
+ * `not run (the full suite did not pass)`, and the script exits with code 5.
+ * After a stop on request the suite still runs for the items that committed;
+ * after a usage limit it does not.
+ *
+ * A stop on request: `roadmap-batch.mjs --stop` (or
+ * `npm run roadmap-batch -- --stop`) writes a file `stop` in the output
+ * directory of each batch that runs. The batch then starts no other session;
+ * the sessions that run end on their own, so no item is left half done. The
+ * runner reads the file when a session ends and once a minute. The summary
+ * marks the items that did not start `not run (stopped on request)`, and the
+ * script exits with code 4. Do not stop the process of the runner instead:
+ * its sessions then stop in the middle of an item, and the status file keeps
+ * no end time.
+ *
  * Output, in `--out <dir>`: for each item, `<id>.jsonl` (the session's
  * stream-json output), `<id>.err`, and `<id>.report.md` (the session's last
- * message); and `summary.md`, one line per item, written as items end.
+ * message), where a run of the full suite has the id `suite-<n>`; and
+ * `summary.md`, one line per item and per run of the suite, written as they
+ * end.
  *
  * Status, for the Progress tab of the issue web app (`scripts/issues-ui.mjs`):
  * one JSON file per batch in `~/.local/state/compute-engine-batch/`, named by
@@ -91,6 +119,10 @@
  *                         on Windows, the platform of univac's copy;
  *                         `--no-secondary` turns it off.
  *   --dry-run             Print the briefs and the launch order; start nothing.
+ *   --suite-every <n>     Run the full suite after each n items that committed
+ *                         and after the last item (default 5). 0: never.
+ *   --stop                Ask each batch that runs to stop after the sessions
+ *                         that run now (see above); start nothing.
  *
  * Examples:
  *   npm run roadmap-batch -- 3
@@ -105,6 +137,7 @@ import {
   mkdirSync,
   readdirSync,
   existsSync,
+  rmSync,
   createWriteStream,
   renameSync,
 } from 'node:fs';
@@ -117,7 +150,8 @@ const sessionsDir = join(homedir(), '.claude', 'sessions');
 
 const usage =
   'Usage: npm run roadmap-batch -- <n | CE-1,CE-2> [--one-at-a-time] [--dry-run]\n' +
-  '   or: roadmap-batch.mjs [--queue <file>] [--out <dir>] [--count <n> | --items CE-1,CE-2] [--concurrency 3 | --one-at-a-time] [--[no-]secondary] [--dry-run]';
+  '   or: roadmap-batch.mjs [--queue <file>] [--out <dir>] [--count <n> | --items CE-1,CE-2] [--concurrency 3 | --one-at-a-time] [--[no-]secondary] [--dry-run]\n' +
+  '   or: roadmap-batch.mjs --stop';
 const { values, positionals } = parseArgs({
   allowPositionals: true,
   allowNegative: true,
@@ -130,10 +164,42 @@ const { values, positionals } = parseArgs({
     'timeout-min': { type: 'string', default: '180' },
     'dry-run': { type: 'boolean', default: false },
     'one-at-a-time': { type: 'boolean', default: false },
+    'stop': { type: 'boolean', default: false },
+    'suite-every': { type: 'string', default: '5' },
     // On Windows the tree is univac's copy, the only Windows machine with one.
     'secondary': { type: 'boolean', default: process.platform === 'win32' },
   },
 });
+const statusDir = join(homedir(), '.local', 'state', 'compute-engine-batch');
+// The name of the file, in the output directory of a batch, that asks the
+// batch to start no other session (see the header).
+const STOP_FILE = 'stop';
+
+// --stop: write the stop file of each batch that runs (a status file with no
+// end time whose process is alive), then exit.
+if (values.stop) {
+  let names = [];
+  try {
+    names = readdirSync(statusDir).filter((n) => n.endsWith('.json'));
+  } catch {}
+  let asked = 0;
+  for (const n of names) {
+    try {
+      const b = JSON.parse(readFileSync(join(statusDir, n), 'utf8'));
+      if (b.finished) continue;
+      process.kill(b.pid, 0); // throws when the process is gone
+      writeFileSync(join(b.out, STOP_FILE), new Date().toISOString() + '\n');
+      const now = b.items.filter((x) => x.state === 'running');
+      console.log(
+        `roadmap-batch: the batch in ${b.out} stops after ${now.map((x) => x.id).join(', ') || 'no session'}`
+      );
+      asked++;
+    } catch {}
+  }
+  if (asked === 0) console.log('roadmap-batch: no batch runs');
+  process.exit(asked === 0 ? 1 : 0);
+}
+
 // One positional argument: a count (`3`) or a list of ids (`CE-1,CE-2`).
 if (
   positionals.length > 1 ||
@@ -313,6 +379,10 @@ const template = readFileSync(
   join(repo, 'scripts', 'roadmap-batch-brief.md'),
   'utf8'
 );
+const suiteTemplate = readFileSync(
+  join(repo, 'scripts', 'roadmap-batch-suite-brief.md'),
+  'utf8'
+);
 const nameOf = (item) => `cebatch-${item.id.slice(3)}`;
 
 // The parts of the brief that depend on the machine (see the header).
@@ -332,7 +402,7 @@ const removeOf = (name) =>
 const machineNotes = [
   ...(windows
     ? [
-        'This machine runs Windows; your shell is Git Bash. Remove a worktree only with the command of step 10, never with a bare `git worktree remove --force`, because Git for Windows follows the `node_modules` junction and deletes the files of the main tree.',
+        'This machine runs Windows; your shell is Git Bash. Remove a worktree only with the command that the steps give, never with a bare `git worktree remove --force`, because Git for Windows follows the `node_modules` junction and deletes the files of the main tree.',
       ]
     : []),
   ...(existsSync(join(homedir(), 'dev', 'cortexjs.io'))
@@ -359,6 +429,35 @@ const briefOf = (item) =>
     .replaceAll('{{TITLE}}', item.title)
     .replaceAll('{{NAME}}', nameOf(item));
 
+/** The full hash of the HEAD of the main tree. */
+function headOf() {
+  return execFileSync('git', ['rev-parse', 'HEAD'], {
+    cwd: repo,
+    encoding: 'utf8',
+  }).trim();
+}
+
+/** The brief of a session that runs the full suite on the commits after
+ *  `base` (see the header). */
+const suiteBriefOf = (name, base) =>
+  suiteTemplate
+    .replaceAll('{{REPO}}', repoPath)
+    .replaceAll(
+      '{{MACHINE}}',
+      machineNotes.length > 0 ? '\n\n' + machineNotes.join('\n\n') : ''
+    )
+    .replaceAll('{{LINK}}', linkOf(name))
+    .replaceAll('{{REMOVE}}', removeOf(name))
+    .replaceAll('{{BASE}}', base)
+    .replaceAll(
+      '{{COMMITS}}',
+      execFileSync('git', ['log', '--format=- %H %s', `${base}..HEAD`], {
+        cwd: repo,
+        encoding: 'utf8',
+      }).trim() || '- (no commit)'
+    )
+    .replaceAll('{{NAME}}', name);
+
 mkdirSync(values.out, { recursive: true });
 
 if (values['dry-run']) {
@@ -366,6 +465,8 @@ if (values['dry-run']) {
     console.log(`${item.id}  ${nameOf(item)}  [${item.area}]  ${item.title}`);
   console.log('\n--- brief of the first item ---\n');
   console.log(briefOf(items[0]));
+  console.log('\n--- brief of a run of the full suite ---\n');
+  console.log(suiteBriefOf(`cebatch-suite-${process.pid}-1`, headOf()));
   process.exit(0);
 }
 
@@ -434,7 +535,6 @@ function log(line) {
   appendFileSync(join(values.out, 'batch.log'), stamped + '\n');
 }
 
-const statusDir = join(homedir(), '.local', 'state', 'compute-engine-batch');
 const batchStarted = new Date().toISOString();
 const statusFile = join(
   statusDir,
@@ -511,9 +611,31 @@ const running = new Map(); // id -> { item, child, started }
 // Set when a session ends on a usage limit: no other session starts, because
 // each would end on the same limit at once.
 let limitReached;
+// Set when the stop file is found: no other session starts (see the header).
+// A stop file that an earlier batch left in the same directory is removed.
+let stopRequested = false;
+// The full suite (see the header): the items committed since its last run,
+// the commit of that run, the number of runs, whether one runs now, and the
+// `Result:` line of a run that did not pass.
+const suiteEvery = Number(values['suite-every']);
+const sinceSuite = [];
+let suiteBase = headOf();
+let suiteCount = 0;
+let suiteRunning = false;
+let suiteFailed;
+const stopFile = join(values.out, STOP_FILE);
+rmSync(stopFile, { force: true });
 
-function launch(item) {
-  const name = nameOf(item);
+/**
+ * Starts one headless session and records its end. `entry` is an item of the
+ * batch, or a run of the full suite (`entry.suite` is true): `id` names its
+ * files in the output directory and its row of the status file, `name` is
+ * the session name, `brief` its prompt, and `onEnd(status, limit)` gets the
+ * `Result:` line of its report and whether it ended on a usage limit.
+ */
+function launch(entry) {
+  const item = entry;
+  const name = entry.name;
   const jsonl = join(values.out, `${item.id}.jsonl`);
   const out = createWriteStream(jsonl);
   const err = createWriteStream(join(values.out, `${item.id}.err`));
@@ -528,7 +650,7 @@ function launch(item) {
       '--output-format',
       'stream-json',
       '--verbose',
-      briefOf(item),
+      entry.brief,
     ],
     {
       cwd: repo,
@@ -547,7 +669,9 @@ function launch(item) {
     log(`${item.id} reached the time limit; stopping it`);
     child.kill('SIGTERM');
   }, timeoutMs);
-  running.set(item.id, { item, child, started: Date.now() });
+  const startedAt = Date.now();
+  if (entry.suite) suiteRunning = true;
+  else running.set(item.id, { item, child, started: startedAt });
   Object.assign(itemStatus.get(item.id), {
     state: 'running',
     started: new Date().toISOString(),
@@ -557,11 +681,9 @@ function launch(item) {
 
   child.on('exit', (code, signal) => {
     clearTimeout(timer);
-    const minutes = (
-      (Date.now() - running.get(item.id).started) /
-      60_000
-    ).toFixed(0);
-    running.delete(item.id);
+    const minutes = ((Date.now() - startedAt) / 60_000).toFixed(0);
+    if (entry.suite) suiteRunning = false;
+    else running.delete(item.id);
     out.end();
     err.end();
     let result;
@@ -603,34 +725,129 @@ function launch(item) {
       cost,
       report: join(values.out, `${item.id}.report.md`),
     });
+    entry.onEnd(status, limit !== undefined);
     writeStatus();
     schedule();
   });
 }
 
+/** Starts the session of an item of the batch. */
+function launchItem(item) {
+  launch({
+    ...item,
+    name: nameOf(item),
+    brief: briefOf(item),
+    onEnd: (status) => {
+      // Only a commit of a fix can change what the suite tests.
+      if (/^committed\b/.test(status)) sinceSuite.push(item.id);
+    },
+  });
+}
+
+/**
+ * Starts a session that runs the full suite on HEAD and fixes the failures
+ * that the commits since the last suite cause (see the header). Its row is
+ * added to the status file when it starts.
+ */
+function launchSuite() {
+  suiteCount++;
+  const id = `suite-${suiteCount}`;
+  const name = `cebatch-suite-${process.pid}-${suiteCount}`;
+  const covered = sinceSuite.splice(0);
+  const title = `The full test suite, after ${covered.join(', ')}`;
+  itemStatus.set(id, {
+    id,
+    title,
+    priority: '',
+    area: 'suite',
+    session: name,
+    state: 'waiting',
+  });
+  launch({
+    id,
+    title,
+    area: 'suite',
+    suite: true,
+    name,
+    brief: suiteBriefOf(name, suiteBase),
+    onEnd: (status, limit) => {
+      if (/^(green|fixed)\b/.test(status)) {
+        suiteBase = headOf();
+      } else if (!limit) {
+        // `red`, or no report: the commits of the batch are not proven, so
+        // no other item starts.
+        suiteFailed = status;
+        log(`the full suite did not pass (${status}); no other session starts`);
+      }
+    },
+  });
+}
+
 let waitingNoted = '';
 function schedule() {
-  if (limitReached !== undefined && pending.length > 0) {
+  if (!stopRequested && existsSync(stopFile)) {
+    stopRequested = true;
+    log('stop requested: no other session starts');
+  }
+  // A usage limit comes first: it is the cause that the user must know.
+  const notRun =
+    limitReached !== undefined
+      ? 'not run (usage limit)'
+      : suiteFailed !== undefined
+        ? 'not run (the full suite did not pass)'
+        : stopRequested
+          ? 'not run (stopped on request)'
+          : undefined;
+  if (notRun !== undefined && pending.length > 0) {
     for (const item of pending.splice(0)) {
       appendFileSync(
         join(values.out, 'summary.md'),
-        `- ${item.id}: not run (usage limit)\n`
+        `- ${item.id}: ${notRun}\n`
       );
       Object.assign(itemStatus.get(item.id), {
         state: 'ended',
         ended: new Date().toISOString(),
-        result: 'not run (usage limit)',
+        result: notRun,
       });
     }
     log('the items that had not started are not run');
-    waitingNote = `stopped: usage limit (${limitReached})`;
+    waitingNote =
+      limitReached !== undefined
+        ? `stopped: usage limit (${limitReached})`
+        : suiteFailed !== undefined
+          ? `stopped: the full suite did not pass (${suiteFailed})`
+          : 'stopped on request';
     writeStatus();
+  }
+  // The full suite runs alone: after each `suiteEvery` commits, and after the
+  // last item. It does not run after a usage limit (its session would end on
+  // the same limit) or after a suite that did not pass.
+  if (suiteRunning) return;
+  if (
+    suiteEvery > 0 &&
+    sinceSuite.length > 0 &&
+    limitReached === undefined &&
+    suiteFailed === undefined &&
+    (sinceSuite.length >= suiteEvery || pending.length === 0)
+  ) {
+    if (running.size === 0) {
+      waitingNote = '';
+      launchSuite();
+    } else {
+      const note = 'waiting: the full suite runs after the sessions that run';
+      if (note !== waitingNoted) log((waitingNoted = note));
+      if (note !== waitingNote) {
+        waitingNote = note;
+        writeStatus();
+      }
+    }
+    return;
   }
   if (oneAtATime) {
     // The queue order decides; areas and other sessions are not read.
     if (pending.length > 0 && running.size === 0) {
       waitingNote = '';
-      launch(pending.shift());
+      launchItem(pending.shift());
     }
   }
   while (!oneAtATime && pending.length > 0) {
@@ -669,17 +886,31 @@ function schedule() {
     }
     const [item] = pending.splice(index, 1);
     waitingNote = '';
-    launch(item);
+    launchItem(item);
   }
   if (running.size === 0) {
     log(
-      limitReached === undefined
-        ? 'batch finished'
-        : 'batch stopped on a usage limit'
+      limitReached !== undefined
+        ? 'batch stopped on a usage limit'
+        : suiteFailed !== undefined
+          ? 'batch stopped: the full suite did not pass'
+          : stopRequested
+            ? 'batch stopped on request'
+            : 'batch finished'
     );
     writeStatus(new Date().toISOString());
-    // Exit code 3: a usage limit stopped the batch before its end.
-    process.exit(limitReached === undefined ? 0 : 3);
+    // Exit code 3: a usage limit stopped the batch before its end. Exit code
+    // 5: a full suite that did not pass did. Exit code 4: a stop on request
+    // did.
+    process.exit(
+      limitReached !== undefined
+        ? 3
+        : suiteFailed !== undefined
+          ? 5
+          : stopRequested
+            ? 4
+            : 0
+    );
   }
 }
 

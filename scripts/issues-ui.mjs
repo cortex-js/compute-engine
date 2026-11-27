@@ -1114,7 +1114,9 @@ function batchTable(b) {
     : b.finished ? 'ended ' + clock(b.finished) + ', ' + ended + ' of ' + b.items.length + ' items'
     : 'stopped before the end (the process is gone; last update ' + clock(b.updated) + '), ' + ended + ' of ' + b.items.length + ' ended';
   const rows = b.items.map((x) => {
-    const time = x.state === 'running' ? minutesSince(x.started) + ' min so far'
+    // A running item of a batch whose process is gone has no end time: its
+    // minutes would count up to now.
+    const time = x.state === 'running' ? (b.alive ? minutesSince(x.started) + ' min so far' : '')
       : x.state === 'ended' ? minutesSince(x.started, x.ended) + ' min' : '';
     const result = x.state === 'ended' ? esc(x.result) + ' <span class="none">(' + esc(x.turns) + ' turns, ' + esc(x.cost) + ')</span>' : '';
     const state = x.state === 'running' && !b.alive ? 'stopped' : x.state;
