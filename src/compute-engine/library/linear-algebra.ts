@@ -1669,13 +1669,26 @@ function transposedShape(t: Type, ops: ReadonlyArray<OperandDescriptor>): Type {
       types: t.types.map((u) => transposedShape(u, ops)),
     };
   if (t.kind !== 'list') return 'value';
-  const dims = t.dimensions;
+  let dims = t.dimensions;
+  let cells = t.elements;
   // A tensor of unknown rank (`tensor<U>`, whose `dimensions` is `null`)
   // transposes to a tensor of the same unknown rank with the same cells:
   // the type is returned as it is. A plain list (no dimensions) is a list
   // of its elements; the transpose keeps the element type and makes no
   // shape claim.
   if (dims === null) return t;
+  // A list of fixed-width rows has an unknown row count but a known width.
+  // The old row width becomes the row count when the axes are swapped.
+  if (
+    dims === undefined &&
+    typeof cells !== 'string' &&
+    cells.kind === 'list' &&
+    cells.dimensions?.length === 1 &&
+    cells.dimensions[0] >= 0
+  ) {
+    dims = [-1, cells.dimensions[0]];
+    cells = cells.elements;
+  }
   // A `Range` element at any depth is listed before the transpose
   // (`listedLazyRows`), so the transpose of a list with a `Range` element
   // holds lists of numbers, not ranges (`listedRangeCells`). The transpose
@@ -1706,7 +1719,9 @@ function transposedShape(t: Type, ops: ReadonlyArray<OperandDescriptor>): Type {
       !Number.isInteger(a1) ||
       !Number.isInteger(a2)
     )
-      return { kind: 'list', elements: t.elements };
+      return t.dimensions === undefined
+        ? { kind: 'list', elements: cells, dimensions: [-1, -1] }
+        : { kind: 'list', elements: cells };
     if (a1 <= 0 || a1 > dims.length || a2 <= 0 || a2 > dims.length)
       return 'value';
     axis1 = a1;
@@ -1717,7 +1732,7 @@ function transposedShape(t: Type, ops: ReadonlyArray<OperandDescriptor>): Type {
     swapped[axis2 - 1],
     swapped[axis1 - 1],
   ];
-  return { kind: 'list', elements: t.elements, dimensions: swapped };
+  return { kind: 'list', elements: cells, dimensions: swapped };
 }
 
 /**

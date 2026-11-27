@@ -82,6 +82,11 @@
 
 ### Behavior Changes
 
+- **Transpose infers the shape of a list of fixed-width rows.** For
+  `P: list<list<real^2>>`, `Transpose(P)` and `ConjugateTranspose(P)` have type
+  `matrix<real^(2x?)>`. Filtering the transpose of `[[1, 2]]` for rows whose
+  sum exceeds `6` now counts `0` rows instead of `2`.
+
 - **Epsil preserves callback effects when a function shadows a library constant.**
   A recursive helper named `i` can forward a callback that writes to the
   enclosing scope without widening its caller's effects to `any`.
