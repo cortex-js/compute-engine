@@ -9,6 +9,31 @@
 
 ### New Features
 
+- **Compiled JavaScript reduces a matrix.** `Sum`, `Product`, `Max` and
+  `Min` of a matrix, of a stated or of a run-time size, declined ("a term
+  that is not a number") and ran in the interpreter. They now compile with
+  the interpreter's value: with `A: matrix<real>` at
+  `A = [[1, 2, 3], [4, 5, 6]]`, `Sum(A)` gives `[5, 7, 9]` (the sums of the
+  columns, as the interpreter adds the rows element by element),
+  `Product(A)` gives `[4, 10, 18]`, `Max(A)` gives 6 and `Min(A)` gives 1;
+  `Sum(Sum(A))` gives 21. Of a list of no row the interpreter's `Sum` is
+  the number 0 and not a list, so `Sum` and `Product` compile for a matrix
+  that has a row (an input or a parameter of a matrix type, a matrix of a
+  stated number of rows) and decline for a table of a run-time number of
+  rows (`Sum(Tabulate(f, n, 3))`), a `Filter` of the rows and an input of
+  type `list<list<real^3>>`. `Mean`, `Median` and `Variance` of a matrix
+  are errors of the static type, as before.
+
+- **A compiled function literal reads an untyped parameter as a matrix when
+  the body requires one.** A parameter of a root function literal of no
+  declared type that the body reads as a matrix declined ("the parameter A
+  of no declared type, read as matrix"). It is now a matrix of real numbers
+  of run-time size on JavaScript: `A ↦ Determinant(A)` gives -2 for
+  `[[1, 2], [3, 4]]`, and throws a `RangeError` for a matrix that is not
+  square. Uses that do not settle a matrix (`A ↦ Trace(A)`,
+  `A ↦ MatrixMultiply(A, A)`, `A ↦ Transpose(A)`) decline as before:
+  declare the parameter, as `(A: matrix<real>) ↦ Trace(A)`.
+
 - **JavaScript compiles host-declared tagged results.** A `compile` handler
   can return a dictionary with a literal `__tag` and fields of runtime
   length. Lists and comprehensions return one object per member, in order.
@@ -784,23 +809,13 @@
   at `B = [[1, 2, 3]]`, `A + B` throws
   `RangeError: incompatible-dimensions: lists of lengths 2 and 1`,
   where the interpreter gives the error `incompatible-dimensions`.
-  The reductions of a matrix compile, of a stated and of a run-time size,
-  where they declined ("a term that is not a number"): at
-  `A = [[1, 2, 3], [4, 5, 6]]`, `Sum(A)` gives `[5, 7, 9]` (the sums of the
-  columns, as the interpreter adds the rows), `Product(A)` gives
-  `[4, 10, 18]`, `Max(A)` gives 6 and `Min(A)` gives 1.
-  A parameter of a root function literal of no declared type that the body
-  reads as a matrix is a matrix of run-time size, where it declined ("the
-  parameter A of no declared type, read as matrix"): `A ↦ Determinant(A)`
-  gives -2 for `[[1, 2], [3, 4]]`.
   The transpose of a list of rows of a stated length compiles too, where
   it declined ("Transpose of a matrix whose number of rows is known at run
   time only"): with `P: list<list<real^2>>` at `P = [[1, 2], [3, 4], [5, 6]]`,
   `Transpose(P)` gives `[[1, 3, 5], [2, 4, 6]]`.
   A `list<list<real>>` argument and a call result at a parameter of a
   matrix type, `RowReduce` of a matrix of run-time size, a row of the
-  result of such an operation as the value (`(A + B)[1]`), `Sum` of a list
-  of lists that can have no row (`Sum(Tabulate(f, n, 3))`), matrices of complex
+  result of such an operation as the value (`(A + B)[1]`), matrices of complex
   numbers or of booleans, a matrix of one stated dimension
   (`matrix<real^2x?>`), GLSL, the interval target and the `bigint` mode
   decline.

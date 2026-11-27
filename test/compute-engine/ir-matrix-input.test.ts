@@ -715,6 +715,17 @@ describe('the reductions of a matrix', () => {
   ])('declines: %s', (_, json, message) => {
     expect(declines(json)).toMatch(message);
   });
+
+  // The other targets and modes keep their declines.
+  test.each([
+    ['GLSL', { to: 'glsl' }],
+    ['the interval mode', { to: 'interval-js' }],
+    ['the bigint mode', { mode: 'bigint' }],
+  ])('%s declines Sum and Max of a matrix of stated size', (_, options) => {
+    const matrix = ['List', ['List', 1, 2], ['List', 3, 4]];
+    expect(declines(['Sum', matrix], options)).not.toBe('');
+    expect(declines(['Max', ['Multiply', 'n', matrix]], options)).not.toBe('');
+  });
 });
 
 // Step 6 of the plan: the uses of the parameter give it the type `matrix`

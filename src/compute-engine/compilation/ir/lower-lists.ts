@@ -1109,10 +1109,13 @@ export function listLowering(cx: Lowering) {
     // and `Product` of it are the list of the sums of its columns, the
     // interpreter's sum of its rows element by element, and `Max` and
     // `Min` read each of its elements.
-    // Not on a target with no list of a run-time length (GLSL), which has
-    // no list of rank 2.
+    // On JavaScript outside the interval and the bigint modes, which keep
+    // their declines (GLSL has no list of rank 2).
     const grid = (x: Expression) =>
-      cx.runtimeLengths && x.type.matches('list<list<number>>');
+      cx.runtimeLengths &&
+      !cx.interval &&
+      !cx.bigint &&
+      x.type.matches('list<list<number>>');
     if (!red.indexed && literal === undefined && e.ops.some(grid))
       return extremes(e, r, grid);
     // The operand is lowered once: the matrix, or the list as before.

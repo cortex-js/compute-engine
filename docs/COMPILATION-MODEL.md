@@ -2002,8 +2002,9 @@ element, so their value is the list of the sums (products) of the columns:
 with `A: matrix<real>` at `A = [[1, 2, 3], [4, 5, 6]]`, `Sum(A)` gives
 `[5, 7, 9]`, `Product(A)` gives `[4, 10, 18]` and `Sum(Sum(A))` gives 21.
 `Max` and `Min` read every element: `Max(A)` gives 6, `Max(A, 10)` gives 10,
-and NaN for a matrix of no element. These compile on `javascript` (GLSL
-has no list of rank 2). Of a list of no row, the interpreter's
+and NaN for a matrix of no element. These compile on `javascript`, outside
+the `bigint` mode; GLSL (which has no list of rank 2) and `interval-js`
+decline them. Of a list of no row, the interpreter's
 `Sum` is the number 0 and not a list, so `Sum` and `Product` compile only
 for a matrix whose number of rows the compiler proves at least 1: an input
 or a parameter of a matrix type (the engine refuses `[]` as its value, and

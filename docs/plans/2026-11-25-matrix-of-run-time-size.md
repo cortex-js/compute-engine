@@ -409,9 +409,12 @@ errors of the static type (`incompatible-type`) and decline.
   one with empty lists: no value differs from the interpreter's other than
   a `RangeError` for two sizes.
 - The interval and the bigint modes, which the scope of this plan leaves
-  out, take `Sum`, `Product`, `Max` and `Min` of a matrix of stated size
-  through the same code, with the interpreter's values (the reviewer's
-  probes); GLSL does not.
+  out, and GLSL keep their declines. The first cut gave the interval mode
+  these reductions of a matrix of stated size (with the interpreter's
+  values, the reviewer's probes); the full suite has a test that pins the
+  decline there (`tycho-item-237-interval-lowering-batch.test.ts`, "this
+  target deliberately does not lower" a list of lists), so the paths are
+  limited to JavaScript outside the two modes (a follow-up commit).
 - Not done: a `Product` of a function expression whose canonical form is
   `Reduce(m, "Multiply", 1)` (a literal, a table) declines, as `Reduce` of
   a matrix does; the Frobenius `Norm` of a matrix declines.

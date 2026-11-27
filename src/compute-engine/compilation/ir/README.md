@@ -2784,9 +2784,9 @@ a value of a matrix type, `matrixCounts` for an input of the entry and
 `rows.count` of a parameter or of an input that a user function reads,
 `matrixValues`; the order `rows.order` of a square matrix of such a number of
 rows; and such a value plus the 0 of a check of two lengths); another matrix
-declines ("… of a list of lists that can have no row"). The paths apply
-where lists have a run-time length (`cx.runtimeLengths`: not GLSL, which has
-no list of rank 2). `Max` and `Min` of operands of which
+declines ("… of a list of lists that can have no row"). The paths apply on
+JavaScript outside the interval and the bigint modes, which keep their
+declines; GLSL has no list of rank 2. `Max` and `Min` of operands of which
 one is a list of lists are `extremes()`: each such operand is the fold over
 its rows of the fold over each row, also for rows of different lengths, and
 with no scalar operand the value is NaN where no operand holds an element,
