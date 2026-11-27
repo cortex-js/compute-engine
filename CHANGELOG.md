@@ -82,6 +82,9 @@
 
 ### Behavior Changes
 
+- **Whole-collection calls inside local initializers keep list arguments whole.**
+  With `function f(xs) { let m = mean(xs); m }`, `f([1, 3])` now returns `2`.
+
 - **Epsil warns when comparing a nominal tuple value with a plain tuple.**
   For an array of `Pixel` values, `px[i] == (255, 255, 255, 255)` compares
   unequal. Use `px[i] == Pixel(255, 255, 255, 255)` to compare the fields.

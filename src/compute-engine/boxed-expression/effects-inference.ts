@@ -1222,6 +1222,11 @@ export function wholeCollectionParameterType(
       return;
     }
     const outer = [...localFunctionArms];
+    // A local of this block hides any helper with the same name in the
+    // enclosing block, including in the initializer of another local.
+    if (isFunction(expr, 'Block'))
+      for (const [name] of outer)
+        if (expr.localScope?.bindings.has(name)) localFunctionArms.delete(name);
     const writes = new Set<string>();
     scopeWrites.push(writes);
     visitNode(expr);
@@ -1234,8 +1239,14 @@ export function wholeCollectionParameterType(
     }
   };
   const visitNode = (expr: Expression): void => {
-    if (!isFunction(expr) || seen.has(expr)) return;
+    if (seen.has(expr)) return;
+    const ops = walkedOperands(expr);
+    if (ops === undefined) return;
     seen.add(expr);
+    if (!isFunction(expr)) {
+      for (const value of ops) visit(value);
+      return;
+    }
     // `h := …` is an `Assign`; the canonical `let h = …` of a block is a
     // `Declare` whose second operand is a dictionary with the entry
     // `value: …`.
@@ -1289,7 +1300,7 @@ export function wholeCollectionParameterType(
         return;
       }
     }
-    for (const op of expr.ops) visit(op);
+    for (const op of ops) visit(op);
   };
   visit(body);
   if (arms.length === 0) return undefined;

@@ -259,8 +259,10 @@ The user decided five rules on 2026-09-29:
   typed `collection<T>`.
 - **An undeclared parameter that is the only operand of a whole-collection
   operator takes the whole collection.** With `h(x) := mean(x)`, `h([1, 2,
-  3])` is `2` and `h(5)` is `5`. The operators are listed in the comment of
-  `wholeCollectionParameterType()` (`boxed-expression/effects-inference.ts`).
+  3])` is `2` and `h(5)` is `5`. The call can be in a local initializer,
+  as in `function h(x) { let m = mean(x); m }`. The operators are listed in
+  the comment of `wholeCollectionParameterType()`
+  (`boxed-expression/effects-inference.ts`).
   `mean(x, 1)`, `norm(x)` and `String(x)` stay element-wise.
 - **A call of a user function over an argument declared `collection<T>` is
   typed `broadcastable<R>`:** with `c: collection<real>` and `g(x) := x^2 +

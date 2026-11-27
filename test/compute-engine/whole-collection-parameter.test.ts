@@ -40,6 +40,12 @@ const EPSIL_CASES: [string, string, string, string[]][] = [
     [LIST, NESTED, SCALAR],
   ],
   [
+    'Mean in a local initializer',
+    'let m = mean(xs); m',
+    '(xs: collection<number> | value) -> number',
+    [LIST, NESTED, SCALAR],
+  ],
+  [
     'Median',
     'median(xs)',
     '(xs: collection<number> | value) -> nan | real | signed_infinity',
@@ -473,6 +479,13 @@ const POINTS: Arg = [
 const ORIGIN: Arg = ['O', 'tuple<real, real>', ['Tuple', 0, 0], [0, 0]];
 
 const ROUTE_CASES: [string, string, Arg[], string, unknown][] = [
+  [
+    'Mean in a local initializer over a list',
+    'function h(xs) { let m = mean(xs); m }',
+    [['L', 'vector<3>', ['List', 1, 2, 3], [1, 2, 3]]],
+    '2',
+    2,
+  ],
   // A use through an element-wise operator reaches the parameter: the list
   // binds whole, and the compiled call takes the helper specialized to the
   // list type, whose body maps the power over the array.
