@@ -48,6 +48,8 @@ ce.declare('gram', '(matrix<real>) -> list<list<real>>');
 ce.assign('gram', box(F(['MatrixMultiply', 'm', ['Transpose', 'm']], 'm')));
 ce.declare('inc', '(matrix<real>) -> list<list<real>>');
 ce.assign('inc', box(F(['Add', 'm', 1], 'm')));
+ce.declare('colsum', '(matrix<real>) -> list<real>');
+ce.assign('colsum', box(F(['Sum', 'm'], 'm')));
 ce.declare('tk', '(real) -> list<list<real>>');
 ce.assign(
   'tk',
@@ -556,7 +558,6 @@ describe('a matrix input: operations on its elements', () => {
     ['a power of a matrix', ['Power', 'M', 'n'], /Power of a matrix/],
     ['a matrix and a list of lists', ['Add', 'M', 'g'], /g of type list<list<real>> other than in an element read/],
     ['Equal of two matrices', ['Equal', 'M', 'A'], /Equal of a list/],
-    ['the sum of the rows', ['Sum', ['Multiply', 2, 'M']], /a term that is not a number/],
     ['RowReduce', ['RowReduce', ['Multiply', 2, 'M']], /RowReduce of a matrix whose number of rows is known at run time only/],
     ['a row of the result as the value', ['At', ['Add', 'M', 'A'], 1], /a row at an index known at run time as the result/],
     ['a matrix operator of arms of two sizes', ['Transpose', ['If', ['Greater', 'n', 2], ['Multiply', 2, 'M'], ['Multiply', 2, 'A']]], /Transpose of a list of lists of run-time length \(its rows can have different lengths\)/],
@@ -599,6 +600,166 @@ describe('a matrix input: operations on its elements', () => {
     expect(declines(['Add', 'I', 1], options)).toMatch(
       /the input I of type matrix<integer>/
     );
+  });
+});
+
+// Step 5 of the plan. The interpreter adds (multiplies) the rows of a
+// matrix element by element, so `Sum` and `Product` are the list of the
+// sums (products) of the columns; `Max` and `Min` read every element.
+describe('the reductions of a matrix', () => {
+  const code = (json: Json) => compile(box(json), { fallback: false }).code;
+  const table = (rows: Json, columns: Json) => [
+    'Tabulate',
+    F(['Subtract', ['Multiply', 'i', 'j'], 2.5], 'i', 'j'),
+    rows,
+    columns,
+  ];
+
+  test.each([
+    ['Sum', ['Sum', 'M']],
+    ['Product', ['Product', 'M']],
+    ['Sum of a matrix of integers', ['Sum', 'I']],
+    ['Sum of a matrix of no stated element type', ['Sum', 'Q']],
+    ['Sum of a matrix of stated size', ['Sum', 'K']],
+    ['Product of a matrix of stated size', ['Product', 'K']],
+    ['Sum of an operation on the elements', ['Sum', ['Add', ['Multiply', 2, 'M'], 1]]],
+    ['Sum of a function of each element', ['Sum', ['Exp', 'M']]],
+    ['the sum of the sums of the columns', ['Sum', ['Sum', 'M']]],
+    ['the mean of each column', ['Divide', ['Sum', 'M'], ['Length', 'M']]],
+    ['the largest sum of a column', ['Max', ['Sum', 'M']]],
+    ['Sum of a literal', ['Sum', ['List', ['List', 1, 'n'], ['List', 3, 4.5]]]],
+    ['Sum of a table of a constant number of rows', ['Sum', table(2, 'n')]],
+    // A value of a matrix type has a row: a parameter of a user function,
+    // and the kernels of a square matrix.
+    ['Sum of a parameter of a user function', ['colsum', 'M']],
+    ['Sum of a parameter of Apply', ['Apply', F(['Sum', 'm'], typed('m', 'matrix<real>')), 'M']],
+    ['Sum of a power of a matrix', ['Sum', ['MatrixPower', 'A', 2]]],
+    ['Max', ['Max', 'M']],
+    ['Min', ['Min', 'M']],
+    ['Max of a matrix of integers', ['Max', 'I']],
+    ['Max of a matrix of stated size', ['Max', 'K']],
+    ['Max of an operation on the elements', ['Max', ['Subtract', 'M', ['Multiply', 2, 'M']]]],
+    ['Max of a transpose', ['Max', ['Transpose', 'M']]],
+    ['Max of a matrix and a scalar', ['Max', 'M', 'n']],
+    ['Min of a list and a matrix', ['Min', 'v', 'M']],
+    ['the range of the elements', ['Subtract', ['Max', 'M'], ['Min', 'M']]],
+    ['Max of a table', ['Max', table('n', 3)]],
+  ])('%s', (_, json) => {
+    expect(check(json).errors).toBe(0);
+  });
+
+  test('Sum of a matrix of stated size is written out', () => {
+    expect(code(['Sum', 'K'])).toBe(
+      [
+        '(() => {',
+        '  const v5 = _.K[0];',
+        '  const v8 = _.K[1];',
+        '  return [((0 + v5[0]) + v8[0]), ((0 + v5[1]) + v8[1]), ((0 + v5[2]) + v8[2])];',
+        '})()',
+      ].join('\n')
+    );
+  });
+
+  test('Sum of a matrix of run-time size makes one list, of the sums', () => {
+    const text = code(['Sum', 'M']);
+    expect(text.match(/new Array\(/g)).toHaveLength(1);
+    expect(text).toMatch(/_\.M\[v\d+\]\[v\d+\]/);
+  });
+
+  test('a matrix whose rows have no element', () => {
+    const M = [[], []];
+    const at = (json: Json) =>
+      compile(box(json), { fallback: false }).run!({ M } as never);
+    // The interpreter: an empty list, and NaN.
+    expect(at(['Sum', 'M'])).toEqual([]);
+    expect(at(['Max', 'M'])).toBeNaN();
+    ce.withValues({ M: list(M) } as never, () => {
+      expect(box(['Sum', 'M']).evaluate().json).toEqual(['List']);
+      expect(box(['Max', 'M']).evaluate().re).toBeNaN();
+    });
+  });
+
+  test('Max of a table of no row is NaN', () => {
+    const json = ['Max', table('n', 3)];
+    const r = compile(box(json), { fallback: false });
+    expect(r.run!({ n: 0 } as never)).toBeNaN();
+    expect(r.run!({ n: 2 } as never)).toBe(3.5);
+    ce.withValues({ n: ce.number(0) } as never, () =>
+      expect(box(json).evaluate().re).toBeNaN()
+    );
+  });
+
+  test('Max of a list of lists whose rows can differ', () => {
+    const json = ['Max', 'g'];
+    const r = compile(box(json), { fallback: false });
+    const g = [[1, 2, 3], [40], [5, 6]];
+    expect(r.run!({ g } as never)).toBe(40);
+    expect(r.run!({ g: [] } as never)).toBeNaN();
+    ce.withValues({ g: list(g) } as never, () =>
+      expect(box(json).evaluate().re).toBe(40)
+    );
+  });
+
+  // Of no row the interpreter's `Sum` is the number 0, not a list: a list
+  // of lists that can have no row has no settled shape (R3). A value of a
+  // matrix type has a row.
+  test.each([
+    ['a table of a run-time number of rows', ['Sum', table('n', 3)], /Sum of a list of lists that can have no row/],
+    ['a transpose (a matrix can have rows of no element)', ['Sum', ['Transpose', 'M']], /Sum of a list of lists that can have no row/],
+    ['a Filter of the rows', ['Sum', ['Filter', 'M', F(['Greater', ['Sum', 'r'], 5], 'r')]], /Sum of a list of lists that can have no row/],
+    // The canonical form of a `Product` of a function expression is a
+    // `Reduce`, which reads no matrix.
+    ['a Product whose canonical form is a Reduce', ['Product', ['List', ['List', 1, 'n'], ['List', 3, 4.5]]], /a term that is not a number/],
+    ['a list of lists whose rows can differ', ['Sum', 'g'], /a term that is not a number/],
+    ['the mean, an error of the static type', ['Mean', 'M'], /a sub-expression of the static type error/],
+  ])('declines: %s', (_, json, message) => {
+    expect(declines(json)).toMatch(message);
+  });
+});
+
+// Step 6 of the plan: the uses of the parameter give it the type `matrix`
+// (the signature of the literal), and it is an input of that type.
+describe('a parameter of no declared type that the body reads as a matrix', () => {
+  test.each([
+    ['Determinant', F(['Determinant', 'm'], 'm'), ['Determinant', 'A']],
+    ['the determinant, scaled', F(['Multiply', 0.5, ['Determinant', 'm']], 'm'), ['Multiply', 0.5, ['Determinant', 'A']]],
+    ['the determinant and an element', F(['Add', ['Determinant', 'm'], ['At', ['At', 'm', 1], 1]], 'm'), ['Add', ['Determinant', 'A'], ['At', ['At', 'A', 1], 1]]],
+  ])('%s', (_, literal, interp) => {
+    // `A` is square at each point: no error.
+    expect(check(literal, (p) => [p.A], interp).errors).toBe(0);
+  });
+
+  test('Inverse, and an operation on its elements', () => {
+    const run = (json: Json) =>
+      (compile(box(json), { fallback: false }).run as any)([[1, 2], [3, 4]]);
+    expect(run(F(['Inverse', 'm'], 'm'))).toEqual([[-2, 1], [1.5, -0.5]]);
+    expect(run(F(['Multiply', 2, ['Inverse', 'm']], 'm'))).toEqual([[-4, 2], [3, -1]]);
+  });
+
+  test('with a parameter that is a number', () => {
+    const r = compile(
+      box(F(['Add', ['Determinant', 'm'], 'k'], 'm', 'k')),
+      { fallback: false }
+    );
+    const run = r.run as (...args: unknown[]) => number;
+    expect(run([[1, 2], [3, 4]], 10)).toBe(8);
+    // A matrix that is not square: the interpreter's error.
+    expect(() => run([[1, 2, 3], [4, 5, 6]], 10)).toThrow(
+      'expected-square-matrix'
+    );
+  });
+
+  // Uses that give a union which holds a matrix, or a collection, do not
+  // settle a shape.
+  test.each([
+    ['Trace', F(['Trace', 'm'], 'm'), /the parameter m of no declared type, read as tensor \| value/],
+    ['a product', F(['MatrixMultiply', 'm', 'm'], 'm'), /the parameter m of no declared type, read as matrix \| vector/],
+    ['Sum', F(['Sum', 'm'], 'm'), /the parameter m of no declared type, read as collection/],
+    ['Transpose', F(['Transpose', 'm'], 'm'), /the parameter m of no declared type \(its uses give it the type value\)/],
+    ['RowReduce, of a run-time size', F(['RowReduce', 'm'], 'm'), /RowReduce of a matrix whose number of rows is known at run time only/],
+    ['GLSL', F(['Determinant', 'm'], 'm'), /the parameter m of no declared type, read as matrix/, { to: 'glsl' }],
+  ])('declines: %s', (_, json, message, options = {}) => {
+    expect(declines(json, options as object)).toMatch(message as RegExp);
   });
 });
 

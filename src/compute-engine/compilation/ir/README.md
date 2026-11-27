@@ -403,7 +403,11 @@ inputs: a parameter of no declared type is a real, and one declared `any` or
 `value` declines, as an argument of type `any` does. A positional parameter of a
 root function literal of no declared type whose uses give it a type that admits
 a list (`A ↦ Transpose(A)`: `value`) declines with `untyped-input` and its name
-(CE-1837). A name that only a branch dropped at compile time reads is an input
+(CE-1837). One whose uses give it the type `matrix` (`A ↦ Determinant(A)`: the
+signature of the literal is `(A: matrix) -> number`) is an input of that type on
+JavaScript, a matrix of run-time size ("Matrices"; `program()` of `lower.ts`);
+another type that is no scalar declines ("the parameter A of no declared type,
+read as …"). A name that only a branch dropped at compile time reads is an input
 too (`If(2 < 3, 0, z)` with `z` undeclared is refused). A scalar of type
 `number` is a real in the `strict` mode and a complex in the `complex` mode; a
 scalar `complex` input is on the complex lane, and a number given for a complex
@@ -2765,8 +2769,30 @@ function whose value it is gives its rows (a call gives one length, `call()` of
 declines where `inc := m ↦ m + 1`), an `If` whose arms are two such results of
 two sizes joins them as rows, a local holds it and is written again, and an
 element `At(At(A + B, i), j)` is read (`rows.at`). The row `At(A + B, 1)` as the
-value, a matrix operator of such an `If`, and the reductions of a matrix
-(`Sum(A)`) decline.
+value and a matrix operator of such an `If` decline.
+
+The reductions of a matrix (`reduction()` of `lower-lists.ts`; an operand
+whose engine type is a list of lists of numbers, lowered once by
+`gridOf()`). `Sum(m)` and `Product(m)` of a matrix (a list of rank 2 of
+reals or integers, `asMatrix()` of a value of the lane `rows`) are
+`columns()`: the interpreter adds the rows element by element, so the value
+is a build over the columns of the fold over the rows from the identity
+(`0 + m[0][j] + …`), written out for a short constant size. Of no row the
+interpreter's value is the number 0 (or 1), so the number of rows must be
+proved `>= 1` (`positive()` of `lower.ts`: a constant, the number of rows of
+a value of a matrix type, `matrixCounts` for an input of the entry and
+`rows.count` of a parameter or of an input that a user function reads,
+`matrixValues`; the order `rows.order` of a square matrix of such a number of
+rows; and such a value plus the 0 of a check of two lengths); another matrix
+declines ("… of a list of lists that can have no row"). The paths apply
+where lists have a run-time length (`cx.runtimeLengths`: not GLSL, which has
+no list of rank 2). `Max` and `Min` of operands of which
+one is a list of lists are `extremes()`: each such operand is the fold over
+its rows of the fold over each row, also for rows of different lengths, and
+with no scalar operand the value is NaN where no operand holds an element,
+a test of the sum of the lengths that is left out for constant sizes. A
+list of lists that is no matrix under `Sum` keeps its decline ("a term that
+is not a number").
 
 Two lengths that must be equal (the inner lengths of `MatrixMultiply`, the
 numbers of rows and of columns of `Trace`) and that `same()` does not prove

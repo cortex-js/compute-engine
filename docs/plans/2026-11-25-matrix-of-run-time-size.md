@@ -1,8 +1,7 @@
 # A matrix of run-time size as a shape of the IR
 
 Status: approved by the user 2026-11-25, with Q1 (a), Q2 (yes) and Q3
-(yes) of section 6; steps 1 to 4 are done (section 8), steps 5 and 6 are
-not started. Scope: the `javascript` target of the IR
+(yes) of section 6; steps 1 to 6 are done (section 8). Scope: the `javascript` target of the IR
 compiler (`src/compute-engine/compilation/ir/`), outside the interval and
 `bigint` modes. GLSL keeps stated sizes. Issues it resolves: CE-1834 (by
 step 2).
@@ -372,3 +371,65 @@ size are exchanged at no cost in both directions.
   `rows.order`, the checks, which do not depend on the lane. Reads of
   `rowWidths` and `rowCounts`: 11 before, 7 after. `lower-matrices.ts`: 718
   lines before, 583 after.
+
+**Step 5.** The interpreter's values are not those of 3.4, so the step
+implements what the interpreter gives. `Sum` and `Product` of a matrix add
+(multiply) its rows element by element: the list of the sums (products) of
+the columns, lowered as a build over the columns of the fold over the rows
+(`columns()` of `lower-lists.ts`), one list and no copy of a row. `Max` and
+`Min` of a matrix are one number, of all its elements (`extremes()`), NaN
+of a matrix of no element. `Mean`, `Median` and `Variance` of a matrix are
+errors of the static type (`incompatible-type`) and decline.
+
+- Of no row the interpreter's `Sum` is the number 0 and not a list (the
+  type of `Sum(A)` is `integer | vector<real>`), so `Sum` and `Product`
+  compile for a matrix that has a row only: a constant number of rows, or
+  the number of rows of a value of a matrix type (`positive()` of
+  `lower.ts`: an input, a parameter of a user function or of `Apply`; the
+  engine refuses `[]` as the value of such a variable, and the interpreter
+  gives `incompatible-type` for it at such a parameter), also through an
+  operation on its elements and through `Inverse` and `MatrixPower`. A
+  table of a run-time number of rows, a `Filter`, the transpose of a matrix
+  of run-time size (its rows can have no element) and an input of type
+  `list<list<real^3>>` decline ("… of a list of lists that can have no
+  row").
+- Tests, on `91d8b0389aafef3de6a5c7111ea2c77c0ac0bd3c` with steps 5 and 6:
+  274 files pass (16,735 tests, 560 snapshots, none changed), and the
+  core set. Changed tests: 37 added for this step; one decline of step 2
+  removed (`Sum(2·M)` compiles); one test of
+  `tycho-row-425-index-of-broadcastable-call.test.ts` that pinned the
+  decline of `Max` and `Min` over `list<vector<2>>` (the code gave NaN
+  when the test was written) checks the interpreter's value instead.
+- Emitted code: the 37 witnesses of step 1 that compiled and the 124 forms
+  of step 2 that compiled have the same code; `Sum(M)`, `Sum(2M)`,
+  `Product(M)`, `Max(M)`, `Min(M)`, `Max(M, 5)` and `Sum(Sum(M))` compile,
+  each with the interpreter's value at four points. GLSL is unchanged (the
+  step applies where lists have run-time lengths).
+- 220 forms of a reduction (20 kinds of operand, 11 forms) at three points,
+  one with empty lists: no value differs from the interpreter's other than
+  a `RangeError` for two sizes.
+- The interval and the bigint modes, which the scope of this plan leaves
+  out, take `Sum`, `Product`, `Max` and `Min` of a matrix of stated size
+  through the same code, with the interpreter's values (the reviewer's
+  probes); GLSL does not.
+- Not done: a `Product` of a function expression whose canonical form is
+  `Reduce(m, "Multiply", 1)` (a literal, a table) declines, as `Reduce` of
+  a matrix does; the Frobenius `Norm` of a matrix declines.
+
+**Step 6.** A positional parameter of a root function literal of no
+declared type whose uses give it a matrix type of no stated dimensions
+(the signature of the literal: `A ↦ Determinant(A)` is
+`(A: matrix) -> number`) is an input of that type on JavaScript
+(`program()` of `lower.ts`), outside the bigint and interval modes.
+`A ↦ Determinant(A)`, `A ↦ Inverse(A)`, `A ↦ 2·Inverse(A)` and
+`(A, k) ↦ Determinant(A) + k` compile with the interpreter's values, and a
+matrix that is not square throws `expected-square-matrix`. Uses that give
+a union (`A ↦ Trace(A)`: `tensor | value`; `A ↦ MatrixMultiply(A, A)`:
+`matrix | vector`), a collection (`A ↦ Sum(A)`) or `value`
+(`A ↦ Transpose(A)`) decline as before. Tests: 11 added.
+
+**While the work was done.** Main gained a second implementation of
+CE-1834 (`b89ad1d6471435b3988201c65ec06008a57cbd5b`) and later matrix
+changes (CE-1884 among them). Steps 5 and 6 were rebased on that state.
+The target of 3.2 is still open there: `Sum(Map(r ↦ Sum(r), 2·A + 1))` is
+three loops and two arrays.

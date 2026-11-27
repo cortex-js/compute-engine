@@ -784,13 +784,23 @@
   at `B = [[1, 2, 3]]`, `A + B` throws
   `RangeError: incompatible-dimensions: lists of lengths 2 and 1`,
   where the interpreter gives the error `incompatible-dimensions`.
+  The reductions of a matrix compile, of a stated and of a run-time size,
+  where they declined ("a term that is not a number"): at
+  `A = [[1, 2, 3], [4, 5, 6]]`, `Sum(A)` gives `[5, 7, 9]` (the sums of the
+  columns, as the interpreter adds the rows), `Product(A)` gives
+  `[4, 10, 18]`, `Max(A)` gives 6 and `Min(A)` gives 1.
+  A parameter of a root function literal of no declared type that the body
+  reads as a matrix is a matrix of run-time size, where it declined ("the
+  parameter A of no declared type, read as matrix"): `A ↦ Determinant(A)`
+  gives -2 for `[[1, 2], [3, 4]]`.
   The transpose of a list of rows of a stated length compiles too, where
   it declined ("Transpose of a matrix whose number of rows is known at run
   time only"): with `P: list<list<real^2>>` at `P = [[1, 2], [3, 4], [5, 6]]`,
   `Transpose(P)` gives `[[1, 3, 5], [2, 4, 6]]`.
   A `list<list<real>>` argument and a call result at a parameter of a
   matrix type, `RowReduce` of a matrix of run-time size, a row of the
-  result of such an operation as the value (`(A + B)[1]`), matrices of complex
+  result of such an operation as the value (`(A + B)[1]`), `Sum` of a list
+  of lists that can have no row (`Sum(Tabulate(f, n, 3))`), matrices of complex
   numbers or of booleans, a matrix of one stated dimension
   (`matrix<real^2x?>`), GLSL, the interval target and the `bigint` mode
   decline.

@@ -1206,11 +1206,13 @@ export function functionLowering(
         // A parameter of a matrix type: the length of its rows, made at the
         // start of the body so that every region of it reads one value.
         params.forEach((t, i) => {
-          if ('width' in t && t.width === true)
+          if ('width' in t && t.width === true) {
+            cx.matrixValues.add(values[i]);
             cx.rowWidths.set(
               values[i],
               b.op('rows.width', [values[i]], scalarType('integer'))
             );
+          }
         });
         // Each variable of the engine that the body reads or writes is an
         // input from the start of the body, so that a write in an arm
@@ -2132,11 +2134,13 @@ export function functionLowering(
       cx.rowsParams.add(v);
       cx.rowsElements.set(v, cx.rowsElementLane(read)!);
       // A matrix input: the length of its rows, at the start of the body.
-      if (isFreeMatrix(read))
+      if (isFreeMatrix(read)) {
+        cx.matrixValues.add(v);
         cx.rowWidths.set(
           v,
           b.entryOp('rows.width', [v], scalarType('integer'))
         );
+      }
     }
     if (tupleAxis(t) === 0 && ir.lane !== 'record') cx.tuples.set(v, 0);
     fn.inputs.push(t);

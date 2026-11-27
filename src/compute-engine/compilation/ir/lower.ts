@@ -891,6 +891,15 @@ function lowerOnce(
     return r;
   };
   const inputLengths = new Set<V>();
+  /** The number of rows of each input of the entry of a matrix type
+   *  (`input()`): at least 1, as the type states (the engine refuses a
+   *  list of no row as the value of such a variable). */
+  const matrixCounts = new Set<V>();
+  /** The values of the lane `rows` that are of a matrix type, which have a
+   *  row too: a parameter of a user function, an input that a user function
+   *  reads, a variable of the engine that a root literal assigns
+   *  (`Lowering.matrixValues`). */
+  const matrixValues = new Set<V>();
   // The calls of the program that have each call, each symbol or each
   // dictionary as an operand, with the position of the operand, and the
   // dictionaries that have it as a value, with the position of the value
@@ -1227,6 +1236,35 @@ function lowerOnce(
       ['add', 'mul', 'max', 'pow', 'sqrt'].includes(op) &&
       (op === 'pow' ? [i.args[0]] : i.args).every(next)
     );
+  };
+
+  /** The integer `v` is proved `>= 1`: such a constant, the number of rows
+   *  of a value of a matrix type (`matrixCounts`, `matrixValues`), the
+   *  order of a square matrix of such a number of rows, and such a value
+   *  plus values that are 0 (a constant, a check of two lengths: the
+   *  length that `agreedLength()` of `lower-lists.ts` gives). */
+  const positive = (v: V, depth = 0): boolean => {
+    const c = constant(v);
+    if (c !== undefined) return c >= 1;
+    if (matrixCounts.has(v)) return true;
+    const i = b.defs.get(v);
+    if (i === undefined || depth > 8) return false;
+    // The number of rows of a value of a matrix type, and the order of a
+    // square matrix that has a row (`Inverse`, `MatrixPower`).
+    if (i.op === 'rows.count') return matrixValues.has(i.args[0]);
+    if (i.op === 'rows.order') return positive(i.args[0], depth + 1);
+    if (i.op.split('.')[0] !== 'add') return false;
+    const zero = (a: V): boolean => {
+      const d = b.defs.get(a);
+      return (
+        constant(a) === 0 ||
+        d?.op === 'rows.agree' ||
+        d?.op === 'rows.square' ||
+        (d?.op.split('.')[0] === 'add' && d.args.every(zero))
+      );
+    };
+    const held = i.args.filter((a) => positive(a, depth + 1));
+    return held.length > 0 && i.args.every((a) => held.includes(a) || zero(a));
   };
 
   /** Whether `r` takes its complex signature on `args`: in every mode when
@@ -5293,6 +5331,7 @@ function lowerOnce(
       // whose count and whose length are those two values (`rowCounts`,
       // `rowWidths`).
       const [rows, columns] = [lengthParam(), lengthParam(true)];
+      matrixCounts.add(rows);
       const matrix = b.param(name, {
         lane: rowsElementLane(t, cx.wide)!,
         shape: [{ v: rows }, { v: columns }],
@@ -8318,6 +8357,8 @@ function lowerOnce(
     type,
     constant,
     nonnegative: (v) => nonnegative(v),
+    positive: (v) => positive(v),
+    matrixValues,
     branch,
     withFrame,
     region,
@@ -9047,6 +9088,21 @@ function lowerOnce(
           typeof own === 'object' && own.kind === 'signature'
             ? own.args?.[i]?.type
             : undefined;
+        // A parameter of no declared type that the body reads as a matrix
+        // (`A ↦ Determinant(A)`: the type of the literal is
+        // `(A: matrix) -> number`) is an input of that type, a matrix of
+        // run-time size, as an input of no declared type has the type that
+        // its occurrences require (`docs/COMPILATION-MODEL.md`).
+        if (
+          declared === 'unknown' &&
+          read !== undefined &&
+          isFreeMatrix(read) &&
+          options.javascript &&
+          !bigint &&
+          !interval &&
+          rowsElementLane(read, cx.wide) !== undefined
+        )
+          return void input(p, name, read, true);
         if (
           declared === 'unknown' &&
           read !== undefined &&
@@ -9127,11 +9183,13 @@ function lowerOnce(
           const v = b.param(s.name, { lane: 'rows', shape: [] });
           rowsParams.add(v);
           rowsElements.set(v, s.lane as 'integer' | 'real');
-          if (isFreeMatrix(s.definition.type.type))
+          if (isFreeMatrix(s.definition.type.type)) {
+            matrixValues.add(v);
             rowWidths.set(
               v,
               b.entryOp('rows.width', [v], scalarType('integer'))
             );
+          }
           frames[0].names.set(s.name, {
             v,
             role: 'local',

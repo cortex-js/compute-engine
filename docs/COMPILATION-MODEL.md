@@ -212,8 +212,9 @@ interpreter's value. A line is removed when the case declines or is fixed.
   whose number of rows is known at run time only,
   `C = Map(i ↦ Map(j ↦ i + 10j, Range(1, 3)), Range(1, n, 1))`, at `n = 0`,
   and an input of a list type of a stated row length: with
-  `P: list<list<real^2>>`, `Shape(P)` at `P = []` gives `[0, 2]` and
-  `Rank(P)` gives 2.
+  `P: list<list<real^2>>`, `Shape(P)` at `P = []` gives `[0, 2]`,
+  `Rank(P)` gives 2 and `Transpose(P)` gives `[[], []]`, where the
+  interpreter leaves the transpose unevaluated.
   Such a table at a parameter of a matrix type, which takes it as its rows:
   with `tr := m ↦ Transpose(m)` declared `(matrix<real>) -> list<list<real>>`,
   `tr(C)` at `n = 0` gives `[]`, and the interpreter leaves the `Transpose`
@@ -242,7 +243,10 @@ interpreter's value. A line is removed when the case declines or is fixed.
   result, each by one length: `Length(M + A)`, `Count(M + A)` and
   `Map(r ↦ 1, M + A)` at that `M` and `A`, which have two rows, give `2`,
   `2` and `[1, 1]`, and `Rank(M + A)`, which reads no length, gives `2`,
-  where the interpreter gives `incompatible-dimensions`.
+  where the interpreter gives `incompatible-dimensions`. So does a reader
+  of the length of `Sum(M + A)`, the list of the sums of the columns, which
+  reads the row length only: `Length(Sum(M + A))` gives `2` at an `M` of
+  three rows and an `A` of two, of two columns each.
 - `javascript` (crafted), `A, B: matrix<real>`, `x: real`: the comparison of
   the row lengths of two matrices under an operation on their elements
   reads the row lengths of the inputs, also where a `Filter` kept no row of
@@ -1356,7 +1360,16 @@ number and a tensor) decline, where the code read a list there as a number
 to each element of a list passed to an untyped parameter and gives
 `[3, 4]`). The host declares the parameter:
 `(A: matrix<real>) ↦ Transpose(A)` compiles and gives `[[1, 3], [2, 4]]`
-for `[[1, 2], [3, 4]]`. A transparent alias of `unknown` or
+for `[[1, 2], [3, 4]]`. When its uses give it the type `matrix`
+(`A ↦ Determinant(A)`, `A ↦ Inverse(A)`: the type of the literal is
+`(A: matrix) -> …`), the parameter is an input of that type on
+`javascript`, a matrix of real numbers of run-time size, as an input of no
+declared type has the type that its occurrences require:
+`A ↦ Determinant(A)` gives -2 for `[[1, 2], [3, 4]]`, and
+`A ↦ 2·Inverse(A)` gives `[[-4, 2], [3, -1]]`. Uses that give it a union
+that holds a matrix (`A ↦ Trace(A)`: `tensor | value`;
+`A ↦ MatrixMultiply(A, A)`: `matrix | vector`) or a collection
+(`A ↦ Sum(A)`) decline. A transparent alias of `unknown` or
 `any` (`ce.declareType("U", "unknown", { alias: true })`) is that type, so
 an input declared `U` declines. A local of a block or of a function body
 (a name that it declares, or assigns first at its own level) is not an
@@ -1978,11 +1991,35 @@ the number of rows and the length of the rows, once, before the loops. At
 (`A + v` with `v: list<real>`, where the interpreter adds `v[i]` to the row
 `i`), a `list<list<real>>` input (`g + g`: its rows can have different
 lengths; declare it `matrix<real>`), the result of a call
-(`inc(A) + 1`), a row of the result as the value (`(A + B)[1]`), a matrix
-operator of an `If` whose arms are two such results of two sizes, and a
-reduction of a matrix (`Sum(A)`). An element of the result compiles
+(`inc(A) + 1`), a row of the result as the value (`(A + B)[1]`), and a matrix
+operator of an `If` whose arms are two such results of two sizes. An element of the result compiles
 (`(A + B)[1][2]`, NaN out of range), and so does such an `If` as the value
 of the program or of a local.
+
+The reductions of a matrix, of a stated or of a run-time size, give the
+interpreter's value. `Sum` and `Product` add (multiply) the rows element by
+element, so their value is the list of the sums (products) of the columns:
+with `A: matrix<real>` at `A = [[1, 2, 3], [4, 5, 6]]`, `Sum(A)` gives
+`[5, 7, 9]`, `Product(A)` gives `[4, 10, 18]` and `Sum(Sum(A))` gives 21.
+`Max` and `Min` read every element: `Max(A)` gives 6, `Max(A, 10)` gives 10,
+and NaN for a matrix of no element. These compile on `javascript` (GLSL
+has no list of rank 2). Of a list of no row, the interpreter's
+`Sum` is the number 0 and not a list, so `Sum` and `Product` compile only
+for a matrix whose number of rows the compiler proves at least 1: an input
+or a parameter of a matrix type (the engine refuses `[]` as its value, and
+the interpreter gives `incompatible-type` for it at such a parameter), a
+matrix of a stated number of rows (`matrix<real^2x3>`, a literal), and a
+value that has the number of rows of one of these (an operation on its
+elements, `Inverse(A)`, `MatrixMultiply(A, B)`, `Transpose(K)` of a `K` of
+stated size). They decline for a table of a run-time number of rows
+(`Sum(Tabulate(f, n, 3))`), a `Filter` of the rows, the transpose of a
+matrix of run-time size (its rows can have no element) and an input of type
+`list<list<real^3>>` ("Sum of a list of lists that can have no row");
+`Map(r ↦ Sum(r), A)` gives the sums of the rows. With
+`sm := m ↦ Sum(m)` declared `(matrix<real>) -> list<real>`, `sm(A)` gives
+`[5, 7, 9]`. `Mean`, `Median` and `Variance` of a matrix are errors of the
+static type and decline, as does a `Product` whose canonical form is a
+`Reduce` (`Product(2·A)` compiles; `Product([[1, x], [3, 4]])` declines).
 
 Compiled `Equal` and `NotEqual` on numeric operands are the IEEE 754
 comparison (`===` on JavaScript, `==` on the shader targets), with no

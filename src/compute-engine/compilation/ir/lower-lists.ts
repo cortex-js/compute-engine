@@ -930,6 +930,158 @@ export function listLowering(cx: Lowering) {
     )!;
   };
 
+  /** The list of lists `x`, lowered once: as a source of its rows, as
+   *  `source()` reads it, and as a matrix when it is one, a list of rank 2
+   *  of real or integer numbers that is no list of points (of a value of
+   *  the lane `rows` whose rows have one length, `cx.asMatrix()`). */
+  const gridOf = (x: Expression): { source: Source; matrix?: V } => {
+    const c = chunks(x);
+    if (c !== undefined && typeof c !== 'number')
+      return {
+        source: c.source(),
+        // The rows of a `Chunk` or a `Partition` have no element lane.
+        matrix: c.row === undefined ? undefined : cx.asMatrix(x, c.rows()),
+      };
+    const v = c ?? cx.value(x)!;
+    if (cx.tuples.get(v) === 0) decline(x, 'a tuple where a list is read');
+    const t = type(v);
+    if (t.shape.length === 0) decline(x, 'a scalar where a list is required');
+    return {
+      source: listSource(v),
+      matrix:
+        t.shape.length === 2 &&
+        !cx.tuples.has(v) &&
+        (t.lane === 'integer' || t.lane === 'real')
+          ? v
+          : undefined,
+    };
+  };
+
+  /** The row at the index `i` of the list of lists `s` that `e` reduces: a
+   *  flat list of real or integer numbers. */
+  const gridRow = (e: Fn, s: Source, i: V): V => {
+    const row = s.at(i);
+    const t = type(row);
+    if (
+      t.shape.length !== 1 ||
+      cx.tuples.has(row) ||
+      (t.lane !== 'integer' && t.lane !== 'real')
+    )
+      decline(e, 'a term that is not a number');
+    return row;
+  };
+
+  /** `Sum(m)` and `Product(m)` of the matrix `m`: the interpreter adds
+   *  (multiplies) its rows element by element, so the value is the list of
+   *  the sums (products) of its columns, a build over the columns of the
+   *  fold over the rows from the identity of `r`. Of no row the
+   *  interpreter's value is the number 0 (or 1), not a list: the matrix
+   *  must have a row, a number of rows that is a constant or that
+   *  `cx.positive()` proves (an input of a matrix type). */
+  const columns = (e: Fn, r: OperatorRow, m: V): V => {
+    const [n, w] = type(m).shape.map((x) =>
+      typeof x === 'number' ? integer(x) : x.v
+    );
+    if (!cx.positive(n))
+      decline(
+        e,
+        `${e.operator} of a list of lists that can have no row, where the interpreter gives a number (an input or a parameter of a matrix type and a matrix of a stated number of rows have a row)`
+      );
+    const init = integer(REDUCTIONS.get(e.operator)!.identity);
+    const rows = listSource(m);
+    return built(e, w, (j) =>
+      reduce(
+        e,
+        r,
+        [{ length: n, at: (i) => listSource(rows.at(i)).at(j) }],
+        init,
+        undefined,
+        false
+      )
+    );
+  };
+
+  /** `Max` and `Min` of operands of which one or more is a matrix
+   *  (`grid`): of all the elements of each matrix, the fold over its rows
+   *  of the fold over each row from the identity of `r`, and of the other
+   *  operands as `reduction()` reads them. With no scalar operand the
+   *  value is NaN where the lists and the matrices hold no element at all,
+   *  as the interpreter's; the test is left out where each matrix has a
+   *  constant number of rows and a constant row length. */
+  const extremes = (
+    e: Fn,
+    r: OperatorRow,
+    grid: (x: Expression) => boolean
+  ): V => {
+    const red = REDUCTIONS.get(e.operator)!;
+    const init = b.constant(red.identity, 'real');
+    // The number of elements of each list and of each matrix, `undefined`
+    // for one that is known to hold an element.
+    const counts: ((() => V) | undefined)[] = [];
+    let scalars = 0;
+    const items = e.ops.map((x): Source | V => {
+      if (!grid(x)) {
+        const s = source(x, true, true);
+        if (typeof s === 'number') scalars += 1;
+        else counts.push(() => s.length);
+        return s;
+      }
+      const s = gridOf(x).source;
+      let width: number | undefined = 0;
+      const value = reduce(
+        e,
+        r,
+        [
+          {
+            length: s.length,
+            at: (i) => {
+              const row = listSource(gridRow(e, s, i));
+              width = cx.constant(row.length);
+              return reduce(e, r, [row], init, undefined, true);
+            },
+          },
+        ],
+        init,
+        undefined,
+        true
+      );
+      const n = cx.constant(s.length);
+      counts.push(
+        n !== undefined && n >= 1 && width !== undefined && width >= 1
+          ? undefined
+          : () =>
+              reduce(
+                e,
+                rowOfHead(cx.rows, 'Add')!,
+                [
+                  {
+                    length: s.length,
+                    at: (i) => listSource(gridRow(e, s, i)).length,
+                  },
+                ],
+                integer(0)
+              )
+      );
+      return value;
+    });
+    const value = items.every((x) => typeof x === 'number')
+      ? items.length === 1
+        ? (items[0] as V)
+        : cx.apply(e, r, items as V[])
+      : reduce(e, r, items, init, undefined, true);
+    if (scalars > 0 || counts.some((c) => c === undefined)) return value;
+    const total = counts
+      .map((c) => c!())
+      .reduce((n, m) => cx.apply(e, 'Add', [n, m]));
+    return cx.branch(
+      e,
+      cx.apply(e, 'Equal', [total, integer(0)]),
+      () => b.constant(red.empty!, 'real'),
+      () => value,
+      true
+    )!;
+  };
+
   /** A reduction head (`Sum`, `Max`, …) of lists and scalars. */
   const reduction = (e: Fn, r: OperatorRow): V => {
     const red = REDUCTIONS.get(e.operator)!;
@@ -953,9 +1105,28 @@ export function listLowering(cx: Lowering) {
       l.ops.every((x) => x.type.matches('number'))
         ? l.ops
         : undefined;
-    const items = (literal ?? e.ops).map(
-      (x) => boundedComprehension(x) ?? source(x, true, true)
-    );
+    // A matrix (a list of lists of numbers, of rows of one length): `Sum`
+    // and `Product` of it are the list of the sums of its columns, the
+    // interpreter's sum of its rows element by element, and `Max` and
+    // `Min` read each of its elements.
+    // Not on a target with no list of a run-time length (GLSL), which has
+    // no list of rank 2.
+    const grid = (x: Expression) =>
+      cx.runtimeLengths && x.type.matches('list<list<number>>');
+    if (!red.indexed && literal === undefined && e.ops.some(grid))
+      return extremes(e, r, grid);
+    // The operand is lowered once: the matrix, or the list as before.
+    const sole =
+      red.indexed && e.nops === 1 && literal === undefined && grid(l)
+        ? gridOf(l)
+        : undefined;
+    if (sole?.matrix !== undefined) return columns(e, r, sole.matrix);
+    const items =
+      sole !== undefined
+        ? [sole.source]
+        : (literal ?? e.ops).map(
+            (x) => boundedComprehension(x) ?? source(x, true, true)
+          );
     if (!red.indexed && items.every((x) => typeof x === 'number')) {
       // `Max(x)` of one real is `x`; of a boolean or a complex number the
       // interpreter leaves it unevaluated (a decline of `apply()`).

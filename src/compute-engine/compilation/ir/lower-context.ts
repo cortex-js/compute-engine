@@ -449,6 +449,14 @@ export type Lowering = {
   constant(v: V): number | undefined;
   /** `v` is proved `>= 0` (`lower.ts`, `nonnegative()`). */
   nonnegative(v: V): boolean;
+  /** The integer `v` is proved `>= 1` (`lower.ts`, `positive()`): a
+   *  constant, or the number of rows of an input of a matrix type. */
+  positive(v: V): boolean;
+  /** The values of the lane `rows` that are of a matrix type of no stated
+   *  dimensions (a parameter, an input that a user function reads): a
+   *  value of such a type has a row, so their number of rows is proved
+   *  `>= 1` (`positive()`). */
+  readonly matrixValues: Set<V>;
   branch(
     node: Expression,
     cond: V,

@@ -816,6 +816,34 @@ describe('Tycho row 425: folds over elements of a union type', () => {
   });
 });
 
+describe('Tycho row 425: the statistics of a list of rows of numbers', () => {
+  // A `list<vector<2>>` is a matrix of a run-time number of rows: `Max` and
+  // `Min` read each of its elements, as the interpreter does (the plan
+  // `docs/plans/2026-11-25-matrix-of-run-time-size.md`, step 5); `Mean` and
+  // `Median` of it are errors of the static type and decline.
+  test('Max and Min over list<vector<2>> are the interpreter\'s', () => {
+    for (const op of ['Max', 'Min']) {
+      const ce = new ComputeEngine();
+      ce.declare('p', 'list<vector<2>>');
+      const rows = compiledVsInterpreted(ce, ce.box([op, 'p']), 'p', [
+        [[[1, 2], [3, 4]], ['List', ['List', 1, 2], ['List', 3, 4]]],
+        [[[-5, 2.5]], ['List', ['List', -5, 2.5]]],
+      ]);
+      expect(rows).not.toBe('declined');
+      for (const [interpreted, compiled] of rows as [string, string][])
+        expect([op, compiled]).toEqual([op, interpreted]);
+    }
+    for (const op of ['Mean', 'Median']) {
+      const ce = new ComputeEngine();
+      ce.declare('p', 'list<vector<2>>');
+      expect([
+        op,
+        compiledVsInterpreted(ce, ce.box([op, 'p']), 'p', []),
+      ]).toEqual([op, 'declined']);
+    }
+  });
+});
+
 describe('Tycho row 425: the compiled marker of a mixed element type', () => {
   // A `list<unknown>` is refused as a bare `list` and a `list<any>` are: the
   // three spellings denote one set of values. Its compiled `Max` read each
@@ -824,7 +852,6 @@ describe('Tycho row 425: the compiled marker of a mixed element type', () => {
   test.each([
     'list<number | vector<2>>',
     'broadcastable<vector<2>>',
-    'list<vector<2>>',
     'list<unknown>',
   ])('the statistics decline over %s', (type) => {
     // The interpreter answers 4 for `Max`, 1 for `Min` and an error for
