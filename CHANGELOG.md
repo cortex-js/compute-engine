@@ -91,6 +91,9 @@
 
 ### Behavior Changes
 
+- **Conjugate transpose with equal axes conjugates every entry.** For example,
+  `ConjugateTranspose([[1 + 2i, 3]], 1, 1)` gives `[[1 - 2i, 3]]`.
+
 - **Transpose waits for explicit axes and preserves Boolean cells.**
   `Transpose(A, axis, 2)` and `ConjugateTranspose(A, axis, 2)` stay unevaluated
   while `axis` has no value. `Transpose([[True, False]])` gives

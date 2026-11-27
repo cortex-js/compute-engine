@@ -3565,7 +3565,6 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
           const axes = transposeAxes(ops, rank);
           if (!axes) return undefined;
           const [axis1, axis2] = axes;
-          if (axis1 === axis2) return op1;
 
           return op1Tensor.conjugateTranspose(axis1, axis2)?.expression;
         }

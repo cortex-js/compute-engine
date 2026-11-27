@@ -563,9 +563,19 @@ export abstract class AbstractTensor<
     axis1 ??= rank - 1;
     axis2 ??= rank;
 
-    if (axis1 === axis2) return this;
     if (axis1 <= 0 || axis1 > rank) return undefined;
     if (axis2 <= 0 || axis2 > rank) return undefined;
+
+    const data = fn ? this.data.map((x) => fn(x)) : this.data;
+    if (axis1 === axis2) {
+      if (!fn) return this;
+      return makeTensor(this.ce, {
+        dtype: this.dtype,
+        holdsFloat: this.holdsFloat,
+        shape: this.shape,
+        data,
+      });
+    }
 
     // Convert to 0-based indices
     const ax1 = axis1 - 1;
@@ -574,10 +584,6 @@ export abstract class AbstractTensor<
     // Calculate new shape (swap the two axes)
     const newShape = [...this.shape];
     [newShape[ax1], newShape[ax2]] = [newShape[ax2], newShape[ax1]];
-
-    // Apply optional transformation function
-    let data = this.data;
-    if (fn) data = data.map((x) => fn(x));
 
     // For rank 2, use optimized path
     if (rank === 2) {

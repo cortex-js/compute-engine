@@ -1152,6 +1152,23 @@ describe('ConjugateTranspose', () => {
     expect(result.toString()).toMatchInlineSnapshot(`[[(2 - 3i),0],[2,i]]`);
   });
 
+  it('conjugates a rectangular matrix without permuting equal axes', () => {
+    const row = ce.expr(['List', ['List', ['Complex', 1, 2], 3]]);
+    expect(ce.expr(['ConjugateTranspose', row, 1, 1]).evaluate().json).toEqual([
+      'List',
+      ['List', ['Complex', 1, -2], 3],
+    ]);
+    expect(ce.expr(['Transpose', row, 1, 1]).evaluate().json).toEqual(row.json);
+  });
+
+  it('conjugates machine-complex cells of a tensor without permuting equal axes', () => {
+    const tensor = ce.expr(['List', ['List', ['List', ['Complex', 1, 2.5], 3]]]);
+    expect(ce.expr(['ConjugateTranspose', tensor, 3, 3]).evaluate().json).toEqual([
+      'List',
+      ['List', ['List', ['Complex', 1, -2.5], { num: '3.0' }]],
+    ]);
+  });
+
   it('should conjugate transpose a matrix with unknowns', () => {
     const result = ce.expr(['ConjugateTranspose', sq2_x]).evaluate();
     expect(result.toString()).toMatchInlineSnapshot(
