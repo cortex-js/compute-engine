@@ -7849,14 +7849,16 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
             isProtocolDispatcher(existing) &&
             ce.context.lexicalScope.bindings.get(symbolName) !== existing;
           if (existing === undefined) ce.symbol(symbolName);
-          else if (isBuiltin || isInheritedDispatcher)
-            // This shell is inferred, like the one for an unbound name.
-            // An explicit value declaration would keep the wildcard type
-            // when the clause is installed and hide its parameter names.
+          else if (isBuiltin && isProgramStatement())
+            // A Program function statement installs an ordinary clause.
+            // Its shadow must be inferred so installation keeps the
+            // clause's parameter names.
             ce._declareSymbolValue(symbolName, {
               type: 'unknown',
               inferred: true,
             });
+          else if (isBuiltin || isInheritedDispatcher)
+            ce.declare(symbolName, 'function');
           const def = ce.lookupDefinition(symbolName);
           if (def && isValueDef(def) && def.value.inferredType) {
             const wasCallable = containsSignatureArm(def.value.type.type);
