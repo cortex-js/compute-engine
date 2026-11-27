@@ -94,11 +94,8 @@ export type BindingGroup = {
   declaration?: [number, number];
   /** The span of the scope the binding is visible in. */
   scope: [number, number];
-  /** Where visibility begins inside that scope: a `let`/binding assignment
-   * is visible only AFTER its statement (a use above the `let`, or in its
-   * initializer, binds outward — verified against the interpreter), while
-   * functions, types, parameters, loop and match-pattern variables are
-   * visible from their scope's start. */
+  /** Where visibility begins for sequential editor lookups. Function bodies
+   * can also resolve enclosing `let` and `const` declarations written later. */
   visibleFrom: number;
   /** A stretch of the scope where the binding is not visible, for a `for`
    * binding: its collection, and in a comprehension the earlier clauses,
@@ -115,10 +112,10 @@ type Scope = {
   span: [number, number];
   bindings: Map<string, BindingGroup>;
   parent: Scope | undefined;
-  /** Under the `engineRules` option, the names whose `let` or `const`
-   * statement of this scope has its initializer walked now: such a name is
-   * read outside this scope. */
+  /** Names whose non-function initializer is being walked. */
   initializing?: ReadonlySet<string>;
+  /** Crossing this scope outward leaves a deferred function body. */
+  functionBody?: true;
 };
 
 /**
@@ -276,6 +273,7 @@ export function documentBindings(
 ): BindingGroup[] {
   const rules = options?.engineRules;
   const groups: BindingGroup[] = [];
+  const forwardDeclarations = new WeakSet<BindingGroup>();
   const freeGroups = new Map<string, BindingGroup>();
   const typeRegions: TypeRegion[] = [];
   // Named-argument labels (`f(x: 3)`), resolved after the walk — see
@@ -296,10 +294,9 @@ export function documentBindings(
   >();
   let writeCounts: Map<string, number> | undefined;
   const labels: {
-    callee: string;
+    callee: BindingGroup | undefined;
     name: string;
     span: [number, number];
-    scope: Scope;
   }[] = [];
   const root: Scope = {
     span: [0, text.length],
@@ -456,13 +453,20 @@ export function documentBindings(
     if (head === '') {
       const written = writtenSymbol(node);
       if (written === undefined) return;
-      ensureBinding(
+      const group = ensureBinding(
         scope,
         written.name,
         kind,
         declaration,
         visibleFrom
-      ).occurrences.push({
+      );
+      // A first assignment can still introduce the editor binding before
+      // the pre-registered declaration.
+      if (forwardDeclarations.has(group) && visibleFrom < group.visibleFrom) {
+        group.visibleFrom = visibleFrom;
+        group.declaration = declaration;
+      }
+      group.occurrences.push({
         start: written.span[0],
         end: written.span[1],
         role: 'definition',
@@ -664,6 +668,7 @@ export function documentBindings(
     // Copied before the body is walked: a body that is not a block can
     // declare into this scope, and those names are not parameters.
     parametersOf.set(node, new Map(scope.bindings));
+    scope.functionBody = true;
     walk(ops[0] ?? null, scope);
   }
 
@@ -786,10 +791,7 @@ export function documentBindings(
         // `let f = (n) => … f(n - 1)` is recursive also when an outer `f`
         // exists.
         const initializer = initializerOf(node);
-        if (
-          rules !== undefined &&
-          (initializer === null || operator(initializer) !== 'Function')
-        )
+        if (initializer === null || operator(initializer) !== 'Function')
           scope.initializing = new Set([
             ...(enclosing ?? []),
             ...patternNames(ops[0] ?? null),
@@ -1071,7 +1073,11 @@ export function documentBindings(
               labelSpan !== undefined &&
               spelled(name, labelSpan)
             )
-              labels.push({ callee: head, name, span: labelSpan, scope });
+              labels.push({
+                callee: visibleBinding(scope, head, labelSpan[0]),
+                name,
+                span: labelSpan,
+              });
           }
         } else walk(head as MathJsonExpression, scope);
         // A binder call (`integrate(x^2, x)`) binds its variables for the
@@ -1229,11 +1235,26 @@ export function documentBindings(
     // The binding of a `let` whose initializer holds the occurrence
     // (`engineRules`).
     let own: BindingGroup | undefined;
+    let deferred = false;
+    let forwardShadowed = false;
     for (let s: Scope | undefined = scope; s !== undefined; s = s.parent) {
       const binding = s.bindings.get(name);
-      if (binding === undefined || offset < binding.visibleFrom) continue;
-      if (s.initializing?.has(name) !== true) return binding;
-      own ??= binding;
+      if (binding !== undefined) {
+        if (offset >= binding.visibleFrom) {
+          if (rules === undefined || s.initializing?.has(name) !== true)
+            return binding;
+          own ??= binding;
+        } else if (
+          forwardDeclarations.has(binding) &&
+          s.initializing?.has(name) !== true
+        ) {
+          if (deferred && !forwardShadowed) return binding;
+          // A sequential use can still see an already visible outer name.
+          // An outer forward declaration cannot displace the nearer local.
+          forwardShadowed = true;
+        }
+      }
+      deferred ||= s.functionBody === true;
     }
     return own !== undefined && rules?.defined(name) === false
       ? own
@@ -1251,23 +1272,25 @@ export function documentBindings(
     return written === undefined ? [] : [written.name];
   }
 
-  /** Under `engineRules`, bind the names of the `let` and `const`
-   * statements among a scope's statements for the whole scope. */
+  /** Pre-register declarations for forward references. In the editor, only
+   * lookups from a deferred function body can see them early. */
   function hoistDeclarations(
     statements: readonly (MathJsonExpression | null)[],
     scope: Scope
   ): void {
-    if (rules === undefined) return;
     for (const statement of statements) {
       if (statement === null || operator(statement) !== 'Declare') continue;
-      for (const name of patternNames(operand(statement, 1)))
-        ensureBinding(
+      const span = spanOf(statement);
+      for (const name of patternNames(operand(statement, 1))) {
+        const group = ensureBinding(
           scope,
           name,
           'variable',
-          spanOf(statement),
-          scope.span[0]
+          span,
+          rules === undefined ? (span?.[1] ?? scope.span[0]) : scope.span[0]
         );
+        if (rules === undefined) forwardDeclarations.add(group);
+      }
     }
   }
 
@@ -1448,12 +1471,12 @@ export function documentBindings(
    * refuses to rename a parameter while an unresolved label spells its
    * name (`unresolvedLabels`).
    *
-   * Runs after the walk: a call may precede the definition of its callee.
+   * Runs after the walk: a call may precede the literal bound to its callee.
    */
   function resolveLabels(): void {
     const candidates = new Map<number, readonly BindingGroup[] | 'any'>();
     for (const label of labels) {
-      const callee = visibleBinding(label.scope, label.callee, label.span[0]);
+      const { callee } = label;
       // A callee this document does not bind (a library or undeclared
       // function) has no parameter here for the label to name.
       if (callee === undefined) {
@@ -1497,6 +1520,7 @@ export function documentBindings(
       for (const statement of statements) walk(statement, root);
     } else {
       hoistFunctions([ast], root);
+      if (rules === undefined) hoistDeclarations([ast], root);
       walk(ast, root);
     }
     resolveLabels();

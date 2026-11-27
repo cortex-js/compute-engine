@@ -938,6 +938,9 @@ several clauses gives its first clause. A library name, a name that only the
 engine defines, a keyword and the variable of a library call have no
 declaration in the source: the result is `null`.
 
+In a function body, a reference to a `let` or `const` in an enclosing scope
+can resolve to that declaration even when it appears later in the source.
+
 Both functions parse the source and do not evaluate it, and take the options
 of `epsilCompletions`.
 

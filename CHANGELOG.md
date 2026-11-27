@@ -72,6 +72,10 @@
 
 ### Behavior Changes
 
+- **Epsil navigation and rename resolve later declarations in function bodies.**
+  In `let h = () => mean(3)` above `let mean = (x) => x + 4`, hover and
+  go-to-definition find the local variable, and renaming it updates the call.
+
 - **Reads of structural pixel cells keep their field names.** For an array
   whose cell type is an alias of `tuple<r: Byte, g: Byte, b: Byte, a: Byte>`,
   `img[2].g` now reads the same byte as `img[2][2]`, where it previously gave

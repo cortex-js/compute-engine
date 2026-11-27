@@ -542,6 +542,40 @@ await scenario(
 
 // ── Navigation: definition, references, highlights, rename ─────────────
 //
+await scenario('rename a forward variable reference', undefined, async (c) => {
+  await c.open(URI, 'let h = () => mean(3)\nlet mean = (x) => x + 4\nh()');
+  const rename = await c.request('textDocument/rename', {
+    textDocument: { uri: URI },
+    position: { line: 1, character: 4 },
+    newName: 'offsetValue',
+  });
+  const edits = rename?.changes?.[URI];
+  check(
+    'renaming the variable also edits the call in the earlier function',
+    edits?.length === 2 &&
+      edits.every((edit) => edit.newText === 'offsetValue') &&
+      edits[0].range.start.line === 0 &&
+      edits[0].range.start.character === 14 &&
+      edits[1].range.start.line === 1 &&
+      edits[1].range.start.character === 4,
+    JSON.stringify(rename)
+  );
+});
+
+await scenario('forward rename capture', undefined, async (c) => {
+  await c.open(URI, 'let h = () => mean(3)\nlet x = 1');
+  const rename = await c.requestRaw('textDocument/rename', {
+    textDocument: { uri: URI },
+    position: { line: 1, character: 4 },
+    newName: 'mean',
+  });
+  check(
+    'rename refuses to capture the library call in the earlier function',
+    rename.error?.message.includes('a name refers to') === true,
+    JSON.stringify(rename)
+  );
+});
+
 // One program exercises the scope rules end to end: an outer `x`, a
 // function-local `y`, a shadowing local `x` (uses above it bind outward —
 // interpreter-verified semantics), and uses of everything at top level.

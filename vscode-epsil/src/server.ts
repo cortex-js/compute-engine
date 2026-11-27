@@ -1706,8 +1706,7 @@ connection.onRenameRequest(
       throw new ResponseError(
         LSPErrorCodes.RequestFailed,
         `Renaming \`${at.group.name}\` to \`${cooked}\` would change which ` +
-          'variable a library call binds (`limit`, `nd`, ... choose it by ' +
-          'name), so the program would mean something else.'
+          'variable or other declaration a name refers to.'
       );
 
     return {

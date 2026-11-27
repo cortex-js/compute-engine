@@ -400,6 +400,37 @@ describe('EPSIL DEFINITION', () => {
     });
   });
 
+  test('a deferred function body resolves a later variable before the library', () => {
+    const source = 'let h = () => ▮mean(3)\nlet mean = (x) => x + 4\nh()';
+    expect(hover(source)).toMatchObject({ kind: 'variable', name: 'mean' });
+    expect(definition(source)).toEqual({
+      name: 'mean',
+      header: 'let mean = (x) => x + 4',
+    });
+  });
+
+  test('a nested function sees a later local and its initializer sees the outer variable', () => {
+    const source =
+      'let x = 1\nfunction f() {\n function g() { x }\n const x = x + 1\n g()\n}\nf()';
+    expect(definition(source.replace('g() { x', 'g() { ▮x'))).toEqual({
+      name: 'x',
+      header: 'const x = x + 1',
+    });
+    expect(definition(source.replace('x = x + 1', 'x = ▮x + 1'))).toEqual({
+      name: 'x',
+      header: 'let x = 1',
+    });
+  });
+
+  test('a nearer later local blocks a forward lookup further out', () => {
+    expect(
+      definition('function f() { print(▮c); let c = 1 }\nconst c = 5')
+    ).toBeNull();
+    expect(
+      definition('function f() { ▮c = 2; let c = 1 }\nconst c = 5')
+    ).toEqual({ name: 'c', header: 'c = 2' });
+  });
+
   test('a parameter, a loop variable and a pattern variable', () => {
     expect(epsilDefinition(ce, F, F.indexOf('x) }'))).toEqual({
       name: [31, 32],

@@ -137,8 +137,9 @@ describe('Program uses one sequence on every execution route', () => {
   test('hoisted function constant-write diagnostics retain original source sites', () => {
     for (const source of ['const c=1; function f(x) scope {c=x}; f(2)', 'function f(x) scope {c=x}; const c=1; f(2)']) {
       const result = executeEpsil(new ComputeEngine(), source);
-      const diagnostic = result.diagnostics.find((d) => d.code === 'constant-assignment');
-      expect(diagnostic).toBeDefined();
+      const diagnostics = result.diagnostics.filter((d) => d.code === 'constant-assignment');
+      expect(diagnostics).toHaveLength(1);
+      const [diagnostic] = diagnostics;
       expect(source.slice(...diagnostic!.range.slice(0, 2) as [number, number])).toBe('c=x');
     }
   });

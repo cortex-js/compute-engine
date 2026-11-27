@@ -505,6 +505,13 @@ describe('EPSIL OCCURRENCES — named-argument labels', () => {
     expect(groupAt(groups, at(src, 'x: number')).occurrences).toHaveLength(3);
   });
 
+  test('a label in a deferred body names the parameter of a later literal', () => {
+    const src = 'let call = () => f(x: 1)\nlet f = (x) => x\ncall()';
+    const groups = groupsOf(src);
+    const parameter = groupAt(groups, at(src, '(x) =>') + 1);
+    expect(groupAt(groups, at(src, 'x: 1'))).toBe(parameter);
+  });
+
   test('an uncertain callee leaves its labels unresolved, with the parameters they could name', () => {
     const src = [
       'g(a) = a + 1',

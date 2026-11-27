@@ -2200,11 +2200,10 @@ function statementHolding(
  * targets the local of the block and fails with `read-before-declaration`.
  * Such a write is not reported here.
  *
- * An assignment in a function body that comes before the `const` is not a
- * `write` of the group: the walk makes it a declaration of a new binding.
- * Program and Block bindings are both established before function bodies
- * canonicalize. Such assignments therefore write the constant and are
- * reported too (`writesFromFunctionBodies()`).
+ * Deferred functions resolve enclosing constants even before the declaration
+ * in source order. If the walk instead creates a synthetic binding for a
+ * bare assignment, `writesFromFunctionBodies()` checks whether the
+ * assignment can write the constant.
  *
  * Each diagnostic is a `static-type-error` that carries the engine code
  * `constant-assignment`, at the assignment, with a note on the `const`
@@ -2290,27 +2289,10 @@ function registerConstant(
 }
 
 /**
- * The assignments that write the constant of `group` when they run, but
- * that the scope-aware walk does not record as a `write` of `group`: the
- * assignments in a function body (a `function` statement or a function
- * literal) that comes before the `const` in the scope of the constant.
- * `named` holds the binding groups with the name of the constant.
- *
- * Where the `const` is not yet visible, the walk makes such an assignment
- * the declaration of a new binding (a bare `c = 2` declares), in the
- * innermost block. The run binds each `const` of a block in the block
- * before it canonicalizes the statements of the block
- * (`canonicalBlock()`, `library/control-structures.ts`), so the function
- * body finds the constant, and the assignment writes it when the function
- * is called after the `const`. The engine refuses it:
- *
- * ```
- * function o() scope -> integer {
- *   let g = () => do { c = 2 }
- *   const c = 1
- *   g()        // the assignment `c = 2` writes the constant
- * }
- * ```
+ * Check synthetic editor bindings in function bodies for writes to the
+ * constant of `group`. The engine pre-binds block constants before it
+ * canonicalizes function bodies. `named` holds the groups that share the
+ * constant's name.
  *
  * The report does not depend on the calls: the assignment is reported also
  * when the function is not called.
