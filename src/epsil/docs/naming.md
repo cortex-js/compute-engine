@@ -56,7 +56,7 @@ write it:
   `function`, `Declare` is `let` and `const`, `Block` is `{ … }`, `Typed` is
   `x: T`, `Spread` is `...xs`, `At` is `xs[i]`.
 - **Literals**: `List` is `[…]`, `Tuple` is `(a, b)`, `Set` is `set(…)`,
-  `Dictionary` is `{k: v}`, `String` is `"…"`, `True` and `False` are
+  `Dictionary` is `{k -> v}`, `String` is `"…"`, `True` and `False` are
   `true` and `false`, `NaN` and `Infinity` are literal words.
 - **Single-letter names**: `D` and `N` stay capitalized, because `d` and `n`
   are ordinary variable names.
