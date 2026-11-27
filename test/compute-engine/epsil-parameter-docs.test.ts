@@ -5,6 +5,7 @@ import {
   groundSkeleton,
   readTypeVariablesAsBounds,
 } from '../../src/common/type/instantiate';
+import { checkEpsil } from '../../src/epsil/check-epsil';
 import { epsilCompletions } from '../../src/epsil/completion';
 import { describeName } from '../../src/epsil/describe-name';
 import { definitionDocs, splitDocComment } from '../../src/epsil/doc-tags';
@@ -14,6 +15,7 @@ import { executeEpsil } from '../../src/epsil/execute-epsil';
 import { epsilHover } from '../../src/epsil/hover';
 import { parseEpsil } from '../../src/epsil/parse-epsil';
 import { resolveLibraryNames } from '../../src/epsil/resolve-library-names';
+import { serializeEpsil } from '../../src/epsil/serialize-epsil';
 import { epsilSignatureHelp } from '../../src/epsil/signature-help';
 
 // CE-1812: the documentation and the sample of each parameter, and of each
@@ -218,6 +220,95 @@ function draw(options: record{color: string}) { options }
       'join([1, 2], [3, 4])',
       'join("ab", "cd")',
     ]);
+  });
+});
+
+describe('DICTIONARY TYPE DOCUMENTATION', () => {
+  const style = `/// The style of a series.
+/// @key color: "crimson" | "blue" -- The color of the series.
+/// @sample color "crimson"
+/// @default color "blue"
+/// @key width: real -- The line width.
+type alias Style = dictionary
+`;
+  const prelude = style + `function draw(series: any | tuple<any, Style> | list<tuple<any, Style>>, options: record{style: Style}) { series }
+`;
+
+  test('a tuple element, a list of tuples, and a field of a named argument', () => {
+    for (const expression of [
+      'draw((sin(x), {▮',
+      'draw([(sin(x), {▮',
+      'draw(sin(x), options: {style -> {▮',
+      'const style: Style = {▮',
+    ]) {
+      const keys = items(prelude + expression);
+      expect(keys.map((key) => key.label)).toEqual(['color', 'width']);
+      expect(keys[0]).toMatchObject({
+        snippet: 'color -> ${1:"crimson"}${0}',
+        documentation: 'The color of the series.',
+      });
+    }
+    expect(
+      items(prelude + 'draw([(sin(x), {color -> "blue", ▮').map((key) => key.label)
+    ).toEqual(['width']);
+    expect(
+      items(prelude + 'draw((sin(x), {color -> ▮').slice(0, 2).map((value) => value.label)
+    ).toEqual(['"crimson"', '"blue"']);
+  });
+
+  test('signature help uses the inner dictionary and keeps the active parameter', () => {
+    const result = help(prelude + 'draw(sin(x), options: {style -> {color -> ▮');
+    expect(result).toMatchObject({ activeParameter: 1, activeKey: 'color' });
+    expect(result?.signatures[0].parameters[1].keys?.[0]).toEqual({
+      name: 'color',
+      type: '"crimson" | "blue"',
+      sample: '"crimson"',
+      default: '"blue"',
+      documentation: 'The color of the series.',
+    });
+    expect(help(prelude + 'draw((sin(x), {co▮lor -> "blue"}))')?.activeKey)
+      .toBe('color');
+    expect(help(prelude + 'draw((sin(x), {unknown -> ▮')?.activeKey)
+      .toBeUndefined();
+  });
+
+  test('the documentation survives serialization and execution of a prelude', () => {
+    const engine = new ComputeEngine();
+    const serialized = serializeEpsil(parseEpsil(prelude)[0]!);
+    expect(serialized).toContain(style.trimEnd());
+    expect(executeEpsil(engine, serialized).diagnostics).toEqual([]);
+    const [source, offset] = at('draw((sin(x), {color -> ▮');
+    expect(epsilSignatureHelp(engine, source, offset)?.activeKey).toBe('color');
+    expect(epsilCompletions(engine, ...at('draw((sin(x), {▮')).items.map(
+      (key) => key.label
+    )).toEqual(['color', 'width']);
+    expect(executeEpsil(engine, 'type alias LocalStyle = Style').diagnostics)
+      .toEqual([]);
+    expect(
+      epsilCompletions(engine, ...at('const style: LocalStyle = {▮')).items.map(
+        (key) => key.label
+      )
+    ).toEqual(['color', 'width']);
+    expect(checkEpsil(engine, 'type alias Style = dictionary').diagnostics)
+      .toEqual([]);
+    expect(epsilSignatureHelp(engine, source, offset)?.activeKey).toBe('color');
+    expect(executeEpsil(engine, 'type alias Style = dictionary').diagnostics)
+      .toEqual([]);
+    expect(epsilSignatureHelp(engine, source, offset)?.activeKey).toBeUndefined();
+  });
+
+  test('parameter tags override type tags only for a whole argument', () => {
+    const source = style + `/// @key options.color Use the theme color.
+function paint(options: Style) { options }
+/// @key pair.label An unrelated parameter key.
+function paintPair(pair: tuple<any, Style>) { pair }
+`;
+    expect(items(source + 'paint({▮')[0]).toMatchObject({
+      label: 'color',
+      documentation: 'Use the theme color.',
+      snippet: 'color -> ${1:"crimson"}${0}',
+    });
+    expect(help(source + 'paintPair((1, {label -> ▮')?.activeKey).toBeUndefined();
   });
 });
 

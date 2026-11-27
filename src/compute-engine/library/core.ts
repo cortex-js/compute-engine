@@ -5096,11 +5096,13 @@ function declareTypeStatement(
 
   // Errors are values: an invalid name, a malformed type expression or a
   // conflict with a host declaration must not throw to the host.
+  const description = hasAttrs ? attrs.get('description') : undefined;
   try {
     declareType(ce, name, typeStr, {
       alias,
       fromStatement: true,
       typeParams,
+      description: isString(description) ? description.string : undefined,
       origin: statementOrigin(ce, nameOp, onStatementRoute),
     });
   } catch (e) {

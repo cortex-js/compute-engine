@@ -404,6 +404,12 @@ export function serializeEpsil(
     return fmt.text(`"${escapeString(s)}"`);
   }
 
+  function docCommentLines(text: string): FormattingBlock[] {
+    return text
+      .split('\n')
+      .map((line) => fmt.text(line === '' ? '///' : `/// ${line}`));
+  }
+
   function serializeComment(expr: MathJsonExpression): FormattingBlock {
     if (!(typeof expr === 'object')) return fmt.text();
     if ('comment' in expr) {
@@ -1485,7 +1491,9 @@ export function serializeEpsil(
       const keys = Object.keys(entries);
       if (
         keys.length === 0 ||
-        keys.some((k) => k !== 'alias' && k !== 'typeParams')
+        keys.some(
+          (k) => k !== 'alias' && k !== 'typeParams' && k !== 'description'
+        )
       )
         return serializeGenericFunction(expr);
 
@@ -1501,13 +1509,18 @@ export function serializeEpsil(
       const kind = aliasOp !== null ? 'type alias ' : 'type ';
 
       const clauseOp = entries['typeParams'];
-      // No clause: only the `alias` flag is left, since the bag is non-empty.
-      if (clauseOp === undefined) return fmt.line(kind, name, ' = ', body);
-      const clause = stringValue(clauseOp) ?? symbol(clauseOp);
-      if (clause === null || clause.length === 0)
+      const clause =
+        clauseOp === undefined ? '' : stringValue(clauseOp) ?? symbol(clauseOp);
+      if (clauseOp !== undefined && !clause)
         return serializeGenericFunction(expr);
-
-      return fmt.line(kind, name, '<', clause, '> = ', body);
+      const line = clause
+        ? fmt.line(kind, name, '<', clause, '> = ', body)
+        : fmt.line(kind, name, ' = ', body);
+      if (entries['description'] === undefined) return line;
+      const description = stringValue(entries['description']);
+      return description === null
+        ? serializeGenericFunction(expr)
+        : fmt.stack(...docCommentLines(description), line);
     },
 
     //
@@ -1537,8 +1550,6 @@ export function serializeEpsil(
       const args = operands(expr);
       if (args.length < 1 || args.length > 4)
         return serializeGenericFunction(expr);
-      const doc = (text: string): FormattingBlock[] =>
-        text.split('\n').map((l) => fmt.text(l === '' ? '///' : `/// ${l}`));
       let description: string | undefined;
       const memberDocs = new Map<string, string>();
       if (args.length === 4) {
@@ -1559,7 +1570,9 @@ export function serializeEpsil(
         }
       }
       const head = (line: FormattingBlock): FormattingBlock =>
-        description === undefined ? line : fmt.stack(...doc(description), line);
+        description === undefined
+          ? line
+          : fmt.stack(...docCommentLines(description), line);
       const rawName = symbol(args[0]) ?? stringValue(args[0]);
       if (rawName === null) return serializeGenericFunction(expr);
       let name = escapeSymbol(rawName);
@@ -1587,7 +1600,7 @@ export function serializeEpsil(
         const text = stringValue(operand(spec, 2)) ?? symbol(operand(spec, 2));
         if (text === null) return serializeGenericFunction(expr);
         const memberDoc = memberDocs.get(member);
-        if (memberDoc !== undefined) members.push(...doc(memberDoc));
+        if (memberDoc !== undefined) members.push(...docCommentLines(memberDoc));
         if (kind === 'function')
           members.push(fmt.text(`function ${escapeSymbol(member)}${text}`));
         else if (kind === 'readonly' || kind === 'readwrite')

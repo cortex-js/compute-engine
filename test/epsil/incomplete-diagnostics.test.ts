@@ -31,6 +31,19 @@ describe('EPSIL INCOMPLETE DIAGNOSTICS', () => {
     ['f(1 // note', ['closing-bracket-expected']],
     ['[1, 2', ['closing-bracket-expected']],
     ['if x {', ['closing-bracket-expected']],
+    ['let d = { ', ['dictionary-entry-expected', 'closing-bracket-expected']],
+    [
+      'let d = {a -> 1, ',
+      ['dictionary-entry-expected', 'closing-bracket-expected'],
+    ],
+    [
+      'plot(sin(x), { ',
+      [
+        'dictionary-entry-expected',
+        'closing-bracket-expected',
+        'closing-bracket-expected',
+      ],
+    ],
     // An operator without its right operand.
     ['let a = 1 +', ['unexpected-symbol']],
     ['let a = 3! +', ['unexpected-symbol']],
@@ -67,6 +80,13 @@ describe('EPSIL INCOMPLETE DIAGNOSTICS', () => {
     ],
   ])('%j is incomplete', (source, codes) => {
     expect(flagsOf(source)).toEqual(codes.map((c) => `${c} (incomplete)`));
+  });
+
+  test('a dictionary value still expects an expression', () => {
+    expect(flagsOf('let d = {a -> ')).toContain('expression-expected (incomplete)');
+    expect(flagsOf('let d = {a -> ')).not.toContain(
+      'dictionary-entry-expected (incomplete)'
+    );
   });
 
   test.each([

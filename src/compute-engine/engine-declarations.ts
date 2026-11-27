@@ -1065,12 +1065,14 @@ export function declareType(
     fromStatement,
     mint,
     typeParams,
+    description,
     origin,
   }: {
     alias?: boolean;
     fromStatement?: boolean;
     mint?: boolean;
     typeParams?: TypeParamsOption;
+    description?: string;
     /** The declaring statement's identity, when this registration comes from
      * an Epsil `type` STATEMENT running inside a batch — the redefinition
      * discipline's runtime stamp
@@ -1635,6 +1637,8 @@ export function declareType(
   if (origin === undefined) delete registry[name]._declOrigin;
   else registry[name]._declOrigin = origin;
   registry[name]._minted = mint;
+  if (description === undefined) delete registry[name]._description;
+  else registry[name]._description = description;
 
   // A5 — replacing a type record is a context change: bump the generation so
   // the caches keyed on it (and every expression boxed AFTER this point) see

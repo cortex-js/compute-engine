@@ -72,6 +72,16 @@
 
 ### Behavior Changes
 
+- **Epsil reports `dictionary-entry-expected` at an unfinished dictionary
+  entry.** `plot(sin(x), {` and `{a -> 1,` now expect a dictionary entry.
+  `f(1,` and the empty value in `{a -> ▮` still report
+  `expression-expected`.
+
+- **Epsil dictionary type aliases document their keys.** With
+  `type alias Style = dictionary` and a `/// @key color: string -- Line color`
+  comment, completion can offer `color` inside a tuple or list argument.
+  Signature help shows the key's documentation at its name and value.
+
 - **Epsil program sites resolve match captures to the names the arm reads.**
   In `match 5 { _k => k }`, `epsilProgramSites` now reports `k` as local
   to the arm. Rest captures such as `..._t` and wildcard call heads such as

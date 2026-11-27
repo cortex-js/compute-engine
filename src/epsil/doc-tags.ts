@@ -18,12 +18,17 @@ import type {
 //   @default <param>.<key> <epsil source>
 //   @example <epsil source>
 //
+// On a type declaration the key tags name the key directly:
+//   @key <key>[: <type> --] <markdown>
+//   @sample <key> <epsil source>
+//   @default <key> <epsil source>
+//
 // A tag line runs to the end of the line; a following line that starts with
 // whitespace and is not blank or a tag continues it. A line that starts with
 // another `@word` stays in the description.
 //
 
-/** The documentation of one key of an options parameter. */
+/** The documentation of one key of a dictionary. */
 export type KeyDoc = {
   name: string;
   type?: string;
@@ -48,13 +53,16 @@ export type DocComment = {
   description?: string;
   parameters: Map<string, ParameterDoc>;
   examples: string[];
+  /** Key tags on a type declaration. */
+  keys?: KeyDoc[];
 };
 
 const TAG = /^\s*@(param|key|sample|default|example)\b[ \t]*(.*)$/;
 
 /** Split the tag lines from the text of a `///` comment. */
-export function splitDocComment(text: string): DocComment {
+export function splitDocComment(text: string, onType = false): DocComment {
   const parameters = new Map<string, ParameterDoc>();
+  const typeDoc: ParameterDoc | undefined = onType ? {} : undefined;
   const examples: string[] = [];
   const kept: string[] = [];
   const lines = text.split('\n');
@@ -74,7 +82,7 @@ export function splitDocComment(text: string): DocComment {
       i += 1;
       body += ' ' + lines[i].trim();
     }
-    applyTag(match[1], body, parameters, examples);
+    applyTag(match[1], body, parameters, examples, typeDoc);
   }
   while (kept.length > 0 && kept[0].trim() === '') kept.shift();
   while (kept.length > 0 && kept[kept.length - 1].trim() === '') kept.pop();
@@ -83,6 +91,7 @@ export function splitDocComment(text: string): DocComment {
     ...(description === undefined ? {} : { description }),
     parameters,
     examples,
+    ...(typeDoc?.keys === undefined ? {} : { keys: typeDoc.keys }),
   };
 }
 
@@ -90,7 +99,8 @@ function applyTag(
   tag: string,
   body: string,
   parameters: Map<string, ParameterDoc>,
-  examples: string[]
+  examples: string[],
+  typeDoc: ParameterDoc | undefined
 ): void {
   if (tag === 'example') {
     if (body !== '') examples.push(body);
@@ -104,13 +114,15 @@ function applyTag(
   if (target === null) return;
   const [, name, key] = target;
   let rest = body.slice(target[0].length).trim();
-  const param = parameterOf(parameters, name);
-  if (key === undefined) {
+  if (typeDoc !== undefined && (key !== undefined || tag === 'param'))
+    return;
+  const param = typeDoc ?? parameterOf(parameters, name);
+  if (key === undefined && typeDoc === undefined) {
     if (tag === 'param') setText(param, 'documentation', rest);
     else if (tag === 'sample') setText(param, 'sample', rest);
     return;
   }
-  const entry = keyOf(param, key);
+  const entry = keyOf(param, key ?? name);
   if (tag === 'key') {
     if (rest.startsWith(':')) {
       const separator = rest.indexOf(' -- ');

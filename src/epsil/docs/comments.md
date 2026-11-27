@@ -80,6 +80,31 @@ the completion lists the keys that the dictionary does not write yet. A
 sample, a default and an example are Epsil source, and a rest parameter
 (`...xs`) is documented by its name (`@param xs`).
 
+### Documenting dictionary types
+
+Put the tags on a dictionary type alias when several parameters use the
+same keys, or when the dictionary is part of a tuple, list or record field.
+Use `@key name: type -- text`, `@sample name source`, and
+`@default name source`, with no parameter prefix.
+
+```epsil
+/// The style of one series.
+/// @key color: string -- The color of the series.
+/// @sample color "crimson"
+/// @key width: real -- The line width.
+type alias Style = dictionary
+
+function draw(series: tuple<any, Style>) { series }
+draw((1, {color -> "crimson"}))
+```
+
+While typing `draw((1, {`, completion offers `color` and `width` with their
+documentation. At `color ->`, signature help highlights `color` within
+`series`. The tags remain available after a prelude defining the type has
+run on the engine. They guide the editor and do not validate entries or
+insert defaults at runtime. A parameter's own tags take precedence when
+the dictionary is the whole argument.
+
 A documentation comment before a `protocol` statement documents the protocol,
 and one before a member of its body documents that member. The engine keeps
 them with the protocol, so an editor shows them in the hover of the protocol

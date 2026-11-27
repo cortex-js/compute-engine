@@ -757,6 +757,7 @@ export class ComputeEngine implements IComputeEngine {
         r,
         def: r.def,
         alias: r.alias,
+        description: r._description,
         typeParams: r.typeParams,
         varianceState: r._varianceState,
         varianceBlockedOn: r._varianceBlockedOn,
@@ -800,6 +801,8 @@ export class ComputeEngine implements IComputeEngine {
         r.def = s.def;
         if (r.alias !== s.alias) changed = true;
         r.alias = s.alias;
+        if (s.description === undefined) delete r._description;
+        else r._description = s.description;
         if (r.typeParams !== s.typeParams) changed = true;
         if (s.typeParams === undefined) delete r.typeParams;
         else r.typeParams = s.typeParams;

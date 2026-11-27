@@ -761,6 +761,8 @@ export type TypeReference = {
   name: string;
   alias: boolean;
   def: Type | undefined;
+  /** The documentation comment on the type declaration. @internal */
+  _description?: string;
   /** The `where`-like clause of a GENERIC type declaration — an ALIAS
    * (`type alias Pair<T> = tuple<T, T>`) or a parameterized NOMINAL type
    * (`type tree<out T> = …`) — in declaration order.

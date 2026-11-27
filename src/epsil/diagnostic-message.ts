@@ -177,6 +177,8 @@ export function epsilDiagnosticMessage(diagnostic: ParsingDiagnostic): string {
       return `The parameter is named "${args[0]}" in the lambda but "${args[1]}" in the type annotation; a parameter name binds wherever it is written, so the two must agree — rename one side, or leave the annotation's parameters unnamed`;
     case 'unexpected-symbol':
       return `Unexpected symbol "${args[0]}"`;
+    case 'dictionary-entry-expected':
+      return 'Expected a dictionary entry';
     case 'expression-expected':
       return 'Expected an expression';
     case 'literal-expected':

@@ -777,7 +777,9 @@ and its `sample`, from the `parameters` of a library definition or the
 written as an argument whose parameter documents its keys (`@key`), the items
 at a key are the keys that the literal does not write yet, and no other name:
 each inserts `key -> `, with a snippet whose field holds the sample of the
-key (an empty field when it has none). In the value of a key whose type is a
+key (an empty field when it has none). A documented dictionary type alias
+also supplies keys. The expected type follows tuple slots, list elements,
+and record fields to the literal. In the value of a key whose type is a
 union of string literals, those strings come first:
 
 ```ts
@@ -868,10 +870,12 @@ parameter: the argument at the offset finds it by position or by name, so
 `take(xs, ▮` and `take(xs, count: ▮` show the same text, and a list entry
 also reaches the named-argument item of completion (`count: `). A positional argument and a named
 argument resolve to the same parameter. The `examples` of the result are
-those of the callee. When the offset is in a dictionary literal written as
-the active argument, `activeKey` is the documented key whose name or value
-contains the offset (`plot(s, {grid -> ▮` gives `"grid"`); a key that is
-still being typed and documents no key gives none.
+those of the callee. When the offset is in a dictionary literal in the
+active argument, `activeKey` is the documented key whose name or value
+contains the offset (`plot(s, {grid -> ▮` gives `"grid"`). For a documented
+type alias inside the argument, the active parameter's `keys` describe
+that dictionary. A name that matches no documented key gives no
+`activeKey`.
 
 ### Hover and definition
 

@@ -100,6 +100,7 @@ const LEGACY_MAPSTO_ARROW = '|->';
 const INCOMPLETE_CODES: ReadonlySet<string> = new Set([
   'closing-bracket-expected',
   'conditional-else-expected',
+  'dictionary-entry-expected',
   'dictionary-key-value-expected',
   'end-of-comment-expected',
   'expression-expected',
@@ -2314,6 +2315,7 @@ export class Parser {
 
     const start = kw.start;
     const end = body.end;
+    const doc = docCommentText(kw);
     const parts: MathJsonExpression[] = [
       'DeclareType',
       this.wrap({ sym: name }, nameTok.start, nameTok.end),
@@ -2324,7 +2326,7 @@ export class Parser {
     // needs none. `alias -> True` marks the structural form; a clause rides as
     // its source TEXT, bracket-free (A1 / §3.1), for BOTH forms — the variance
     // marker of a parameterized nominal type is just more clause text.
-    if (isAlias || clauseText !== undefined) {
+    if (isAlias || clauseText !== undefined || doc !== undefined) {
       const entries: MathJsonExpression[] = ['Dictionary'];
       if (isAlias)
         entries.push(
@@ -2340,6 +2342,15 @@ export class Parser {
           this.kvPair(
             'typeParams',
             this.wrap({ str: clauseText }, start, end),
+            start,
+            end
+          )
+        );
+      if (doc !== undefined)
+        entries.push(
+          this.kvPair(
+            'description',
+            this.wrap({ str: doc }, start, end),
             start,
             end
           )
@@ -10063,6 +10074,14 @@ export class Parser {
     let comprehension: MathJsonExpression | undefined;
     if (!this.check(closeType)) {
       for (;;) {
+        if (allowDictionaryMarker && this.check('EOF')) {
+          this.error(
+            ['dictionary-entry-expected'],
+            this.current.start,
+            this.current.end
+          );
+          break;
+        }
         // A bare `->` element — the DICTIONARY MARKER (brace literals
         // only). It contributes no entry; it forces the dictionary reading
         // of a brace whose other elements are all spreads

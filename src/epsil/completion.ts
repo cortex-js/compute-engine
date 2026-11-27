@@ -47,7 +47,7 @@ import {
   isSubscript,
   isSuperscript,
 } from './characters.js';
-import { callAt, isFunctionHeader } from './call-at.js';
+import { callAt, dictionaryAt, isFunctionHeader } from './call-at.js';
 import { definitionSitesByOffset } from './definition-sites.js';
 import { definitionSourceExamples, describeName } from './describe-name.js';
 import { epsilExamples } from './example-spelling.js';
@@ -255,7 +255,7 @@ export type SourceType =
        * `sumVariants` option, whose payload is unknown. */
       variants: { name: string; payload: string[] | undefined }[];
     }
-  | { kind: 'alias' | 'nominal'; body: string };
+  | { kind: 'alias' | 'nominal'; body: string; description?: string };
 
 /** What the declaring node of a name says about its type. */
 export type Declaration =
@@ -400,7 +400,7 @@ export function epsilCompletions(
     return { range, replaceEnd, items: [] };
   const before = tokens.filter((t) => t.type !== 'EOF' && t.end <= start);
 
-  let { text, placeholder, ast } = parseWithHole(source, start, end, options);
+  let { text, placeholder, ast } = parseWithHole(ce, source, start, end, options);
   // `if ▮`, `while ▮` and `for x in ▮` do not parse before their block is
   // typed: parse again with an empty block after the hole.
   if (
@@ -408,7 +408,7 @@ export function epsilCompletions(
     beforeMissingBlock(source, start, end)
   ) {
     const block = `${source.slice(0, end)} {}${source.slice(end)}`;
-    const retry = parseWithHole(block, start, end, options);
+    const retry = parseWithHole(ce, block, start, end, options);
     if (findHole(retry.ast, retry.placeholder, start) !== undefined)
       ({ text, placeholder, ast } = retry);
   }
@@ -517,9 +517,8 @@ export function epsilCompletions(
     text,
     typeNames,
   };
-  // In a dictionary literal written as an argument of a call whose parameter
-  // documents the keys of its options (`plot(s, {▮`): the keys, or the type
-  // of the key whose value is at the offset (`plot(s, {grid -> ▮`).
+  // The documented keys of the dictionary at the offset, or the documented
+  // type of the key whose value is being written.
   const option = optionKeysAt(context, tokens, start, end, source);
   let expectedType =
     path === undefined
@@ -1105,6 +1104,7 @@ export function wordAt(source: string, offset: number): [number, number] {
  * replaced by a placeholder name that does not occur in the source, and its
  * raw parse, or `null` when the parse throws. */
 export function parseWithHole(
+  ce: ComputeEngine,
   source: string,
   start: number,
   end: number,
@@ -1124,7 +1124,7 @@ export function parseWithHole(
   let ast: MathJsonExpression | null = null;
   try {
     [ast] = parseEpsil(text, undefined, {
-      typeNames: options?.typeNames,
+      typeNames: [...ce._typeResolver.names, ...(options?.typeNames ?? [])],
       protocolNames: options?.protocolNames,
       sumVariants: options?.sumVariants,
       parseLatex: options?.parseLatex,
@@ -1969,23 +1969,9 @@ function recordLiteralFields(
   brace: number,
   placeholder: string
 ): { name: string; type: Type; optional: boolean }[] | undefined {
-  const nodes: MathJsonExpression[] = [];
-  const indices: number[] = [];
-  const visit = (node: MathJsonExpression, index: number): boolean => {
-    nodes.push(node);
-    indices.push(index);
-    const ops = operands(node);
-    for (let i = 0; i < ops.length; i += 1) if (visit(ops[i], i)) return true;
-    if (
-      ['Dictionary', 'Set'].includes(operator(node)) &&
-      spanOf(node)?.[0] === brace
-    )
-      return true;
-    nodes.pop();
-    indices.pop();
-    return false;
-  };
-  if (context.ast === null || !visit(context.ast, -1)) return undefined;
+  const path = dictionaryPath(context.ast, brace);
+  if (path === undefined) return undefined;
+  const { nodes, indices } = path;
   const expected = expectedTypeAt(
     { ...context, nodes, indices },
     nodes.length - 1
@@ -2005,6 +1991,30 @@ function recordLiteralFields(
     }
   written.delete(placeholder);
   return fields.filter((field) => !written.has(field.name));
+}
+
+/** A partially written dictionary without an arrow can parse as a set. */
+function dictionaryPath(
+  ast: MathJsonExpression | null,
+  brace: number
+): HolePath | undefined {
+  const nodes: MathJsonExpression[] = [];
+  const indices: number[] = [];
+  const visit = (node: MathJsonExpression, index: number): boolean => {
+    nodes.push(node);
+    indices.push(index);
+    const ops = operands(node);
+    for (let i = 0; i < ops.length; i += 1) if (visit(ops[i], i)) return true;
+    if (
+      ['Dictionary', 'Set'].includes(operator(node)) &&
+      spanOf(node)?.[0] === brace
+    )
+      return true;
+    nodes.pop();
+    indices.pop();
+    return false;
+  };
+  return ast !== null && visit(ast, -1) ? { nodes, indices } : undefined;
 }
 
 /** A variant of a sum type of the source, with the sum that declares it. */
@@ -3182,15 +3192,137 @@ function slotOfArgument(
   return arm.rest ? arm.params.length : -1;
 }
 
+/** The literal around the cursor, when its brace is the innermost bracket. */
+export function dictionaryAtOffset(tokens: readonly Token[], start: number) {
+  const before = tokens.filter((t) => t.type !== 'EOF' && t.end <= start);
+  const open = innermostOpen(before, before.length - 1);
+  return before[open]?.type === 'OPEN_BRACE'
+    ? dictionaryAt(tokens, open, start)
+    : undefined;
+}
+
+/** The documented keys at a dictionary literal, including literals inside
+ * tuples, lists and record fields. A union contributes the documented keys
+ * of each arm that has a dictionary at the literal's position. */
+export function documentedDictionaryKeys(
+  context: Context,
+  brace: number
+): KeyDoc[] | undefined {
+  const path = dictionaryPath(context.ast, brace);
+  if (path === undefined) return undefined;
+  const literal = { ...context, ...path };
+  let docs: ParameterDoc | undefined;
+  for (const type of expectedLiteralTypes(literal, path.nodes.length - 1)) {
+    for (const arm of literalTypeArms(context, type)) {
+      if (
+        arm.type !== 'dictionary' &&
+        (typeof arm.type !== 'object' ||
+          (arm.type.kind !== 'dictionary' && arm.type.kind !== 'record'))
+      )
+        continue;
+      for (const description of arm.descriptions) {
+        const { keys } = splitDocComment(description, true);
+        if (keys !== undefined) docs = mergeParameterDocs(docs, { keys });
+      }
+    }
+  }
+  return docs?.keys;
+}
+
+/** Follow the literal's position from the enclosing expected type. Keep
+ * union arms separate so a general arm such as `any` cannot erase a
+ * documented type in another arm. */
+function expectedLiteralTypes(context: Context, k: number): Type[] {
+  if (k < 1) return [];
+  const { ce, nodes, indices, typeNames } = context;
+  const parent = nodes[k - 1];
+  const head = operator(parent);
+  const index = indices[k];
+  const field =
+    head === 'KeyValuePair' &&
+    index === 1 &&
+    operator(nodes[k - 2]) === 'Dictionary'
+      ? stringValue(operand(parent, 1))
+      : null;
+  if (head !== 'Tuple' && head !== 'List' && field === null) {
+    const text = expectedTypeAt(context, k);
+    const type =
+      text === undefined ? undefined : parseSourceType(ce, text, typeNames);
+    return type === undefined ? [] : [type];
+  }
+  const parentIndex = field === null ? k - 1 : k - 2;
+  const result = new Set<Type>();
+  for (const expected of expectedLiteralTypes(context, parentIndex)) {
+    for (const { type } of literalTypeArms(context, expected)) {
+      if (typeof type !== 'object') continue;
+      let element: Type | undefined;
+      if (head === 'Tuple' && type.kind === 'tuple')
+        element = type.elements[index]?.type;
+      else if (
+        head === 'List' &&
+        type.kind === 'list' &&
+        (type.dimensions === undefined || type.dimensions?.length === 1)
+      )
+        element = type.elements;
+      else if (
+        field !== null &&
+        type.kind === 'record' &&
+        Object.hasOwn(type.elements, field)
+      )
+        element = type.elements[field];
+      if (element !== undefined) result.add(element);
+    }
+  }
+  return [...result];
+}
+
+/** Unfold only transparent aliases. Preserve their comments in outermost
+ * first order, and stop at a repeated alias in a recursive type. */
+function* literalTypeArms(
+  context: Context,
+  type: Type,
+  seen: ReadonlySet<string> = new Set(),
+  descriptions: readonly string[] = []
+): Generator<{ type: Type; descriptions: readonly string[] }> {
+  if (typeof type === 'object' && type.kind === 'union') {
+    for (const member of type.types)
+      yield* literalTypeArms(context, member, seen, descriptions);
+    return;
+  }
+  if (typeof type === 'object' && type.kind === 'reference') {
+    const declared = context.sourceTypes.get(type.name);
+    const registered = context.ce._typeRegistry[type.name] ?? type;
+    const alias =
+      declared === undefined ? registered.alias : declared.kind === 'alias';
+    if (alias && !seen.has(type.name)) {
+      const body =
+        declared?.kind === 'alias'
+          ? parseSourceType(context.ce, declared.body, context.typeNames)
+          : (type.def ?? registered.def);
+      if (body !== undefined) {
+        const description =
+          declared?.kind === 'alias'
+            ? declared.description
+            : registered._description;
+        yield* literalTypeArms(
+          context,
+          body,
+          new Set([...seen, type.name]),
+          description === undefined
+            ? descriptions
+            : [...descriptions, description]
+        );
+      }
+    }
+    return;
+  }
+  yield { type, descriptions };
+}
+
 /**
- * Where the word `[start, end]` is in a dictionary literal written as an
- * argument of a call (`callAt()`), when the parameter of that argument
- * documents keys (`calleeParameterDocs()`): at a key, the documented keys
- * that the literal does not write yet (the word itself does not count); in
- * the value of a documented key that has a type, that type. The parameter is
- * the one of a named argument (`f(options: {▮`), or else the parameter at the position of the
- * argument in the first signature of the callee that has it. A member call
- * and a call after `|>` give `undefined`.
+ * At a key, the documented keys that the literal does not write yet. At a
+ * value, the documented type of the key. Documentation on a parameter
+ * takes precedence when the dictionary is the whole argument.
  */
 function optionKeysAt(
   context: Context,
@@ -3211,22 +3343,32 @@ function optionKeysAt(
   | { position: 'value'; type: string }
   | undefined {
   const call = callAt(tokens, start);
-  if (call?.dictionary === undefined || call.member) return undefined;
-  const before = tokens.filter((t) => t.end <= call.headStart);
-  const previous = before[before.length - 1];
-  if (previous?.type === 'OPERATOR' && previous.text === '|>') return undefined;
-  const docs = calleeParameterDocs(context, call.head);
-  // The parameter of the argument in each arm of the signature, in turn:
-  // the first that documents keys.
-  let keys: KeyDoc[] | undefined;
-  for (const arm of namedCallee(context, call.head)?.arms ?? []) {
-    const slot = slotOfArgument(arm, call.index, call.label);
-    if (slot < 0) continue;
-    keys = parameterDocAt(docs, arm, slot)?.keys;
-    if (keys !== undefined && keys.length > 0) break;
+  const dictionary = call?.dictionary ?? dictionaryAtOffset(tokens, start);
+  if (dictionary === undefined) return undefined;
+  const typeKeys =
+    dictionary.position === 'key' &&
+    !/^[ \t]*(->|,|\}|[\r\n\u2028\u2029]|$)/.test(source.slice(end))
+      ? undefined
+      : documentedDictionaryKeys(context, dictionary.open);
+  let parameterKeys: KeyDoc[] | undefined;
+  if (call?.dictionary !== undefined && !call.member) {
+    const before = tokens.filter((t) => t.end <= call.headStart);
+    const previous = before[before.length - 1];
+    if (previous?.type !== 'OPERATOR' || previous.text !== '|>') {
+      const docs = calleeParameterDocs(context, call.head);
+      for (const arm of namedCallee(context, call.head)?.arms ?? []) {
+        const slot = slotOfArgument(arm, call.index, call.label);
+        if (slot < 0) continue;
+        parameterKeys = parameterDocAt(docs, arm, slot)?.keys;
+        if (parameterKeys !== undefined && parameterKeys.length > 0) break;
+      }
+    }
   }
+  const keys =
+    parameterKeys === undefined || typeKeys === undefined
+      ? (parameterKeys ?? typeKeys)
+      : mergeParameterDocs({ keys: parameterKeys }, { keys: typeKeys })?.keys;
   if (keys === undefined || keys.length === 0) return undefined;
-  const { dictionary } = call;
   if (dictionary.position === 'key') {
     const word = source.slice(start, end);
     const written = new Set(dictionary.written.filter((k) => k !== word));
@@ -5329,7 +5471,15 @@ export function collectSourceTypes(
           symbol(operand(kv, 1)) === 'alias' &&
           symbol(operand(kv, 2)) === 'True'
       );
-      result.set(name, { kind: alias ? 'alias' : 'nominal', body });
+      const description = operands(attributes).find(
+        (kv) => symbol(operand(kv, 1)) === 'description'
+      );
+      const doc = stringValue(operand(description ?? null, 2));
+      result.set(name, {
+        kind: alias ? 'alias' : 'nominal',
+        body,
+        ...(doc === null ? {} : { description: doc }),
+      });
     }
   }
   return result;

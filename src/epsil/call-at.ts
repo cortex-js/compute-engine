@@ -8,14 +8,13 @@ import type { Token } from './tokens.js';
 //
 
 /**
- * The dictionary literal written as the argument at an offset of a call
- * (`plot(s, {grid -> ▮})`), as `epsilSignatureHelp()` reads it: whether the
- * offset is at the key of an entry or in its value, the key of that entry
- * (in the value), and the keys that the literal writes. `undefined` when the
- * offset is not in a dictionary literal that is a whole argument of a call.
+ * The opening brace offset and entry at the cursor in a dictionary literal.
+ * The entry's key is known when the cursor is in its value. `written` lists
+ * the keys already present in the literal.
  * @internal
  */
 export type DictionaryArgument = {
+  open: number;
   position: 'key' | 'value';
   key?: string;
   written: string[];
@@ -74,7 +73,7 @@ export function callAt(
   let commas = 0;
   let lastComma = -1;
   // The innermost `{` around `start`, while no other bracket encloses it.
-  let brace: { open: number; lastComma: number } | undefined;
+  let brace: number | undefined;
   let innermost = true;
   for (let j = last; j >= 0; j -= 1) {
     const type = tokens[j].type;
@@ -113,9 +112,9 @@ export function callAt(
         const argumentStart = (lastComma < 0 ? j : lastComma) + 1;
         const dictionary =
           brace !== undefined &&
-          (brace.open === argumentStart ||
-            (label !== undefined && brace.open === argumentStart + 2))
-            ? dictionaryAt(tokens, brace.open, brace.lastComma, last)
+          (brace === argumentStart ||
+            (label !== undefined && brace === argumentStart + 2))
+            ? dictionaryAt(tokens, brace, start)
             : undefined;
         return {
           ...callee,
@@ -124,8 +123,7 @@ export function callAt(
           ...(dictionary === undefined ? {} : { dictionary }),
         };
       }
-      brace =
-        innermost && type === 'OPEN_BRACE' ? { open: j, lastComma } : undefined;
+      brace = innermost && type === 'OPEN_BRACE' ? j : undefined;
       innermost = false;
       commas = 0;
       lastComma = -1;
@@ -137,13 +135,12 @@ export function callAt(
   return undefined;
 }
 
-/** Where the tokens up to `last` end in the dictionary literal that opens
- * at `open`, whose last comma before them is `lastComma` (-1 for none). */
-function dictionaryAt(
+/** The entry at `start` and the keys already written in the dictionary
+ * whose opening token is `tokens[open]`. */
+export function dictionaryAt(
   tokens: readonly Token[],
   open: number,
-  lastComma: number,
-  last: number
+  start: number
 ): DictionaryArgument {
   const keyOf = (token: Token | undefined): string | undefined =>
     token === undefined
@@ -159,6 +156,7 @@ function dictionaryAt(
   const written: string[] = [];
   let depth = 0;
   let entryStart = open + 1;
+  let activeEntry = entryStart;
   for (let j = open + 1; j < tokens.length; j += 1) {
     const type = tokens[j].type;
     if (type === 'EOF') break;
@@ -175,7 +173,10 @@ function dictionaryAt(
     ) {
       if (depth === 0) break;
       depth -= 1;
-    } else if (depth === 0 && type === 'COMMA') entryStart = j + 1;
+    } else if (depth === 0 && type === 'COMMA') {
+      entryStart = j + 1;
+      if (tokens[j].end <= start) activeEntry = entryStart;
+    }
     // An unclosed literal (`plot(s, {▮` above more code) ends at the first
     // line that does not start an entry: the code after it is not a key.
     else if (
@@ -196,16 +197,17 @@ function dictionaryAt(
     }
   }
   // The entry that holds the offset: in its value once its `->` is written.
-  const first = (lastComma < 0 ? open : lastComma) + 1;
-  if (first + 1 <= last && isArrow(tokens[first + 1])) {
-    const key = keyOf(tokens[first]);
+  const arrow = tokens[activeEntry + 1];
+  if (isArrow(arrow) && arrow.end <= start) {
+    const key = keyOf(tokens[activeEntry]);
     return {
+      open: tokens[open].start,
       position: 'value',
       ...(key === undefined ? {} : { key }),
       written,
     };
   }
-  return { position: 'key', written };
+  return { open: tokens[open].start, position: 'key', written };
 }
 
 /** The name written before the `(` at `paren`, its offset, whether it is

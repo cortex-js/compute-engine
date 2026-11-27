@@ -20,6 +20,8 @@ import {
   collectDeclarations,
   contextAt,
   declarationOf,
+  dictionaryAtOffset,
+  documentedDictionaryKeys,
   firstLine,
   functionSignatureParts,
   insideLiteralOrComment,
@@ -99,9 +101,8 @@ export type EpsilSignatureParameter = {
    * as faint text in an empty argument; it is not part of the
    * documentation. */
   sample?: string;
-  /** The keys of a parameter that takes a dictionary of options, in the
-   * order of their documentation (the `keys` of a library definition, the
-   * `@key` tags of a `///` comment). */
+  /** The documented keys of a parameter, or of the dictionary at the
+   * offset when the parameter expects a documented type there. */
   keys?: EpsilSignatureKey[];
 };
 
@@ -153,9 +154,8 @@ export type EpsilSignatureHelp = {
    * the argument at the offset matches none of its parameters: the
    * `activeParameter` of `signatures[activeSignature]`. */
   activeParameter: number;
-  /** When the offset is in a dictionary literal written as the active
-   * argument (`plot(s, {grid -> ▮})`), and the active parameter documents a
-   * key of that name: the key whose name or value contains the offset. */
+  /** The documented dictionary key whose name or value is at the offset,
+   * including dictionaries nested inside the active argument. */
   activeKey?: string;
   /** The examples of the callee, each one line of Epsil source in the
    * Epsil spelling (`join([1, 2], [3, 4])`): the `examples` of a library
@@ -232,9 +232,9 @@ export function epsilSignatureHelp(
 
   const call = callAt(tokens, start);
   if (call === undefined) return null;
-  const { head, headStart, std, member, index, label, dictionary } = call;
+  const { head, headStart, std, member, index, label } = call;
 
-  const { text, placeholder, ast } = parseWithHole(source, start, end, options);
+  const { text, placeholder, ast } = parseWithHole(ce, source, start, end, options);
   // The names visible at the callee: a name bound between the callee and
   // the offset (a lambda parameter) does not shadow it.
   const context = contextAt(ce, ast, text, placeholder, headStart, options);
@@ -273,8 +273,23 @@ export function epsilSignatureHelp(
     0,
     active.findIndex((i) => i >= 0)
   );
+  const parameter =
+    candidates[activeSignature]?.parameters[active[activeSignature]];
+  const brace = call.dictionary ?? dictionaryAtOffset(tokens, start);
+  const dictionary =
+    brace !== undefined && brace.open > headStart ? brace : undefined;
+  const typeKeys =
+    dictionary === undefined || parameter === undefined
+      ? undefined
+      : documentedDictionaryKeys(context, dictionary.open);
+  const parameterKeys =
+    call.dictionary === undefined ? undefined : parameter?.keys;
   const keys =
-    candidates[activeSignature]?.parameters[active[activeSignature]]?.keys;
+    parameterKeys === undefined || typeKeys === undefined
+      ? (parameterKeys ?? typeKeys)
+      : mergeParameterDocs({ keys: parameterKeys }, { keys: typeKeys })?.keys;
+  if (parameter !== undefined && typeKeys !== undefined)
+    parameter.keys = keys;
   const keyName =
     dictionary === undefined
       ? undefined
