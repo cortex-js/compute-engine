@@ -1607,6 +1607,38 @@ describe('Document type policy', () => {
     }
   });
 
+  test('declines a promotion that gives an open formula an error type', () => {
+    const doc = document();
+    const revision = doc.prepare(
+      [
+        { id: 'f', latex: 'f(p)=p' },
+        { id: 'width', latex: '\\operatorname{Field}(f(Q),\\text{width})' },
+        { id: 'g', latex: 'g(q)=q+1' },
+        { id: 'v', latex: 'v=g(2)' },
+      ],
+      () => new Map([
+        ['f', { formalTypes: { p: 'real' } }],
+        ['g', { formalTypes: { q: 'real' } }],
+      ])
+    );
+    try {
+      const { ce } = doc;
+      const { scope } = revision;
+      const formula = ce.box(revision.rawRows.get('width')!, { scope });
+      expect(formula.isValid).toBe(true);
+      expect(formula.type.type).toBe('unknown');
+      expect(formula.evaluate().operator).toBe('Field');
+      expect(revision.rowErrors.size).toBe(0);
+      expect([...revision.promotedContracts!]).toEqual([
+        ['g', { formalTypes: { q: 'real' } }],
+      ]);
+      expect(ce.expr('v', { scope }).evaluate().json).toBe(3);
+    } finally {
+      revision.dispose();
+      doc.dispose();
+    }
+  });
+
   test('the host can choose between elementwise calls and whole-list arguments', () => {
     const doc = document();
     const rows = [

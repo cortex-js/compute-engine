@@ -1882,7 +1882,8 @@ export function prepareDocument(
           ce._inScope(probe, () => {
             const expr = ce.box(parsed.get(row.id)!);
             if (!expr.isValid) return;
-            validFormulaRows?.add(row.id);
+            if (validFormulaRows !== undefined && expr.type.type !== 'error')
+              validFormulaRows.add(row.id);
             if (!readsCallable) return;
             // A row adds its evidence only when its walk finishes.
             const read = emptyCallSiteEvidence(arities);

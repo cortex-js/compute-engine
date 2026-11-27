@@ -115,6 +115,14 @@
 
 ### Resolved Issues
 
+- **The linear algebra guide now shows how to compute a scalar reciprocal**
+  (CE-1887). `ce.expr(['Divide', 1, 4]).N()` gives `0.25`.
+
+- **Document type promotion preserves formulas that would acquire an error
+  type.** (CE-1886) With `f(p)=p` and an open `Q`, `Field(f(Q), "width")` stays
+  symbolic when a type policy proposes `real` for `p`. The promotion used to
+  make the field read evaluate to `incompatible-type`.
+
 - **A `Declare` boxed in the structural form evaluates its attributes
   dictionary again** (CE-1876, a regression of 0.202.0). With the attributes
   as a function-form `Dictionary`, the form that `parseEpsil("let n: real = 2")`
