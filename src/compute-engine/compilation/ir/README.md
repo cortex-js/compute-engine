@@ -1871,6 +1871,14 @@ bounded build or a pure flat element-wise operation. A reduction over a pure
 filter of a stated source length visits the source in order and updates the
 accumulator where the predicate holds. Emitting the filtered list itself would
 require a shader value of run-time length, so that form declines.
+A scalar reduction can also stream a one-clause comprehension of a small
+integer `Range`, including a literal scale of it. The bounds of the range
+must prove at most 64 elements and endpoint magnitudes below 2^20. The
+proof uses constants and finite input declarations through rounding and
+power-of-two scaling. An `At` of a pure build of a stated length
+can read its real element directly, including from a `Map` that exceeds the
+unrolling limit or a fixed-length `ListJoin`. An invalid constant index
+keeps the target's decline.
 
 On JavaScript and GLSL, independent scalar reductions over the same bounds
 can share a loop and the per-index calculations that CSE finds in it. Each

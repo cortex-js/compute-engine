@@ -701,6 +701,7 @@ function lowerOnce(
       : i.k === 'call'
         ? fns.effect(i.fn) === 'effectful'
         : i.k === 'region' && regionRow(i.op)?.effect === 'effectful';
+  const inputBounds = new Map<V, readonly [number, number]>();
   const b = new Builder(
     (op) => rowOfOp(rows, op)?.row.effect === 'pure',
     effectful,
@@ -5188,6 +5189,21 @@ function lowerOnce(
     const declared =
       def !== undefined && !def.inferredType ? def.type.type : undefined;
     if (
+      options.glsl &&
+      shape.length === 0 &&
+      (ir.lane === 'real' || ir.lane === 'integer') &&
+      typeof declared === 'object' &&
+      declared.kind === 'numeric' &&
+      declared.lower !== undefined &&
+      declared.upper !== undefined &&
+      Number.isFinite(declared.lower) &&
+      Number.isFinite(declared.upper)
+    )
+      inputBounds.set(v, [
+        Math.fround(declared.lower),
+        Math.fround(declared.upper),
+      ]);
+    if (
       !interval &&
       shape.length === 0 &&
       (ir.lane === 'real' || ir.lane === 'integer') &&
@@ -8128,6 +8144,7 @@ function lowerOnce(
   const cx: Lowering = {
     b,
     rows,
+    inputBounds,
     frames,
     scopes,
     value,
@@ -8281,6 +8298,7 @@ function lowerOnce(
     return {
       ...p,
       inputs,
+      ...(inputBounds.size > 0 ? { inputBounds } : {}),
       ...(enclosure ? { valueKinds: ['enclosure'] } : {}),
       ...(assigns.length > 0 ? { assigns } : {}),
       ...(stagedAssignments ? { stagedAssignments: true as const } : {}),

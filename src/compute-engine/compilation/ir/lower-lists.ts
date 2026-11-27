@@ -51,6 +51,7 @@ import {
   userBinding,
 } from './lower-context.js';
 import { SCALARIZE_LIMIT } from './passes.js';
+import { shaderBounds } from './shader-bounds.js';
 import { emptyBigOpValue } from '../../symbolic/big-op-identity.js';
 import { MAX_CHUNK_COUNT } from '../../numerics/value-scaled-caps.js';
 import { brangeCount } from '../bigint-runtime.js';
@@ -262,6 +263,7 @@ export function listLowering(cx: Lowering) {
   const { b, type } = cx;
   const op = (name: string) => rowOfOp(cx.rows, name)!.row;
   const integer = (n: number) => b.constant(n, 'integer');
+  const boundsOf = shaderBounds(cx.constant, (v) => b.defs.get(v), cx.inputBounds);
   // The bodies written out in the program: the elements of the builds on
   // GLSL (`over()`) and the terms of the sums (`writtenOut()`).
   let unrolled = 0;
@@ -477,6 +479,89 @@ export function listLowering(cx: Lowering) {
       cx.apply(e, 'Add', [lo, cx.apply(e, 'Multiply', [k, step])]);
     return { length, at };
   }
+
+  /** A shader reduction can consume a scalar comprehension of a small
+   *  integer range directly. The range's count is a value, with no list
+   *  of that length in the program. One scalar multiplier of the range
+   *  scales each element and keeps the count and traversal order. */
+  const boundedComprehension = (e: Expression): Source | undefined => {
+    if (
+      cx.runtimeLengths ||
+      !isFunction(e, 'Comprehension') ||
+      !cx.isLibrary(e) ||
+      e.type.matches('error') ||
+      e.nops !== 2
+    )
+      return undefined;
+    const [body, clause] = e.ops;
+    if (
+      !isFunction(clause, 'Element') ||
+      clause.nops !== 2 ||
+      !isSymbol(clause.ops[0])
+    )
+      return undefined;
+    const name = clause.ops[0].symbol;
+    let range = clause.ops[1];
+    let factor: Expression | undefined;
+    if (isFunction(range, 'Multiply') && cx.isLibrary(range) && range.nops === 2) {
+      const [a, z] = range.ops;
+      if (isNumber(a)) [factor, range] = [a, z];
+      else if (isNumber(z)) [factor, range] = [z, a];
+    }
+    if (!isFunction(range, 'Range') || !cx.isLibrary(range) || range.nops !== 2)
+      return undefined;
+    const sourceRange = range;
+    let stream: Source | undefined;
+    const tried = cx.attempt(
+      () => {
+        const [lo, hi] = sourceRange.ops.map(cx.scalar);
+        const a = boundsOf(lo);
+        const z = boundsOf(hi);
+        if (
+          // Constant ranges already have a source with an exact count.
+          (cx.constant(lo) !== undefined && cx.constant(hi) !== undefined) ||
+          type(lo).lane !== 'integer' ||
+          type(hi).lane !== 'integer' ||
+          a === undefined ||
+          z === undefined ||
+          ![...a, ...z].every((x) => Number.isFinite(x) && Math.abs(x) < 2 ** 20) ||
+          Math.max(z[1] - a[0], a[1] - z[0]) >= SCALARIZE_LIMIT
+        )
+          return undefined;
+        const step = cx.apply(sourceRange, op('rangestep'), [lo, hi]);
+        const delta = cx.apply(sourceRange, 'Subtract', [hi, lo]);
+        const length = cx.apply(sourceRange, 'Add', [
+          cx.apply(sourceRange, 'Abs', [delta]),
+          integer(1),
+        ]);
+        const scale = factor === undefined ? undefined : cx.scalar(factor);
+        stream = {
+          length,
+          at: (k) => {
+            const before = b.changes();
+            const index = cx.apply(sourceRange, 'Add', [
+              lo,
+              cx.apply(sourceRange, 'Multiply', [k, step]),
+            ]);
+            const v = indexed(
+              name,
+              scale === undefined
+                ? index
+                : cx.apply(e, 'Multiply', [scale, index]),
+              () => cx.value(body)!
+            );
+            if (b.changes() !== before)
+              decline(e, 'a Comprehension with an effect');
+            return v;
+          },
+        };
+        return length;
+      },
+      () => true,
+      () => {}
+    );
+    return tried === undefined ? undefined : stream;
+  };
 
   /** A term of an indexed `Sum` or `Product` that is a list: a flat list
    *  of numbers, a tuple, or a list of tuples, each tuple of a constant
@@ -858,7 +943,9 @@ export function listLowering(cx: Lowering) {
       l.ops.every((x) => x.type.matches('number'))
         ? l.ops
         : undefined;
-    const items = (literal ?? e.ops).map((x) => source(x, true, true));
+    const items = (literal ?? e.ops).map(
+      (x) => boundedComprehension(x) ?? source(x, true, true)
+    );
     if (!red.indexed && items.every((x) => typeof x === 'number')) {
       // `Max(x)` of one real is `x`; of a boolean or a complex number the
       // interpreter leaves it unevaluated (a decline of `apply()`).

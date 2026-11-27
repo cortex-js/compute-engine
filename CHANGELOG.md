@@ -57,6 +57,16 @@
 
 ### Improvements
 
+- **GLSL compiles reductions over bounded comprehensions and reads from
+  computed lists.** `Min([Sin(i) for i in 2 * Range(0, Ceil(t/4))])` compiles
+  with `t: real<0..5>`. `At(Map(Sin, L), i)` of a fixed-length real list
+  can compute just the element at `i`.
+
+- **GLSL compiles bounded recurrences with one predecessor.** A function
+  with a base case at zero and a step such as
+  `r(k - 1, x) + Sin(r(k - 1, x))` compiles for a call with provably bounded
+  integer depth. The shader uses a loop with a fixed-shape state.
+
 - **`{key: value}` in Epsil is an error with a fixit to `{key -> value}`.**
   `{"a": 1}`, the spelling of JSON and Python, gave three unrelated errors; it
   now gives the error `dictionary-arrow-expected`, whose fixit replaces the

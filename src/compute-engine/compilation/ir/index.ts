@@ -514,8 +514,9 @@ export type Extension = {
 
 export type SliceOptions = {
   readonly target: Target;
-  /** The passes to run. Default: all of them. `false`: none (`scalarize`
-   *  still runs for a target that needs it). */
+  /** The optimization passes to run, defaulting to all of them. `false`
+   *  keeps only target-required lowering, including shader scalarization
+   *  and bounded recurrence lowering. */
   readonly passes?: PassOptions | false;
   readonly extend?: Extension;
   /** `false`: the lowering evaluates no closed sub-expression with `N()`
@@ -882,6 +883,7 @@ export function sliceProgram(
       ...passes,
       scalarize: !profile.elementwise,
       staticForward: options.target === 'glsl' && passes.forward === true,
+      shaderRecurrences: options.target === 'glsl',
       fuseLoops: passes.fuseLoops && !interval && !bigint,
       ...(bigint
         ? { fold: false, hoist: false, inline: false, invariants: false }

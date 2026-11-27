@@ -508,6 +508,41 @@ describe('IR profile on GLSL: points', () => {
 
 const L6 = [1.5, 2, 3, 4, 5, 6.5];
 const SUM_N = ['Sum', ['Multiply', 'j', 'x'], ['Limits', 'j', 1, 'n']];
+const SCALAR_RECURRENCE = ['sr', 20, 'x'];
+const POINT_RECURRENCE = ['vr', ['Floor', 'depth']];
+const INDEXED_MAP = ['At', ['Map', 'Sin', 'wideList'], 'ix'];
+const INDEXED_JOIN = ['At', ['ListJoin', 'L6', 'V4'], 'ix'];
+const BOUNDED_RANGE = [
+  'Min',
+  [
+    'Comprehension',
+    ['Sin', 'j'],
+    ['Element', 'j', ['Multiply', 2, ['Range', 0, ['Ceil', ['Divide', 'span', 4]]]]],
+  ],
+];
+ce.declare('wideList', 'list<real^100>');
+ce.declare('span', 'real<-5..5>');
+ce.declare('depth', 'real<-1..10>');
+ce.declare('sr', '(real, real) -> real');
+const priorScalar = ['sr', ['Subtract', 'j', 1], 'u'];
+ce.assign('sr', ce.box([
+  'Function',
+  ['If', ['Equal', 'j', 0], 'u', ['Add', priorScalar, ['Multiply', 0.5, ['Sin', priorScalar]]]],
+  'j', 'u',
+]));
+ce.declare('vr', '(integer) -> tuple<real, real>');
+const priorPoint = ['vr', ['Subtract', 'j', 1]];
+ce.assign('vr', ce.box([
+  'Function',
+  [
+    'If',
+    ['LessEqual', 'j', 0],
+    ['Tuple', 1.5, 0],
+    ['Tuple', ['Add', ['At', priorPoint, 1], ['At', priorPoint, 2]],
+      ['Subtract', ['At', priorPoint, 1], ['At', priorPoint, 2]]],
+  ],
+  'j',
+]));
 // prettier-ignore
 const G3: [label: string, json: Json, options: object, points: PointValue[]][] = [
   ['At(L6, ix)', ['At', 'L6', 'ix'], {}, [1, 6, -1, -6, 0, 7, -7, 2.5].map((ix) => ({ L6, ix }))],
@@ -579,6 +614,35 @@ function interpretG3(json: Json, options: object, point: PointValue): unknown {
 }
 
 describe('IR profile on GLSL: arrays, At, the cap, point parameters', () => {
+  test('At reads a pure producer in place and still declines an invalid constant index', () => {
+    for (const [program, outside] of [[INDEXED_MAP, 101], [INDEXED_JOIN, 11]] as const) {
+      const r = glsl(program);
+      expect(r.code).not.toMatch(/for \(|float\[\d+\]\(/);
+      expect(r.code).toContain('0x7fc00000u');
+      expect(() => glsl(['At', program[1], outside])).toThrow();
+    }
+  });
+
+  test('bounded ranges and recurrences compile to loops', () => {
+    expect(glsl(BOUNDED_RANGE).code?.match(/for \(int /g)).toHaveLength(1);
+    for (const expr of [SCALAR_RECURRENCE, POINT_RECURRENCE]) {
+      expect(glsl(expr).preamble?.match(/for \(int /g)).toHaveLength(1);
+    }
+    expect(() => glsl(BOUNDED_RANGE, { inputs: { span: 'real' } })).toThrow();
+    expect(() => glsl(['sr', -1, 'x'])).toThrow(/recursive/);
+    expect(() => glsl(['sr', 65, 'x'])).toThrow(/recursive/);
+    expect(() => glsl(['sr', 'n', 'x'])).toThrow(/recursive/);
+
+    ce.declare('otherArg', '(integer, real) -> real');
+    ce.assign('otherArg', ce.box([
+      'Function',
+      ['If', ['Equal', 'j', 0], 'u',
+        ['Add', ['otherArg', ['Subtract', 'j', 1], ['Add', 'u', 1]], 'j']],
+      'j', 'u',
+    ]));
+    expect(() => glsl(['otherArg', 5, 'x'])).toThrow(/recursive/);
+  });
+
   test('sibling scalar sums share an iteration and their phase', () => {
     const phase = ['Sin', ['Multiply', 'k', 'x']];
     const limits = ['Limits', 'k', 1, 100];
@@ -656,6 +720,58 @@ describe('IR profile on GLSL: arrays, At, the cap, point parameters', () => {
       driver = await GlslDriver.start();
     }, 60_000);
     afterAll(async () => driver?.stop());
+
+    test('indexed producers, bounded ranges and recurrences agree with their reference values', async () => {
+      const wideList = Array.from({ length: 100 }, (_, i) => i / 64);
+      const V4 = [7, 8, 9, 10];
+      const joined = [...L6, ...V4];
+      const indexed = (values: number[], index: number) =>
+        Number.isInteger(index) && index !== 0
+          ? (values.at(index > 0 ? index - 1 : index) ?? NaN)
+          : NaN;
+      const cases: [Json, PointValue, number | number[]][] = [];
+      for (const ix of [1, -1, 6, 7, 100, 101, 0, 1.5]) {
+        cases.push([INDEXED_MAP, { wideList, ix }, Math.sin(indexed(wideList, ix))]);
+        cases.push([INDEXED_JOIN, { L6, V4, ix }, indexed(joined, ix)]);
+      }
+      for (const span of [-5, -4, 0, 4, 4.25, 5]) {
+        const last = Math.ceil(span / 4);
+        const values = Array.from({ length: Math.abs(last) + 1 }, (_, k) =>
+          Math.sin(2 * k * (last < 0 ? -1 : 1))
+        );
+        cases.push([BOUNDED_RANGE, { span }, Math.min(...values)]);
+      }
+      for (const x of [0, 0.125, -0.75]) {
+        let expected = x;
+        for (let k = 0; k < 20; k++) expected += 0.5 * Math.sin(expected);
+        cases.push([SCALAR_RECURRENCE, { x }, expected]);
+      }
+      for (const depth of [-0.5, 0, 1, 2, 5.75, 10]) {
+        let pair = [1.5, 0];
+        for (let k = 1; k <= Math.floor(depth); k++)
+          pair = [pair[0] + pair[1], pair[0] - pair[1]];
+        cases.push([POINT_RECURRENCE, { depth }, pair]);
+      }
+      const shaders = cases.flatMap(([expr, params, expected]) =>
+        pointShaders(glsl(expr), {}, expected).map((source, k) => ({
+          name: JSON.stringify(expr),
+          source,
+          uniforms: Object.fromEntries(
+            Object.entries(params).flatMap(([n, v]) =>
+              [v].flat().map((x, j) => [`u_${n}_${j}`, x])
+            )
+          ),
+          expected: [expected].flat()[k],
+        }))
+      );
+      const results = await driver.evaluate(shaders);
+      results.forEach((result, i) => {
+        if (!result.ok) throw new Error(result.log);
+        const expected = shaders[i].expected;
+        if (Number.isNaN(expected)) expect(result.value).toBeNaN();
+        else expect(result.value).toBeCloseTo(expected, 3);
+      });
+    });
 
     test('streamed filters and sibling reductions give the scalar results', async () => {
       const phase = ['Sin', ['Multiply', 'k', 'x']];

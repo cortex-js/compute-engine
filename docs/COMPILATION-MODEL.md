@@ -2261,6 +2261,11 @@ name, a member or an element of one, such as `u_x`, `u.P` or `u[0]`; the
 name stays in `freeSymbols`). A scalar reduction such as `Sum(Filter(L, p))`
 can scan a list of stated length when the predicate and reduction body are
 pure. It updates the accumulator only where the predicate is true.
+A scalar reduction can also consume a one-clause comprehension over a
+bounded integer range, optionally scaled by a numeric literal. For example,
+`Min([Sin(i) for i in 2 * Range(0, Ceil(t/4))])` with `t: real<0..5>`
+visits at most three elements. Its source count can vary while the result is
+always scalar.
 `preamble` holds the helpers (`_gpu_ir_…`) and
 the user functions (`_fn_ir_…`); `freeSymbolTypes[name].lowered` is `float`,
 `bool`, `vecN` or `float[n]`. A shader cannot throw, so the pass cap is
@@ -2287,7 +2292,13 @@ element per texel, row-major from texel (0, 0), read at level 0 with no
 filtering; `_gpu_ir_texel`), by `At`, by a reduction or an element-wise operation, and
 in a user function, which takes a `sampler2D` parameter; `S` as a value
 declines. A user function takes every input that its body reads as a
-parameter.
+parameter. A direct recurrence can compile to a loop when every call has
+finite integer depth bounds and the upper bound is at most 64. Its state
+is a real or integer scalar or a fixed vector of two to four numbers.
+The base case is chosen at zero, and each step reads only the preceding
+state with every other argument unchanged. For a `depth == 0` base case,
+callers must prove the depth is nonnegative. A `depth <= 0` base case also
+admits negative depths.
 A colour result (`Rgb`, `Hsl`, `Hsv`, `Oklab`, `Oklch`, `AsOklch`) is an
 OKLCh `vec3`; `AsOklab`, `AsRgb`, `AsHsv` and `AsHsl` give the
 `vec3` of their space and are admitted only as the result of the program;
@@ -3498,6 +3509,10 @@ or past the stated length of its list declines, where JavaScript gives NaN:
 with `P: tuple<real, real>`, `At(P, 3)` declines ("the index 3 of At is
 outside the 2 elements of its list on glsl"), so that a host can key a retry
 on the refusal (`compilation/ir/README.md`, "Options and results").
+
+`At(Map(f, L), i)` and `At(ListJoin(A, B), i)` can read a single element
+of a pure, fixed-length real list directly. The bounds test guards the
+element computation, which runs only where the index names an element.
 
 `At(A, i)` of an array input `A` (`array<T>`, "Arrays" below) follows the
 same rule, with the count of the cells from the uniform `A_count` in place

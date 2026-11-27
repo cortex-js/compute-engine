@@ -252,6 +252,8 @@ export type Program = {
    *  excludes 0. A value outside its declared type gives an unspecified
    *  result, so the printers may read it (`print.ts`, `nonnegative()`). */
   readonly signs?: ReadonlyMap<V, Sign>;
+  /** Finite declared scalar input bounds for the shader lowerings. */
+  readonly inputBounds?: ReadonlyMap<V, readonly [number, number]>;
   /** The variables of the engine that a root function literal assigns, in
    *  the order of their parameters: the entry takes the value of each one
    *  after the arguments, and returns the value of the body followed by the

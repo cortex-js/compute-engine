@@ -79,6 +79,7 @@ import {
   type OperatorRow,
 } from './operators.js';
 import { passChecksOn, SliceInternalError, verify } from './verify.js';
+import { shaderBounds } from './shader-bounds.js';
 
 export type PassOptions = {
   scalarize?: boolean;
@@ -107,6 +108,8 @@ export type PassOptions = {
   forward?: boolean;
   /** Forward only statically bounded lists before GLSL scalarization. */
   staticForward?: boolean;
+  /** Lower bounded self-recursion to a shader loop. */
+  shaderRecurrences?: boolean;
   /** Combine independent reductions with identical bounds. */
   fuseLoops?: boolean;
   dce?: boolean;
@@ -175,7 +178,7 @@ export function runPasses(
   ) {
     const hasFilter = has((i) => i.k === 'region' && i.op === 'filter');
     for (let round = 0; round < 8; round++) {
-      const moved = run('static forward', (q, r) => forward(q, r, true));
+      const moved = run('static forward', (q, r) => forward(q, r, 'static'));
       const filtered =
         hasFilter && run('static filters', (q, r) => filters(q, r, true));
       if (!moved && !filtered) break;
@@ -217,6 +220,24 @@ export function runPasses(
     if (options.dce) changed = run('dce', dce) || changed;
     if (!changed) break;
   }
+  // GLSL declines an invalid constant index. Wait until the other passes
+  // have finished exposing constants before replacing the read.
+  if (
+    options.staticForward &&
+    has((i) => i.k === 'op' && i.op === 'at') &&
+    has((i) => i.k === 'region' && i.op === 'build') &&
+    run('static index', (q, r) => forward(q, r, 'index'))
+  ) {
+    if (options.fold) run('fold', (q, r) => fold(q, r));
+    run('dce', dce);
+  }
+  if (
+    options.shaderRecurrences &&
+    p.functions.length > 1 &&
+    run('shader recurrences', shaderRecurrences) &&
+    options.dce
+  )
+    run('dce', dce);
   return p;
 }
 
@@ -1157,6 +1178,167 @@ function readsValue(p: Program, i: Instr, reads: (v: V) => boolean): boolean {
   );
 }
 
+/** One predecessor of the same shape, with a count that decreases by one
+ *  and every other argument unchanged. Evaluate the base once and apply
+ *  the step in increasing index order. Only calls with a small, proved
+ *  integer count reach the transformed function. */
+const shaderRecurrences: Pass = (p, rows) => {
+  const cyclic = recursiveFunctions(p.functions);
+  if (cyclic.size === 0) return { changed: false, resolve: (v) => v };
+  const { def, constants } = siteIndex(p);
+  const constant = (v: V) => {
+    const x = constants.get(v);
+    return typeof x === 'number' ? x : undefined;
+  };
+  const boundsOf = shaderBounds(
+    constant,
+    (v) => {
+      const i = def.get(v);
+      return i?.k === 'op' ? i : undefined;
+    },
+    p.inputBounds
+  );
+  type Call = Extract<Instr, { k: 'call' }>;
+  const callers = new Map<string, Call[]>();
+  const walk = (r: Region) => {
+    for (const i of r.body) {
+      if (i.k === 'call' && cyclic.has(i.fn)) {
+        const list = callers.get(i.fn) ?? [];
+        list.push(i);
+        callers.set(i.fn, list);
+      }
+      regionsOf(i).forEach(walk);
+    }
+  };
+  p.functions.forEach((f) => walk(f.body));
+  const fx = effects(p, rows);
+  let changed = false;
+  for (const f of p.functions) {
+    if (!cyclic.has(f.name) || f.results.length !== 1) continue;
+    const result = f.results[0];
+    if (
+      (result.lane !== 'integer' && result.lane !== 'real') ||
+      (result.shape.length > 0 &&
+        !(result.shape.length === 1 &&
+          typeof result.shape[0] === 'number' &&
+          result.shape[0] >= 2 &&
+          result.shape[0] <= 4))
+    )
+      continue;
+    const { params, body, yields } = f.body;
+    const branch = body.at(-1);
+    if (
+      branch?.k !== 'if' ||
+      branch.outs.length !== 1 ||
+      yields.length !== 1 ||
+      yields[0] !== branch.outs[0]
+    )
+      continue;
+    const test = def.get(branch.cond);
+    if (
+      test?.k !== 'op' ||
+      (test.op !== 'le' && test.op !== 'eq') ||
+      !body.slice(0, -1).every((i) => i.k === 'const' || i === test)
+    )
+      continue;
+    const [a, b] = test.args;
+    const count = test.op === 'eq' && constant(a) === 0 ? b : a;
+    const slot = params.indexOf(count);
+    const countOrTest = (v: V) => v === count || v === test.out;
+    if (
+      slot < 0 ||
+      constant(count === a ? b : a) !== 0 ||
+      p.types[count].shape.length !== 0 ||
+      (p.types[count].lane !== 'integer' && p.types[count].lane !== 'real') ||
+      branch.then.yields.some(countOrTest) ||
+      branch.then.body.some(
+        (i) => !fx.speculatable(i) || readsValue(p, i, countOrTest)
+      )
+    )
+      continue;
+    const all = callers.get(f.name) ?? [];
+    const predecessors = branch.else.body.filter(
+      (i): i is Call => i.k === 'call' && i.fn === f.name
+    );
+    const predecessorCalls = new Set<Instr>(predecessors);
+    const sameStep = (call: Call) => {
+      if (
+        call.outs.length !== 1 ||
+        call.args.length !== params.length ||
+        call.args.some((v, k) => k !== slot && v !== params[k])
+      )
+        return false;
+      const dec = def.get(call.args[slot]);
+      return (
+        dec?.k === 'op' &&
+        dec.args[0] === count &&
+        (((dec.op === 'sub.int' || dec.op === 'sub') && constant(dec.args[1]) === 1) ||
+          ((dec.op === 'add.int' || dec.op === 'add') && constant(dec.args[1]) === -1))
+      );
+    };
+    const isPredecessor = (i: Instr): boolean => predecessorCalls.has(i);
+    if (
+      predecessors.length === 0 ||
+      !predecessors.every(sameStep) ||
+      branch.else.body.some((i) => !isPredecessor(i) && !fx.speculatable(i))
+    )
+      continue;
+    if (
+      all.length <= predecessors.length ||
+      all.some((call) => {
+        if (isPredecessor(call)) return false;
+        const v = call.args[slot];
+        const limits = boundsOf(v);
+        return (
+          p.types[v].lane !== 'integer' ||
+          limits === undefined ||
+          !limits.every(Number.isFinite) ||
+          (test.op === 'eq' && limits[0] < 0) ||
+          limits[1] > SCALARIZE_LIMIT
+        );
+      })
+    )
+      continue;
+
+    const out = branch.outs[0];
+    const prev = fresh(p, p.types[out]);
+    const index = fresh(p, scalarType('integer'));
+    const steps: Region = {
+      params: [index, prev],
+      body: branch.else.body.filter((i) => !isPredecessor(i)),
+      yields: branch.else.yields,
+    };
+    const reads = new Set(predecessors.map((call) => call.outs[0]));
+    const replace = (v: V) =>
+      v === count ? index : reads.has(v) ? prev : v;
+    const rename = (r: Region) => {
+      for (const i of r.body) {
+        mapDirectArgs(i, replace);
+        for (const v of outsOf(i)) p.types[v] = mapLengths(p.types[v], replace);
+        regionsOf(i).forEach(rename);
+      }
+      r.yields = r.yields.map(replace);
+    };
+    rename(steps);
+    const prefix = body.slice(0, -1);
+    const one = integer(p, 1, prefix);
+    let hi = count;
+    if (p.types[count].lane === 'real') {
+      // Every caller supplies an integer even if the parameter was declared
+      // real. The loop's bound still needs the integer lane in the IR.
+      hi = fresh(p, scalarType('integer'));
+      prefix.push({ k: 'op', out: hi, op: 'floor', args: [count] });
+    }
+    f.body.body = [
+      ...prefix,
+      ...branch.then.body,
+      { k: 'loop', lo: one, hi, init: branch.then.yields, outs: [out], body: steps },
+    ];
+    changed = true;
+  }
+  return { changed, resolve: (v) => v };
+};
+
 /** Keep both reduction orders, sharing the index and exposing their common
  *  calculations to CSE. Move across pure scalar instructions, deferring
  *  those that read the first reduction until both have finished. The
@@ -1263,8 +1445,9 @@ const fuseLoops: Pass = (p, rows) => {
 const forward = (
   p: Program,
   rows: readonly OperatorRow[],
-  staticOnly = false
+  mode?: 'static' | 'index'
 ): ReturnType<Pass> => {
+  const staticOnly = mode !== undefined;
   const fx = effects(p, rows);
   const bounded = boundedLengths(p);
   const { constants, def, sites, only, between } = siteIndex(p);
@@ -1412,7 +1595,7 @@ const forward = (
   const scalar = new Map<Instr, Instr & { k: 'op' }>();
   for (const [i, site] of sites) {
     if (
-      staticOnly &&
+      mode === 'static' &&
       i.k === 'op' &&
       threads(rows, i.op) &&
       fx.speculatable(i) &&
@@ -1440,12 +1623,23 @@ const forward = (
       read === undefined ||
       read.i.k !== 'op' ||
       (read.i.op !== 'elem' && read.i.op !== 'at') ||
-      (staticOnly && read.i.op !== 'elem') ||
+      (mode === 'index' && read.i.op !== 'at') ||
+      (mode === 'static' && read.i.op !== 'elem') ||
       read.i.args[0] !== i.outs[0] ||
       readers.length !== 1 ||
       !reads(read.i, between(read, site), i.args[0])
     )
       continue;
+    if (mode === 'index') {
+      const n = constants.get(i.args[0]);
+      const k = constants.get(read.i.args[1]);
+      if (
+        typeof n !== 'number' ||
+        n <= 0 ||
+        (k !== undefined && elementIndex(n, k) === undefined)
+      )
+        continue;
+    }
     const n = bounded.has(i.args[0]) ? i.args[0] : guard(i, site, read);
     if (n !== false) plan.set(read.i, { source: i.regions[0], n: n ?? i.args[0] });
   }

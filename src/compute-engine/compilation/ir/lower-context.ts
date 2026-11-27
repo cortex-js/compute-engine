@@ -325,6 +325,8 @@ export function coversListed(a: Listed, p: Listed): boolean {
 export type Lowering = {
   readonly b: Builder;
   readonly rows: readonly OperatorRow[];
+  /** Finite bounds from effective declarations of scalar inputs to GLSL. */
+  readonly inputBounds: ReadonlyMap<V, readonly [number, number]>;
   readonly frames: Frame[];
   /** The local scopes of the engine around the node being lowered, the
    *  innermost last: the scope of each node with one (a `Block`), of a
