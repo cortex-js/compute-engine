@@ -67,6 +67,7 @@ import {
   isString,
   isSymbol,
 } from '../compute-engine/boxed-expression/type-guards.js';
+import { isLibraryOperator } from '../compute-engine/library-shadowing.js';
 
 import type { Fixit, ParsingDiagnostic } from './diagnostics.js';
 import {
@@ -1021,7 +1022,7 @@ function canonicalizationDiagnostics(
         string,
         ReturnType<ComputeEngine['box']>[]
       >();
-      indexBoxedErrors(boxed, boxedErrorsByJson);
+      indexBoxedErrors(boxed, boxedErrorsByJson, diagnostics);
       const firstTwin = (error: MathJsonExpression) =>
         boxedErrorsByJson.get(JSON.stringify(error))?.[0];
       const occurrences = new Map<string, number>();
@@ -3112,10 +3113,13 @@ function collectErrors(
  * the first entry with the first collected JSON error, which is the one the
  * dedup loop keeps. Children are pushed reversed because the stack pops from
  * the end.
+ *
+ * When checking a statement, the same walk also reports comparison warnings.
  */
 function indexBoxedErrors(
   root: ReturnType<ComputeEngine['box']>,
-  into: Map<string, ReturnType<ComputeEngine['box']>[]>
+  into: Map<string, ReturnType<ComputeEngine['box']>[]>,
+  warnings?: ParsingDiagnostic[]
 ): void {
   const stack = [root];
   while (stack.length > 0) {
@@ -3125,6 +3129,10 @@ function indexBoxedErrors(
       const twins = into.get(key);
       if (twins !== undefined) twins.push(node);
       else into.set(key, [node]);
+    }
+    if (warnings !== undefined) {
+      const warning = nominalTupleComparison(node);
+      if (warning !== undefined) warnings.push(warning);
     }
     // `ops` (functions) and `values` (dictionaries — the `let` initializer
     // shape `collectErrors` descends) live on narrowed interfaces this
@@ -3138,6 +3146,51 @@ function indexBoxedErrors(
     if (ops !== undefined)
       for (let i = ops.length - 1; i >= 0; i--) stack.push(ops[i]);
   }
+}
+
+/** A plain tuple and a tagged value of a nominal tuple type compare unequal
+ * even when their fields agree. */
+function nominalTupleComparison(
+  node: ReturnType<ComputeEngine['box']>
+): ParsingDiagnostic | undefined {
+  const head = node.operator;
+  if (
+    (head !== 'Equal' && head !== 'NotEqual') ||
+    !node.isCanonical ||
+    !isFunction(node) ||
+    node.nops !== 2 ||
+    !isLibraryOperator(node)
+  )
+    return undefined;
+
+  for (const [tuple, other] of [
+    [node.op1, node.op2],
+    [node.op2, node.op1],
+  ]) {
+    if (!isLibraryOperator(tuple, 'Tuple')) continue;
+    const range = sourceOffsetsOfBoxed(tuple);
+    if (range === undefined) continue;
+    const nominal = resolveTypeAlias(other.type.type);
+    if (
+      typeof nominal !== 'object' ||
+      nominal.kind !== 'reference' ||
+      nominal.alias ||
+      nominal.def === undefined
+    )
+      continue;
+    const payload = resolveTypeAlias(nominal.def);
+    if (typeof payload !== 'object' || payload.kind !== 'tuple') continue;
+    return {
+      severity: 'warning',
+      message: [
+        'nominal-tuple-comparison',
+        typeToString(nominal),
+        head === 'Equal' ? 'false' : 'true',
+      ],
+      range: [range[0], range[1], range[0]],
+    };
+  }
+  return undefined;
 }
 
 /**

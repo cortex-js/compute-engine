@@ -232,6 +232,12 @@ Write `1 => do { a = 2 }` to assign, or `1 => a == 2` if the comparison was mean
 
 The warning applies to the whole body of a `match` case, of a branch of a conditional expression and of a function, when the left side is a variable that the program declares, other than a constant, and nothing reads the value of the body. The body of a function counts as unread when each read of the function's name is a call whose value is discarded. A body whose value is read (`let r = match k { 1 => a = 2 }`, a lambda passed to `map` or `solve`, the last statement of the program) and an equation of a free name, of a constant, of a parameter or of a pattern variable get no warning. It is a warning: the program still runs.
 
+## `nominal-tuple-comparison`
+
+A tuple and a value of a nominal tuple type are unequal even when all their fields agree. After `type point = tuple<x: number, y: number>`, the comparison `point(1, 2) == (1, 2)` gives `false` and `point(1, 2) != (1, 2)` gives `true`.
+
+To compare points, use a point on both sides, as in `point(1, 2) == point(1, 2)`. The warning also applies to a point read from an array. The program still runs.
+
 ## `symbol-expected`
 
 A name was required at this position — after `let` or `const`, as a `for` loop's variable, as a function's or parameter's name — but something else was found there (`let = 42`).

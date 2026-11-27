@@ -28,6 +28,42 @@ describe('checkEpsil', () => {
     expect(codes('let a = 3\nfunction f(x) { x + a }\nf(2)')).toEqual([]);
   });
 
+  test('comparing a nominal array cell with a plain tuple warns at the tuple', () => {
+    const tuple = '(255, 255, 255, 255)';
+    const source = [
+      'type Pixel = tuple<r: integer, g: integer, b: integer, a: integer>',
+      `let px = arrayFrom([Pixel${tuple}], "Pixel")`,
+      `let eq = (i: integer) => px[i] == ${tuple}`,
+      `let ne = (i: integer) => ${tuple} != px[i]`,
+      `[eq(1), ne(1), px[1] == Pixel${tuple}, ${tuple} == ${tuple}]`,
+    ].join('\n');
+    const { diagnostics } = checkEpsil(new ComputeEngine(), source);
+    expect(diagnostics.map((d) => d.message)).toEqual([
+      ['nominal-tuple-comparison', 'Pixel', 'false'],
+      ['nominal-tuple-comparison', 'Pixel', 'true'],
+    ]);
+    for (const diagnostic of diagnostics) {
+      expect(diagnostic.severity).toBe('warning');
+      const [start, end] = diagnostic.range;
+      expect(source.slice(start, end)).toBe(tuple);
+    }
+    const result = executeEpsil(new ComputeEngine(), source);
+    expect(result.diagnostics).toEqual(diagnostics);
+    expect(result.value.json).toEqual([
+      'List',
+      'False',
+      'True',
+      'True',
+      'True',
+    ]);
+  });
+
+  test('a structural tuple alias does not warn about the tuple comparison', () => {
+    const source =
+      'type alias Pair = tuple<integer, integer>\nfunction eq(p: Pair) { p == (1, 2) }\neq((1, 2))';
+    expect(codes(source)).toEqual([]);
+  });
+
   test('the check assigns no value, defines no function and declares no type', () => {
     const ce = new ComputeEngine();
     const { diagnostics } = checkEpsil(

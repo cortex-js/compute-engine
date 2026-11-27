@@ -1376,7 +1376,9 @@ describe('EPSIL TYPE CONSTRUCTORS', () => {
         '(point(1, 2) == point(1, 2), point(1, 2) == (1, 2), polar(1, 2) == point(1, 2))',
       ].join('\n')
     );
-    expect(r.diagnostics).toEqual([]);
+    expect(r.diagnostics.map((d) => [d.severity, ...d.message])).toEqual([
+      ['warning', 'nominal-tuple-comparison', 'point', 'false'],
+    ]);
     expect(r.value.toString()).toBe('("True", "False", "False")');
   });
 });

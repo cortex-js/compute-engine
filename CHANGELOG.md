@@ -82,6 +82,10 @@
 
 ### Behavior Changes
 
+- **Epsil warns when comparing a nominal tuple value with a plain tuple.**
+  For an array of `Pixel` values, `px[i] == (255, 255, 255, 255)` compares
+  unequal. Use `px[i] == Pixel(255, 255, 255, 255)` to compare the fields.
+
 - **JavaScript compilation preserves empty list fields in nested records.**
   A callback returning a captured `Group([Leaf([1], [])])` now compiles
   when the empty field is declared `list<real>`. The result keeps the

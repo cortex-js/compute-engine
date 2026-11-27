@@ -582,13 +582,23 @@ height(2)
 
 Two values built by the same constructor are equal when their arguments are.
 Values built by different constructors are never equal, and neither is a
-constructed value and a plain one of the same shape:
+constructed value and a plain one of the same shape.
 
 ```epsil-live
 type point = tuple<x: number, y: number>
 type polar = tuple<r: number, t: number>
-(point(1, 2) == point(1, 2), point(1, 2) == (1, 2), polar(1, 2) == point(1, 2))
-// ➔ (true, false, false)
+(point(1, 2) == point(1, 2), polar(1, 2) == point(1, 2))
+// ➔ (true, false)
+```
+
+Epsil warns when a nominal tuple value is compared with a plain tuple.
+The comparison still runs. Use a value of the same nominal type on each
+side to compare their fields.
+
+```epsil
+type point = tuple<x: number, y: number>
+point(1, 2) == (1, 2)
+// ➔ false with a nominal-tuple-comparison warning
 ```
 
 ### Types are global, and re-running a cell
