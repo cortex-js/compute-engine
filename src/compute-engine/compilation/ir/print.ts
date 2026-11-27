@@ -725,6 +725,7 @@ export function printProgram(
             line(`  _run.addList(${use(l)}, ${k}_s, ${i.outs.length + m});`)
           );
           line('}');
+          line(`_run.finishLoop(${pooled.id});`);
         }
       } else if (i.k === 'region') {
         const [inner] = i.regions;
@@ -758,6 +759,7 @@ export function printProgram(
           line('} else {');
           line(`  ${out} = _run.joinSlices(${awaited(`${out}_p`)});`);
           line('}');
+          line(`_run.finishLoop(${pooled.id});`);
         }
       } else if (i.k === 'call' && i.outs.length === 2) {
         // The list, then its length (`lower-functions.ts`).

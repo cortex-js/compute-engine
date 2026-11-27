@@ -219,6 +219,7 @@ function settleAborted(task: QueuedTask): void {
 interface Slot {
   worker: WorkerLike;
   ready: Promise<void>;
+  readyForCalls: boolean;
   /** Settles `ready` with an error: a worker that failed to start, a version
    * mismatch, or `dispose()` while starting. */
   failReady: (e: Error) => void;
@@ -557,6 +558,7 @@ class KernelPoolImpl implements KernelPool, FitSlicePool, CallPool {
     const slot: Slot = {
       worker,
       ready,
+      readyForCalls: false,
       failReady,
       loaded: new Set(),
       batches: new Set(),
@@ -579,6 +581,7 @@ class KernelPoolImpl implements KernelPool, FitSlicePool, CallPool {
             this.fail(slot, new Error(message));
             return;
           }
+          slot.readyForCalls = true;
           resolveReady();
           return;
         }
@@ -835,6 +838,19 @@ class KernelPoolImpl implements KernelPool, FitSlicePool, CallPool {
         reject,
       })
     );
+  }
+
+  /** Read the likely setup cost without starting a worker or loading code. */
+  callWarmth(stored: StoredResult): CallPoolWarmth {
+    const id = this.kernelIds.get(stored);
+    // A dispatch can reach any slot when other calls are in flight.
+    for (let k = 0; k < this.size; k++)
+      if (!this.slots[k]?.readyForCalls || this.slots[k]?.dead)
+        return 'cold-pool';
+    return id !== undefined &&
+      this.slots.every((s) => s?.loaded.has(id) && !s.refused.has(id))
+      ? 'warm'
+      : 'cold-kernel';
   }
 
   /** The slot `pickSlot()` gives, or a rejected promise when it throws (the
@@ -1306,11 +1322,15 @@ export function fitSlicePool(
   return isKernelPool(pool) && pool.unusable === undefined ? pool : undefined;
 }
 
+export type CallPoolWarmth = 'cold-pool' | 'cold-kernel' | 'warm';
+
 /** The methods of a pool that `runAsync()` uses (`callPool()`). */
 export interface CallPool {
   /** The count of workers: `runAsync()` splits a loop into one sub-range
    * per worker. */
   readonly size: number;
+  /** Optional for a pool supplied by an older copy of the package. */
+  callWarmth?(stored: StoredResult): CallPoolWarmth;
   /** See `KernelPoolImpl.runCall`. */
   runCall(
     stored: StoredResult,

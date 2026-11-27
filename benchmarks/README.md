@@ -30,7 +30,7 @@ open-source comparators — against what a mature commercial CAS does.
 | **Scalar block accumulation** | `scalar-accumulator.ts [baseline-entry.ts]` | CE baseline · CE current | stdout |
 | **Compilation (legacy)** | `numeric-evaluation.ts` | CE interpreted · compiled-JS | stdout |
 | **Worker threads** | `workers/*.mts` | CE (self, serial vs worker threads) | stdout |
-| **Parallel loop scheduling** | `node --import tsx benchmarks/workers/parallel-for.mts` | CE source, `run()` vs forced `runAsync()` on eight warmed workers | stdout |
+| **Parallel loop scheduling** | `node --import tsx benchmarks/workers/parallel-for.mts` | CE source, serial vs fixed threshold vs first and steady automatic dispatch on eight prewarmed workers | stdout |
 | **Tycho document open** | `tycho-document-open/evaluate.ts`, `rebind.ts` | CE (self; replays the `evaluate` and `rebind` calls Tycho makes when it opens `art/2ki2hjsouf`, from `2ki2hjsouf.fixture.json.gz`; ROADMAP CE-535, CE-536) | stdout |
 | **Scalar arithmetic profile** | `scalar-arithmetic.mjs` | CE source or production bundle; timings, cache counts, inspector profiles | `scalar-arithmetic-2026-11-03.json`; evaluation-cache architecture §11 |
 | **Program regression diagnostics** | `program-regression-child.mjs`, `program-regression-symbolize.mjs` | Exact frozen production baseline/candidate; focused boxing, checking, real notebook reruns; separate CPU/allocation and calibrated scalar controls | Raw profiles and source-map proof; diagnostic wall times are not benchmark timings |

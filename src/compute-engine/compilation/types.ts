@@ -974,6 +974,7 @@ export type BroadcastAsyncReason =
  *   the workers cannot charge.
  * - `'below-threshold'`: the loop has fewer passes than
  *   `RunAsyncOptions.minPasses`.
+ * - `'estimated-cost'`: automatic dispatch chose the calling thread.
  * - `'too-large'`: the private lists of the workers (one copy of each list
  *   accumulator and list that the passes read per sub-range, plus the
  *   output slices of a comprehension)
@@ -987,6 +988,7 @@ export type ParallelLoopReason =
   | 'pool-unusable'
   | 'step-budget'
   | 'below-threshold'
+  | 'estimated-cost'
   | 'too-large'
   | 'pool-declined';
 
@@ -1013,6 +1015,11 @@ export interface ParallelLoopReport {
   passes: number;
   route: 'pool' | 'calling-thread';
   reason?: ParallelLoopReason;
+  /** Cost decision for automatic dispatch, when the loop met the pool limits. */
+  dispatch?: {
+    warmth: 'cold-pool' | 'cold-kernel' | 'warm';
+    basis: 'estimate' | 'measured' | 'sample';
+  };
 }
 
 /** The options of `runAsync()` (see `CompilationResult.runAsync`). */
@@ -1028,9 +1035,8 @@ export interface RunAsyncOptions {
    */
   signal?: AbortSignal;
   /**
-   * The smallest count of passes of a loop or comprehension that goes to the
-   * pool. A positive integer, default 20 000; another value rejects the
-   * promise with a `TypeError`.
+   * Override automatic cost-based dispatch with a minimum pass count.
+   * Supply a positive integer. Another value rejects with a `TypeError`.
    */
   minPasses?: number;
   /**
@@ -1577,8 +1583,8 @@ export type CompilationResult<
    * terms of an accumulator are added in another grouping: an accumulator
    * of integers whose values and partial sums stay within ±2^53 has the
    * value of `run()`; one of real numbers can differ from it, usually in the
-   * last bits, by an amount that depends on the count of workers (for one
-   * pool size, every run gives the same bits). The inputs are checked and
+   * last bits, by an amount that depends on the count of workers. Pooled
+   * runs at one pool size use the same grouping. The inputs are checked and
    * the value converted as `run()` does; an error of the program rejects the
    * promise (an error of a pass on a worker is the error that `run()` gives,
    * since the calling thread runs that sub-range again), and the call never
@@ -1598,8 +1604,9 @@ export type CompilationResult<
    * A compiled numeric parallel comprehension uses the same placement and
    * runtime rules and joins the consecutive output slices in domain order.
    * At run time, the loop goes to the pool when the pool is usable, the call
-   * is not inside `ce.withStepBudget()`, the count of passes is at least
-   * `options.minPasses`, and the private lists of all workers together hold
+   * is not inside `ce.withStepBudget()`, automatic dispatch estimates a
+   * benefit (or the pass count meets an explicit `options.minPasses`), and
+   * the private lists of all workers together hold
    * at most 16 million numbers. A worker stops at the deadline of the frame
    * that is current at the call (`ce.withTimeLimit()`), and the promise then
    * rejects with that frame's `CancellationError`.
@@ -1616,14 +1623,12 @@ export type CompilationResult<
   ) => Promise<unknown>;
 
   /**
-   * Whether `runAsync()` would send a parallel loop or comprehension to the
-   * pool now: the program has work that can run on the pool (also inside
-   * a function that it calls), the engine has a usable pool (`ce.workers`),
-   * the call is not inside `ce.withStepBudget()`, and `passes`, when it is
-   * given, is at least `minPasses` (default 20 000; a value that is not a
-   * positive integer throws a `TypeError`). It does not check the size limit
-   * of the private lists, the signal or the deadline, and a worker can still
-   * fail later. Present where `runAsync` is.
+   * Checks whether the program has work eligible for a usable pool and the
+   * current call is outside `ce.withStepBudget()`. With `passes`, estimates
+   * the automatic dispatch decision without the input sizes, or checks an
+   * explicit `minPasses` cutoff (a non-positive integer or a non-integer
+   * throws a `TypeError`). The actual route can also depend on inputs,
+   * sampling, the signal and the deadline. Present where `runAsync` is.
    */
   willParallelize?: (passes?: number, minPasses?: number) => boolean;
 

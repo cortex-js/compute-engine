@@ -1,11 +1,22 @@
-import { callPool, isKernelPool, type StoredResult } from '../kernel-pool.js';
+import {
+  callPool,
+  isKernelPool,
+  type CallPool,
+  type CallPoolWarmth,
+  type StoredResult,
+} from '../kernel-pool.js';
 import {
   CancellationError,
   frameWallDeadline,
   type DeadlineFrame,
 } from '../../common/interruptible.js';
 import { setReconstructionDigits } from './javascript-runtime.js';
-import type { ParallelLoopReason, RunAsyncOptions } from './types.js';
+import { ParallelDispatchHistory } from './parallel-dispatch.js';
+import type {
+  ParallelLoopReason,
+  ParallelLoopReport,
+  RunAsyncOptions,
+} from './types.js';
 
 //
 // The runtime of `runAsync()` on a `javascript` result (design:
@@ -17,9 +28,6 @@ import type { ParallelLoopReason, RunAsyncOptions } from './types.js';
 // partial sums of the sub-ranges to the accumulators.
 //
 
-/** The default of `RunAsyncOptions.minPasses`. */
-export const DEFAULT_MIN_PASSES = 20_000;
-
 /** The most numbers that the private lists of all the workers hold together
  * for one loop (the list accumulators and the lists that the body reads,
  * one copy per sub-range, plus the slices of a comprehension). */
@@ -27,6 +35,7 @@ const MAX_PRIVATE_NUMBERS = 16_000_000;
 
 /** A pool loop of the program, as `runAsync()` runs it. */
 export interface RunAsyncLoop {
+  readonly workPerPass: number;
   /** The worker returns one slice of a comprehension. */
   readonly comprehension?: boolean;
   /** The worker program as stored code: a lambda of `i0`, `i1`, `lo` and
@@ -86,6 +95,7 @@ export type RunState = {
     values: unknown[],
     lists: ArrayLike<number>[]
   ) => Promise<unknown[][]> | undefined;
+  finishLoop: (id: number) => void;
   addNumber: (acc: number, sums: unknown[][], j: number) => number;
   addList: (list: number[], sums: unknown[][], j: number) => ArrayLike<number>;
   joinSlices: (parts: unknown[][]) => number[];
@@ -138,19 +148,42 @@ export function numbersOf(v: unknown): number {
 }
 
 /** Check `minPasses` as `runAsync()` and `willParallelize()` do. */
-function checkMinPasses(where: string, minPasses: number | undefined): number {
-  const n = minPasses ?? DEFAULT_MIN_PASSES;
-  if (!Number.isInteger(n) || n < 1)
+function checkMinPasses(where: string, n: number | undefined): void {
+  if (n !== undefined && (!Number.isInteger(n) || n < 1))
     throw new TypeError(
-      `${where}: \`minPasses\` must be a positive integer (got ${String(minPasses)})`
+      `${where}: \`minPasses\` must be a positive integer (got ${String(n)})`
     );
-  return n;
 }
 
 /** The frame holds a step budget (`ce.withStepBudget()`), which workers
  * cannot charge. */
 const hasStepBudget = (frame: DeadlineFrame | undefined): boolean =>
   (frame?.budgets?.length ?? 0) > 0;
+
+type SizeBands = Map<string, ParallelDispatchHistory>;
+const profiles = new WeakMap<RunAsyncLoop, WeakMap<CallPool, SizeBands>>();
+const unobserved = new ParallelDispatchHistory();
+
+function historyFor(
+  loop: RunAsyncLoop,
+  pool: CallPool,
+  count: number,
+  numbers: number,
+  parts: number,
+  learn: boolean
+): ParallelDispatchHistory {
+  const key = `${Math.floor(Math.log2(count || 1))}:${Math.floor(Math.log2(numbers + 1))}:${parts}`;
+  let pools = profiles.get(loop);
+  let bands = pools?.get(pool);
+  let history = bands?.get(key);
+  if (history !== undefined) return history;
+  if (!learn) return unobserved;
+  if (pools === undefined) profiles.set(loop, (pools = new WeakMap()));
+  if (bands === undefined) pools.set(pool, (bands = new Map()));
+  if (bands.size === 64) bands.delete(bands.keys().next().value!);
+  bands.set(key, (history = new ParallelDispatchHistory()));
+  return history;
+}
 
 /**
  * Build the `willParallelize` entry of a `javascript` result: whether
@@ -161,13 +194,21 @@ export function makeWillParallelize(
   spec: RunAsyncSpec
 ): (passes?: number, minPasses?: number) => boolean {
   return (passes, minPasses) => {
-    const least = checkMinPasses('willParallelize', minPasses);
-    return (
-      spec.loops.length > 0 &&
-      callPool(spec.engine.workers) !== undefined &&
-      !hasStepBudget(spec.engine._deadlineFrame) &&
-      (passes === undefined || passes >= least)
-    );
+    checkMinPasses('willParallelize', minPasses);
+    const pool = callPool(spec.engine.workers);
+    if (!spec.loops.length || !pool || hasStepBudget(spec.engine._deadlineFrame))
+      return false;
+    if (passes === undefined) return true;
+    if (minPasses !== undefined) return passes >= minPasses;
+    if (!(passes >= 2 && passes <= 2 ** 32)) return false;
+    const parts = Math.min(pool.size, passes);
+    return spec.loops.some((loop) => {
+      const numbers = loop.comprehension ? passes : 0;
+      const warmth = pool.callWarmth?.(loop.stored) ?? 'cold-pool';
+      const history = historyFor(loop, pool, passes, numbers, parts, false);
+      return history.choose(passes, parts, numbers, loop.workPerPass, warmth, false)
+        .usePool;
+    });
   };
 }
 
@@ -182,9 +223,9 @@ export function makeRunAsync(
   let body: ((vars: unknown, run: RunState) => Promise<unknown>) | undefined;
   const engine = spec.engine;
   return async (inputs, options = {}) => {
-    const { signal, onLoop } = options;
+    const { signal, onLoop, minPasses } = options;
     if (signal?.aborted) throw signal.reason;
-    const minPasses = checkMinPasses('runAsync', options.minPasses);
+    checkMinPasses('runAsync', minPasses);
     if (spec.loops.length === 0 || spec.body === undefined)
       return spec.run(inputs);
     body ??= spec.body();
@@ -243,6 +284,15 @@ export function makeRunAsync(
         ? frameWallDeadline(frame)
         : undefined;
 
+    const timings = new Map<
+      number,
+      {
+        start: number;
+        count: number;
+        history: ParallelDispatchHistory;
+        route: 'serial' | CallPoolWarmth;
+      }
+    >();
     const state: RunState = {
       s: (p) => {
         leave();
@@ -259,6 +309,17 @@ export function makeRunAsync(
       addNumber,
       addList,
       joinSlices,
+      finishLoop: (id) => {
+        const timing = timings.get(id);
+        if (timing === undefined) return;
+        timings.delete(id);
+        if (!signal?.aborted)
+          timing.history.observe(
+            timing.route,
+            timing.count,
+            globalThis.performance.now() - timing.start
+          );
+      },
       loop: (id, lo, hi, values, lists) => {
         // An abort while the calling thread ran statements is seen here.
         if (signal?.aborted) throw signal.reason;
@@ -268,6 +329,7 @@ export function makeRunAsync(
         const n = Math.floor(hi - lo) + 1;
         if (!(n - 1 < 2 ** 32)) return undefined;
         const count = Math.max(0, n);
+        let dispatch: ParallelLoopReport['dispatch'];
         const report = (
           route: 'pool' | 'calling-thread',
           reason?: ParallelLoopReason
@@ -277,6 +339,7 @@ export function makeRunAsync(
             passes: count,
             route,
             ...(reason !== undefined ? { reason } : {}),
+            ...(dispatch === undefined ? {} : { dispatch }),
           });
         };
         // Here the program's state is set: the host's `onLoop` runs with
@@ -290,7 +353,9 @@ export function makeRunAsync(
         if (pool === undefined)
           return off(isKernelPool(workers) ? 'pool-unusable' : 'no-pool');
         if (hasStepBudget(frame)) return off('step-budget');
-        if (count < minPasses) return off('below-threshold');
+        if (minPasses !== undefined && count < minPasses)
+          return off('below-threshold');
+        if (count === 0) return off('estimated-cost');
         const parts = Math.min(pool.size, count);
         const numbers =
           (lists.reduce((a, l) => a + l.length, 0) +
@@ -298,6 +363,27 @@ export function makeRunAsync(
             parts +
           (record.comprehension ? count : 0);
         if (numbers > MAX_PRIVATE_NUMBERS) return off('too-large');
+        if (minPasses === undefined) {
+          const history = historyFor(record, pool, count, numbers, parts, true);
+          const warmth = pool.callWarmth?.(record.stored) ?? 'cold-pool';
+          const { usePool, basis } = history.choose(
+            count,
+            parts,
+            numbers,
+            record.workPerPass,
+            warmth,
+            true
+          );
+          dispatch = { warmth, basis };
+          if (!usePool) off('estimated-cost');
+          timings.set(id, {
+            start: globalThis.performance.now(),
+            count,
+            history,
+            route: usePool ? warmth : 'serial',
+          });
+          if (!usePool) return undefined;
+        }
         // One sub-range of pass counts for each worker, in order.
         const ranges: [number, number][] = [];
         for (let p = 0; p < parts; p++)
@@ -368,10 +454,15 @@ export function makeRunAsync(
             // No rerun once the deadline has passed.
             if (failed && deadline !== undefined && Date.now() >= deadline)
               throw deadlineError();
+            const timing = timings.get(id);
+            const startedReport = timing && onLoop ? globalThis.performance.now() : undefined;
             report(
               failed ? 'calling-thread' : 'pool',
               failed ? 'pool-declined' : undefined
             );
+            if (failed) timings.delete(id);
+            else if (timing !== undefined && startedReport !== undefined)
+              timing.start += globalThis.performance.now() - startedReport;
             // A sub-range that a worker did not complete runs on the calling
             // thread with the worker program, in the order of the
             // sub-ranges: the first one that throws gives the error of the

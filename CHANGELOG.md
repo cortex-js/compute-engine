@@ -57,6 +57,11 @@
 
 ### Improvements
 
+- **`runAsync()` chooses the worker pool by estimated cost.** It learns from
+  completed loops, accounting for worker startup and kernel loading
+  separately from warm calls. Pass `{ minPasses: 20000 }` to use an explicit
+  cutoff. `onLoop` reports the reason for automatic dispatch.
+
 - **JavaScript compiles numeric parallel comprehensions.** For example,
   `[k^2 parallel for k in 1..n]` builds a list in domain order. When a
   worker pool is available and the comprehension qualifies, `runAsync()`

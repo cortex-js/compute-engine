@@ -827,9 +827,10 @@ function compileIr(
   const asyncCode = slice.asyncCode;
   const runAsyncSpec: RunAsyncSpec = {
     run: run as (inputs: unknown) => unknown,
-    loops: (pool?.loops ?? []).map(({ loop, printed }) => {
+    loops: (pool?.loops ?? []).map(({ loop, printed, workPerPass }) => {
       const own = printed.preambleOnce;
       return {
+        workPerPass,
         ...(loop.k === 'region' ? { comprehension: true } : {}),
         stored: {
           runtimeVersion: RUNTIME_VERSION,

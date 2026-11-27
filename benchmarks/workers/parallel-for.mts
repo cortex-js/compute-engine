@@ -73,7 +73,9 @@ try {
   console.log(
     `${process.version} · ${cpus()[0].model} · ${workerCount} workers · machine precision · ${warmups} warmups, median of ${repetitions} interleaved runs`
   );
-  console.log('workload\tpasses\trun ms\tpool ms\tspeedup');
+  console.log(
+    'workload\tpasses\trun ms\tforced pool ms\tfixed threshold ms\tfirst auto ms (route/warmth)\tsteady auto ms (pool calls)'
+  );
   for (const { label, name, expression, counts } of cases) {
     const ce = new ComputeEngine({ workers: pool });
     ce.precision = 'machine';
@@ -97,6 +99,7 @@ try {
       }
       const serial: number[] = [];
       const parallel: number[] = [];
+      const fixedThreshold: number[] = [];
       for (let i = -warmups; i < repetitions; i++) {
         const t0 = performance.now();
         const baseline = runner.run(inputs);
@@ -107,18 +110,47 @@ try {
           onLoop: (report) => routes.push(report.route),
         });
         const t2 = performance.now();
+        const fixedResult = await runner.runAsync(inputs, { minPasses: 20_000 });
+        const t3 = performance.now();
         assert.deepEqual(routes, ['pool']);
         assert.deepEqual(baseline, expected);
         assert.deepEqual(result, expected);
+        assert.deepEqual(fixedResult, expected);
         if (i >= 0) {
           serial.push(t1 - t0);
           parallel.push(t2 - t1);
+          fixedThreshold.push(t3 - t2);
         }
       }
-      const run = median(serial);
-      const workers = median(parallel);
+      // A fresh compile has a new worker kernel, even on a prewarmed pool.
+      const automatic = compile(ce.box(call), { to: 'javascript', fallback: false });
+      assert(automatic.success && automatic.runAsync);
+      const automaticTimes: number[] = [];
+      let first = '';
+      let poolCalls = 0;
+      for (let i = 0; i <= warmups + repetitions; i++) {
+        let route: string | undefined;
+        let warmth: string | undefined;
+        const start = performance.now();
+        const value = await automatic.runAsync(inputs, {
+          onLoop: (report) => {
+            route = report.route;
+            warmth = report.dispatch?.warmth;
+          },
+        });
+        const elapsed = performance.now() - start;
+        assert(route && warmth);
+        assert.deepEqual(value, expected);
+        if (i === 0) first = `${elapsed.toFixed(3)} (${route}/${warmth})`;
+        else if (i > warmups) {
+          automaticTimes.push(elapsed);
+          if (route === 'pool') poolCalls++;
+        }
+      }
+      const run = median(serial).toFixed(3);
+      const forced = median(parallel).toFixed(3);
       console.log(
-        `${label}\t${n}\t${run.toFixed(3)}\t${workers.toFixed(3)}\t${(run / workers).toFixed(2)}x`
+        `${label}\t${n}\t${run}\t${forced}\t${median(fixedThreshold).toFixed(3)}\t${first}\t${median(automaticTimes).toFixed(3)} (${poolCalls}/${repetitions})`
       );
     }
   }

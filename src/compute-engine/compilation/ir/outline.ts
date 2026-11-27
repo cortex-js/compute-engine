@@ -54,6 +54,8 @@ function isParallelWork(i: Instr): i is ParallelWork {
 export type PoolLoop = {
   /** The loop of the program. */
   readonly loop: ParallelWork;
+  /** Approximate work of one pass before any timing has been observed. */
+  readonly workPerPass: number;
   /** The values of the program that a worker program reads, after `i0`,
    *  `i1` and `lo`, in the order of its parameters. */
   readonly passed: readonly V[];
@@ -106,6 +108,34 @@ export function outline(
   }
   const fns = new Map(p.functions.map((f) => [f.name, f]));
   const { def, uses } = useIndex(p);
+  const workByFunction = new Map<string, number>();
+  const workOf = (r: Region): number =>
+    r.body.reduce((work, i) => {
+      if (i.k === 'loop') {
+        const lo = def.get(i.lo);
+        const hi = def.get(i.hi);
+        const count =
+          lo?.k === 'const' && hi?.k === 'const'
+            ? Math.max(0, Number(hi.value.value) - Number(lo.value.value) + 1)
+            : 16;
+        return work + 1 + Math.min(128, count) * (1 + workOf(i.body));
+      }
+      if (i.k === 'if')
+        return work + 1 + Math.max(workOf(i.then), workOf(i.else)) / 4;
+      if (i.k === 'call') {
+        let cost = workByFunction.get(i.fn);
+        if (cost === undefined) {
+          workByFunction.set(i.fn, 32);
+          const f = fns.get(i.fn);
+          cost = f === undefined ? 32 : workOf(f.body);
+          workByFunction.set(i.fn, cost);
+        }
+        return work + 4 + cost;
+      }
+      if (i.k === 'region')
+        return work + 16 * (1 + i.regions.reduce((n, x) => n + workOf(x), 0));
+      return work + (i.k === 'const' ? 0 : 1);
+    }, 0);
   type Calls = { fn: string; waiting: boolean }[];
   const calls = new Map<string, Calls>();
   /** The marked loops at a waiting position of each function, not yet
@@ -407,7 +437,7 @@ export function outline(
     );
     if (!isShippableCode(`${printed.preambleOnce}\n${printed.code}`))
       return 'unshippable-body';
-    return { loop, passed, lists, printed };
+    return { loop, passed, lists, printed, workPerPass: 1 + workOf(region) };
   }
 
   /**

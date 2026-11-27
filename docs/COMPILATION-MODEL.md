@@ -795,12 +795,21 @@ asynchronous text of the same IR, which awaits at such a loop.
   makes a compilation decline.
 - **At run time.** The loop goes to the pool when the pool is usable, the
   call is not inside `ce.withStepBudget()` (a worker cannot charge the
-  caller's steps), the count of passes is at least `minPasses` (default
-  20 000), and the private lists of all workers (each list accumulator, and
+  caller's steps), the dispatch policy selects the pool, and the private
+  lists of all workers (each list accumulator, and
   each list that the passes read, once per sub-range) hold at most 16 million
   numbers. Otherwise it runs in order, and `onLoop` reports the reason
   (`'no-pool'`, `'pool-unusable'`, `'step-budget'`, `'below-threshold'`,
-  `'too-large'`).
+  `'too-large'`, `'estimated-cost'`).
+- **Automatic dispatch.** With `minPasses` omitted, dispatch starts from an IR
+  estimate of the work per pass, the size of the data copied, and whether the
+  pool and kernel are warm. It learns from successful runs of the same loop
+  and pool at comparable pass and data sizes. Worker timings include queueing,
+  copying and merging. Cold-pool, cold-kernel and warm-kernel samples are
+  kept separately. The policy favors the calling thread near the crossover
+  and occasionally samples the other route. An explicit positive
+  `minPasses` uses the stated cutoff. `onLoop` supplies `dispatch.warmth`
+  and `dispatch.basis` for automatic cost decisions.
 - **The merge.** The passes are split into one sub-range of consecutive
   passes per worker. Each worker runs a program of the IR of the loop body
   from `-0` (the identity of `+`, so a cell that no pass writes adds
@@ -808,7 +817,7 @@ asynchronous text of the same IR, which awaits at such a loop.
   accumulators in the order of the sub-ranges. An integer accumulator whose
   values stay within 2^53 has the value of `run()`; a real one can differ
   from it by the grouping of the sum (a different order of summation, a
-  caveat above), and for one pool size has the same bits at every run.
+  caveat above). Pooled runs at one pool size use the same grouping.
 - **Errors.** An error of a pass on a worker, a failed worker or a pool that
   turns out unusable sends the sub-range back to the calling thread, which
   runs it again in the order of the sub-ranges, so the error is the one
@@ -828,10 +837,10 @@ asynchronous text of the same IR, which awaits at such a loop.
   until the promise settles: the program reads them after a wait, and the
   value is otherwise unspecified.
 
-`willParallelize(passes?, minPasses?)` answers whether `runAsync()` would
-send a loop of this program to the pool now: the program has a pool loop,
-the pool is usable, no step budget is current, and `passes`, when given, is
-at least `minPasses`. A stored result loaded with
+`willParallelize()` checks whether the program has a pool loop, the pool
+is usable and no step budget is current. With `passes`, it also estimates
+the cost decision for any eligible loop without knowing the input sizes.
+Pass `minPasses` to check an explicit cutoff. A stored result loaded with
 `createJavaScriptRuntime()` has no asynchronous text: its `runAsync()` is
 `run()`.
 

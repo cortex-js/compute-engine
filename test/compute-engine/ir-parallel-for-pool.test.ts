@@ -20,6 +20,7 @@ import {
 import { executeEpsil } from '../../src/epsil/execute-epsil';
 import { callPool } from '../../src/compute-engine/kernel-pool';
 import { numbersOf } from '../../src/compute-engine/compilation/run-async';
+import { ParallelDispatchHistory } from '../../src/compute-engine/compilation/parallel-dispatch';
 import {
   RUNTIME_VERSION,
   setReconstructionDigits,
@@ -157,6 +158,7 @@ async function routed(
 ): Promise<{ value: unknown; reports: ParallelLoopReport[] }> {
   const reports: ParallelLoopReport[] = [];
   const value = await code.runAsync(inputs, {
+    minPasses: 20_000,
     ...options,
     onLoop: (r) => {
       reports.push(r);
@@ -209,6 +211,60 @@ const LONG = `function f(n: integer) -> integer {
   s
 }`;
 
+describe('Automatic dispatch', () => {
+  test('keeps a cheap loop serial and distinguishes pool and kernel warm-up', async () => {
+    const workers = watchedPool();
+    pools.push(workers.pool);
+    const cheap = program(
+      `function f(n: integer) -> integer {
+        let s: integer = 0
+        parallel for k in 1..n { s += k }
+        s
+      }`,
+      { n: 'integer' },
+      { pool: workers.pool }
+    ).code;
+    const cold = await routed(cheap, { n: 20_000 }, { minPasses: undefined });
+    expect(cold.value).toBe(200_010_000);
+    expect(cold.reports).toEqual([{
+      ...off(20_000, 'estimated-cost'),
+      dispatch: { warmth: 'cold-pool', basis: 'estimate' },
+    }]);
+    expect(workers.log.created).toBe(0);
+    await workers.pool.prewarm();
+    const heavy = program(LONG, { n: 'integer' }, { pool: workers.pool }).code;
+    const inputs = { n: 10_000 };
+    const first = await routed(heavy, inputs, { minPasses: undefined });
+    const second = await routed(heavy, inputs, { minPasses: undefined });
+    expect(first.value).toBe(heavy.run(inputs));
+    expect(second.value).toBe(first.value);
+    expect(first.reports[0]).toMatchObject({
+      route: 'pool',
+      dispatch: { warmth: 'cold-kernel', basis: 'estimate' },
+    });
+    expect(second.reports[0]).toMatchObject({ dispatch: { warmth: 'warm' } });
+    workers.pool.dispose();
+    const disposed = await routed(cheap, { n: 20_000 }, { minPasses: undefined });
+    expect(disposed.reports[0].dispatch?.warmth).toBe('cold-pool');
+  }, 60_000);
+
+  test('cold samples stay separate and near-threshold calls explore without changing preflight', () => {
+    const history = new ParallelDispatchHistory();
+    const choose = (warmth: 'cold-kernel' | 'warm', explore = false) =>
+      history.choose(4_000, 4, 0, 200, warmth, explore);
+    history.observe('serial', 4_000, 0.8);
+    history.observe('cold-kernel', 4_000, 7);
+    expect(choose('cold-kernel')).toEqual({ usePool: false, basis: 'measured' });
+    expect(choose('warm')).toEqual({ usePool: true, basis: 'measured' });
+    history.observe('warm', 4_000, 0.72);
+    for (let k = 0; k < 15; k++) {
+      expect(choose('warm', true)).toEqual({ usePool: false, basis: 'measured' });
+      expect(choose('warm')).toEqual({ usePool: false, basis: 'measured' });
+    }
+    expect(choose('warm', true)).toEqual({ usePool: true, basis: 'sample' });
+  });
+});
+
 describe('A parallel for on the pool', () => {
   test('the witness-shaped step: a histogram list local and a scalar sum', async () => {
     const { code } = program(HISTOGRAM, {
@@ -216,7 +272,6 @@ describe('A parallel for on the pool', () => {
       n: 'integer',
     });
     const H = new Array(15).fill(0);
-    // The default `minPasses` is 20 000.
     await agrees(code, { H, n: 30_000 }, [pool(30_000)]);
     expect(H.every((x) => x === 0)).toBe(true);
     expect(shared.log.calls.length).toBe(2);
@@ -351,7 +406,7 @@ describe('A parallel for on the pool', () => {
     const { value, reports } = await routed(code, { n: 40_000 });
     expect(reports).toEqual([pool(40_000)]);
     expect(Math.abs((value as number) - exact) / exact).toBeLessThan(1e-12);
-    const again = await code.runAsync({ n: 40_000 });
+    const again = await code.runAsync({ n: 40_000 }, { minPasses: 20_000 });
     expect(Object.is(again, value)).toBe(true);
   }, 60_000);
 
@@ -406,8 +461,9 @@ describe('A parallel for on the pool', () => {
       n: 'integer',
     });
     expect(code.willParallelize()).toBe(true);
-    expect(code.willParallelize(20_000)).toBe(true);
-    expect(code.willParallelize(19_999)).toBe(false);
+    expect(code.willParallelize(1)).toBe(false);
+    expect(code.willParallelize(20_000, 20_000)).toBe(true);
+    expect(code.willParallelize(19_999, 20_000)).toBe(false);
     expect(code.willParallelize(10, 10)).toBe(true);
     expect(code.willParallelize(9, 10)).toBe(false);
     expect(() => code.willParallelize(10, 0)).toThrow(TypeError);
@@ -735,7 +791,7 @@ describe('Errors and cancellation', () => {
     expect((error as Error).message).toMatch(/out-of-range/);
     const reports: ParallelLoopReport[] = [];
     const rejected = await code
-      .runAsync(inputs, { onLoop: (r) => reports.push(r) })
+      .runAsync(inputs, { minPasses: 20_000, onLoop: (r) => reports.push(r) })
       .catch((e) => e);
     expect(rejected).toBeInstanceOf(Error);
     expect((rejected as Error).message).toBe((error as Error).message);
@@ -801,6 +857,7 @@ describe('Errors and cancellation', () => {
       two.runAsync(
         { n: 20_000 },
         {
+          minPasses: 20_000,
           signal: between.signal,
           onLoop: (r) => {
             seen.push(r);
@@ -826,7 +883,10 @@ describe('Errors and cancellation', () => {
       .withTimeLimit(
         { ms, label: 'outer' },
         () =>
-          code.runAsync(inputs, { onLoop: (r) => reports.push(r) }) as never
+          code.runAsync(inputs, {
+            minPasses: 20_000,
+            onLoop: (r) => reports.push(r),
+          }) as never
       )
       .then(
         () => undefined,
@@ -966,8 +1026,8 @@ describe('The state of a call', () => {
     // The reject path: an abort during both waits.
     const ctl = new AbortController();
     const pending = [
-      fifteen.runAsync(inputs, { signal: ctl.signal }),
-      seventeen.runAsync(inputs, { signal: ctl.signal }),
+      fifteen.runAsync(inputs, { signal: ctl.signal, minPasses: 20_000 }),
+      seventeen.runAsync(inputs, { signal: ctl.signal, minPasses: 20_000 }),
     ];
     ctl.abort('stop');
     await expect(Promise.all(pending)).rejects.toBe('stop');
@@ -992,7 +1052,7 @@ describe('The state of a call', () => {
     const expected = code.run({ n: 20_000 });
     const pending = ce.withTimeLimit(
       { ms: 60_000, label: 'mine' },
-      () => code.runAsync({ n: 20_000 }) as never
+      () => code.runAsync({ n: 20_000 }, { minPasses: 20_000 }) as never
     ) as Promise<unknown>;
     ce._deadlineFrame = other;
     const value = await pending;
@@ -1009,7 +1069,7 @@ describe('The state of a call', () => {
       { H: 'list<integer>', n: 'integer' },
       { ce: new ComputeEngine() }
     );
-    const p2 = failing.code.runAsync({ H: [0], n: 20_000 });
+    const p2 = failing.code.runAsync({ H: [0], n: 20_000 }, { minPasses: 20_000 });
     failing.ce._deadlineFrame = other;
     await expect(p2).rejects.toThrow(/out-of-range/);
     expect(failing.ce._deadlineFrame).toBe(other);
@@ -1021,8 +1081,8 @@ describe('The state of a call', () => {
     const seventeen = at(300).code;
     const before = current();
     const [c1, c2] = [new AbortController(), new AbortController()];
-    const p1 = fifteen.runAsync(inputs, { signal: c1.signal });
-    const p2 = seventeen.runAsync(inputs, { signal: c2.signal });
+    const p1 = fifteen.runAsync(inputs, { signal: c1.signal, minPasses: 20_000 });
+    const p2 = seventeen.runAsync(inputs, { signal: c2.signal, minPasses: 20_000 });
     let between: number | undefined;
     c1.abort('one');
     queueMicrotask(() => (between = current()));
