@@ -78,6 +78,14 @@
 
 ### Improvements
 
+- **`epsilProgramSites()` takes the type and protocol names of the host.**
+  The options `typeNames` and `protocolNames` are added to the names that
+  the engine declares, as in `epsilCompletions()`. A host that runs the
+  program on another engine passes them, so that a statement such as
+  `let c: Figure = circle(k)` keeps its sites when only that engine
+  declares `Figure`. Without them, the statement is a parse error and has
+  no sites (CE-1907).
+
 - **In Epsil, a library spelling at the head of a call pattern names the
   library operator.** In `match sin(1) { sin(a) => a }`, the pattern
   `sin(a)` matches and gives `1`; it matched only a call of an operator named

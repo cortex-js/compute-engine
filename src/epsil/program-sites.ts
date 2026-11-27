@@ -256,13 +256,26 @@ function treeFacts(
  * error, the sites are those of the tree that the parser recovered; a
  * `#error` directive gives an empty result.
  *
+ * An annotation may name a type or a protocol that the engine declares, or
+ * one of `options.typeNames` and `options.protocolNames`, which are added to
+ * those of the engine, as in `epsilCompletions()`. A host that runs the
+ * program on another engine passes the names that engine declares. A
+ * statement whose annotation names an unknown type is a parse error and has
+ * no sites.
+ *
  * An expired time limit of `ce` (`ce.withTimeLimit()`) is thrown to the
  * caller as a `CancellationError`.
  */
 export function epsilProgramSites(
   ce: ComputeEngine,
   source: string,
-  options?: Pick<ExecuteEpsilOptions, 'url' | 'parseLatex' | 'allowHostPragmas'>
+  options?: Pick<
+    ExecuteEpsilOptions,
+    'url' | 'parseLatex' | 'allowHostPragmas'
+  > & {
+    typeNames?: readonly string[];
+    protocolNames?: readonly string[];
+  }
 ): EpsilProgramSites {
   const result: EpsilProgramSites = {
     bindings: [],
@@ -275,8 +288,11 @@ export function epsilProgramSites(
     [ast] = parseEpsil(source, options?.url, {
       parseLatex: islandParser(ce, options?.parseLatex),
       allowHostPragmas: options?.allowHostPragmas ?? false,
-      typeNames: ce._typeResolver.names,
-      protocolNames: Object.keys(ce._protocolRegistry),
+      typeNames: [...ce._typeResolver.names, ...(options?.typeNames ?? [])],
+      protocolNames: [
+        ...Object.keys(ce._protocolRegistry),
+        ...(options?.protocolNames ?? []),
+      ],
       sumVariants: sumVariantNames(ce),
       deadline: ce._deadlineFrame,
       isLibraryFunction: (name) => ce._isLibraryFunction(name),

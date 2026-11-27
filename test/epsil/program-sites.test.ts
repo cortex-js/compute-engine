@@ -463,6 +463,29 @@ describe('EPSIL PROGRAM SITES — bindings', () => {
     expect(roles).toContain('a@103 reference local a');
   });
 
+  test('a type or protocol name of the host is known to an annotation', () => {
+    const source = 'let c: Figure = circle(k)\nlet d: number = c';
+    const ce = cellEngine();
+    // Without the option, the first statement is a parse error, with no
+    // sites.
+    expect(shape(source, epsilProgramSites(ce, source))).toEqual([
+      'd@30 definition program d',
+      'c@42 read unresolved c',
+    ]);
+    const result = epsilProgramSites(ce, source, {
+      typeNames: ['Figure'],
+      protocolNames: ['Shape'],
+    });
+    expect(shape(source, result)).toEqual([
+      'c@4 definition program c',
+      'circle@16 read unresolved circle',
+      'k@23 read external k',
+      'd@30 definition program d',
+      'c@42 read program c',
+    ]);
+    expect(ce.lookupDefinition('Figure')).toBeUndefined();
+  });
+
   test('the query declares nothing on the engine', () => {
     const ce = cellEngine();
     epsilProgramSites(ce, 'let fresh = 1\ntype t = integer\nfresh');

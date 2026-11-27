@@ -215,6 +215,15 @@ visible, which is an `external` binding when the program has none. The
 collection of a `for` clause is read outside its loop: in
 `for n in 1..n`, the second `n` is the binding around the loop.
 
+An annotation may name a type or a protocol that `ce` declares. A host that
+runs the program on another engine passes the names that engine declares
+in the options `typeNames` and `protocolNames`, which are added to those
+of `ce`, as for `epsilCompletions()`. A statement whose annotation names an
+unknown type is a parse error and has no sites:
+`epsilProgramSites(ce, "let c: Figure = circle(k)", { typeNames: ["Figure"] })`
+gives the sites of `c`, `circle` and `k`, and without the option it gives
+none.
+
 In `match 5 { _k => k }`, the definition site spans `_k` and the arm reads
 the local binding `k`. The same rule applies to rest captures such as
 `..._t` and wildcard call heads such as `_f(x)`. The rest definition
