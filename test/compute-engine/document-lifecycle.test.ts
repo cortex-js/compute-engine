@@ -4,8 +4,10 @@ import {
   createDocumentEnvironment,
   type DeclareDocumentInput,
   type DocumentImports,
+  type DocumentRowTypeContract,
   type DocumentSourceRow,
   type DocumentSyntax,
+  type DocumentTypePolicy,
   type Expression,
   type InspectableScope,
 } from '../../src/compute-engine';
@@ -1482,6 +1484,159 @@ describe('the result of a recursive function with no stated result', () => {
     expect(typeOf(revision, 'L')).toBe('(unknown) pure -> list<any>');
     expect(call(revision, ['L', 3])).toBe('["List",1,2,3]');
     revision.dispose();
+  });
+});
+
+describe('Document type policy', () => {
+  const fromCallSites: DocumentTypePolicy = ({ definitions }) =>
+    new Map(definitions.flatMap((row) => {
+      const type = row.callSiteTypes?.[0];
+      return type === undefined ? [] : [[row.id, { formalTypes: { [row.params[0]]: type } }]];
+    }));
+
+  function document() {
+    const ce = new ComputeEngine();
+    const environment = createDocumentEnvironment(ce, () => {});
+    const imports = environment.createImports(() => {});
+    return {
+      ce,
+      prepare(rows: DocumentSourceRow[], typePolicy = fromCallSites) {
+        return imports.prepare(rows, latexSyntax(ce), undefined, { typePolicy });
+      },
+      dispose() {
+        imports.dispose();
+        environment.dispose();
+      },
+    };
+  }
+
+  test('scalar-to-point edits and their reversal agree with a fresh document', () => {
+    const editing = document();
+    function prepare(doc: ReturnType<typeof document>, argument: string) {
+      const revision = doc.prepare([
+        { id: 'f', latex: 'f(p)=p' },
+        { id: 'v', latex: 'v=f(' + argument + ')' },
+        { id: 'bad', latex: 'b(q)=q', formalTypes: { q: 'bad-type(' } },
+      ]);
+      try {
+        return {
+          contracts: [...revision.promotedContracts!],
+          type: String(doc.ce.expr('f', { scope: revision.scope }).type),
+          diagnostics: [...revision.rowErrors].map(([id, error]) => [id, error.json]),
+          value: doc.ce.expr('v', { scope: revision.scope }).evaluate().json,
+        };
+      } finally {
+        revision.dispose();
+      }
+    }
+    try {
+      for (const [argument, expectedType, expectedValue] of [
+        ['2', 'real', 2],
+        ['(1,2)', 'tuple<real, real>', ['Tuple', 1, 2]],
+        ['2', 'real', 2],
+      ] as const) {
+        const fresh = document();
+        try {
+          const result = prepare(editing, argument);
+          expect(result).toEqual(prepare(fresh, argument));
+          expect(result.contracts).toEqual([['f', { formalTypes: { p: expectedType } }]]);
+          expect(result.diagnostics.map(([id]) => id)).toEqual(['bad']);
+          expect(result.value).toEqual(expectedValue);
+        } finally {
+          fresh.dispose();
+        }
+      }
+    } finally {
+      editing.dispose();
+    }
+  });
+
+  test('uses the types of newly typed callers as further evidence', () => {
+    const doc = document();
+    const revision = doc.prepare([
+      { id: 'd', latex: 'd(p)=\\sqrt{p.x^2+p.y^2}' },
+      { id: 'g', latex: 'g(q)=d(q)' },
+      { id: 'v', latex: 'v=g((3,4))' },
+    ]);
+    try {
+      expect(revision.rowErrors.size).toBe(0);
+      expect(revision.promotedContracts!.get('d')).toEqual({
+        formalTypes: { p: 'tuple<real, real>' },
+      });
+      expect(revision.promotedContracts!.get('g')).toEqual({
+        formalTypes: { q: 'tuple<real, real>' },
+      });
+      expect(doc.ce.expr('v', { scope: revision.scope }).evaluate().json).toBe(5);
+    } finally {
+      revision.dispose();
+      doc.dispose();
+    }
+  });
+
+  test('backs out contracts that invalidate a definition or formula and keeps independent ones', () => {
+    const doc = document();
+    const revision = doc.prepare([
+      { id: 'f', latex: 'f(p)=p' },
+      { id: 'plot', latex: 'f(2)' },
+      { id: 'g', latex: 'g(p)=p' },
+      { id: 'a', latex: 'a=g(2)' },
+      { id: 'h', latex: 'h(p)=p+1' },
+      { id: 'b', latex: 'b=h(2)' },
+      { id: 'k', latex: 'k(q)=q', formalTypes: { q: 'integer' } },
+      { id: 'r', latex: 'r(q)=q+1' },
+    ], () => new Map<string, DocumentRowTypeContract>([
+      ['f', { formalTypes: { p: 'tuple<real, real>' } }],
+      ['g', { formalTypes: { p: 'tuple<real, real>' } }],
+      ['h', { formalTypes: { p: 'real' } }],
+      ['k', { formalTypes: { q: 'string' } }],
+      ['r', { formalTypes: { q: 'real' }, resultType: 'string' }],
+    ]));
+    try {
+      expect(revision.rowErrors.size).toBe(0);
+      expect([...revision.promotedContracts!]).toEqual([
+        ['h', { formalTypes: { p: 'real' } }],
+      ]);
+      const scope = revision.scope;
+      expect(doc.ce.parse('f(2)', { scope }).evaluate().json).toBe(2);
+      expect(doc.ce.expr('a', { scope }).evaluate().json).toBe(2);
+      expect(doc.ce.expr('b', { scope }).evaluate().json).toEqual(3);
+      expect(String(doc.ce.expr('k', { scope }).type)).toContain('integer');
+    } finally {
+      revision.dispose();
+      doc.dispose();
+    }
+  });
+
+  test('the host can choose between elementwise calls and whole-list arguments', () => {
+    const doc = document();
+    const rows = [
+      { id: 'f', latex: 'f(p)=[p,p]' },
+      { id: 'v', latex: 'v=f([1,2])' },
+    ];
+    try {
+      for (const [type, value] of [
+        ['real', ['List', ['List', 1, 1], ['List', 2, 2]]],
+        ['list<real>', ['List', ['List', 1, 2], ['List', 1, 2]]],
+      ] as const) {
+        const revision = doc.prepare(rows, ({ definitions }) => {
+          if (definitions[0].callSiteTypes?.[0] === undefined) return new Map();
+          return new Map([['f', { formalTypes: { p: type } }]]);
+        });
+        try {
+          expect(revision.rowErrors.size).toBe(0);
+          expect(revision.promotedContracts!.get('f')).toEqual({
+            formalTypes: { p: type },
+          });
+          expect(
+            doc.ce.expr('v', { scope: revision.scope }).evaluate().json
+          ).toEqual(value);
+        } finally {
+          revision.dispose();
+        }
+      }
+    } finally {
+      doc.dispose();
+    }
   });
 });
 

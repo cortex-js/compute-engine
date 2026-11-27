@@ -318,9 +318,14 @@ export type {
   DocumentImports,
 } from './compute-engine/document-preparation/document-environment.js';
 export type {
+  DocumentRowTypeContract,
   DocumentSourceRow,
   DocumentSyntax,
   PreparedDocumentDefinition,
   PreparedDocumentRevision,
   PreparedDocumentValuePass,
 } from './compute-engine/document-preparation/prepare-document.js';
+export type {
+  DocumentTypeEvidence,
+  DocumentTypePolicy,
+} from './compute-engine/document-preparation/type-policy.js';

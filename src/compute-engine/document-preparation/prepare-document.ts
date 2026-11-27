@@ -64,6 +64,9 @@ export type DocumentSourceRow = {
   valueType?: string;
   effects?: 'pure' | 'random';
 };
+export type DocumentRowTypeContract = Readonly<
+  Pick<DocumentSourceRow, 'formalTypes' | 'resultType' | 'valueType'>
+>;
 export interface PreparedDocumentDefinition {
   readonly id: string;
   readonly name: string;
@@ -171,6 +174,8 @@ export interface PreparedDocumentRevision {
    * may not run, and its arm is a base case. */
   readonly rowErrors: ReadonlyMap<string, Expression>;
   readonly definitions: readonly PreparedDocumentDefinition[];
+  /** Additional type annotations accepted from the policy, by row ID. */
+  readonly promotedContracts?: ReadonlyMap<string, DocumentRowTypeContract>;
   /** Start after input writes. Use this pass only for the current redraw. */
   createValuePass(names: ReadonlySet<string>): PreparedDocumentValuePass;
   collectionWriteError(name: string, value: Expression): string | undefined;
@@ -805,7 +810,7 @@ export function prepareDocument(
   input: readonly DocumentSourceRow[],
   syntax: DocumentSyntax,
   writableNames?: ReadonlySet<string>,
-  releaseImports?: () => void
+  validFormulaRows?: Set<string>
 ): PreparedDocumentRevision {
   const ids = new Set<string>();
   const rows: DraftRow[] = input.map((row) => {
@@ -1840,6 +1845,8 @@ export function prepareDocument(
       // valid, gives no evidence. An argument that reads a field axis or a
       // field value is open: its value depends on the point of the field. A
       // name that a binder around it binds (`\sum_{t=1}^{3}`) is not a read.
+      // The type policy also checks formulas that only read document values,
+      // since a promoted value contract can invalidate one of those reads.
       const readsField = (
         expr: Expression,
         bound: ReadonlySet<string>
@@ -1860,9 +1867,13 @@ export function prepareDocument(
         return expr.ops.some((op) => readsField(op, inner));
       };
       for (const row of rows) {
+        if (row.role !== 'formula') continue;
+        const refs = rowReferences.get(row.id)!;
+        const readsCallable = refs.some((ref) => names.callables.has(ref));
         if (
-          row.role !== 'formula' ||
-          !rowReferences.get(row.id)!.some((ref) => names.callables.has(ref))
+          !readsCallable &&
+          (validFormulaRows === undefined ||
+            !refs.some((ref) => declarations.has(ref)))
         )
           continue;
         checkDeadline(ce._deadlineFrame);
@@ -1871,6 +1882,8 @@ export function prepareDocument(
           ce._inScope(probe, () => {
             const expr = ce.box(parsed.get(row.id)!);
             if (!expr.isValid) return;
+            validFormulaRows?.add(row.id);
+            if (!readsCallable) return;
             // A row adds its evidence only when its walk finishes.
             const read = emptyCallSiteEvidence(arities);
             readCallSites(ce, [expr], arities, read, readsField);
@@ -1989,11 +2002,7 @@ export function prepareDocument(
           rowErrors.clear();
           preparedDefinitions.length = 0;
           declarations.clear();
-          try {
-            scope.dispose();
-          } finally {
-            releaseImports?.();
-          }
+          scope.dispose();
         },
       };
     });

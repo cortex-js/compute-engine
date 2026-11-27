@@ -9,6 +9,10 @@ import {
   type DocumentSyntax,
   type PreparedDocumentRevision,
 } from './prepare-document.js';
+import {
+  prepareWithTypePolicy,
+  type DocumentTypePolicy,
+} from './type-policy.js';
 
 export type DeclareDocumentInput = (name: string, contract: string) => void;
 
@@ -22,11 +26,15 @@ export interface DocumentEnvironment {
 }
 
 export interface DocumentImports {
-  /** Prepare an independent revision using these imports. */
+  /** Prepare an independent revision using these imports. If supplied, the
+   * type policy proposes additional row contracts from this preparation's
+   * evidence. The revision reports the accepted proposals in
+   * `promotedContracts`. */
   prepare(
     rows: readonly DocumentSourceRow[],
     syntax: DocumentSyntax,
-    writableNames?: ReadonlySet<string>
+    writableNames?: ReadonlySet<string>,
+    options?: { readonly typePolicy?: DocumentTypePolicy }
   ): PreparedDocumentRevision;
   /** Close this factory. Existing revisions retain their imports until disposed. */
   dispose(): void;
@@ -150,17 +158,26 @@ export function createDocumentEnvironment(
         inputs = undefined;
       }
       return {
-        prepare(rows, syntax, writableNames) {
+        prepare(rows, syntax, writableNames, options) {
           const releaseImports = imports.retain();
           try {
-            return prepareDocument(
-              ce,
-              parent,
-              rows,
-              syntax,
-              writableNames,
-              releaseImports
-            );
+            const policy = options?.typePolicy;
+            const revision =
+              policy === undefined
+                ? prepareDocument(ce, parent, rows, syntax, writableNames)
+                : prepareWithTypePolicy(
+                    ce, parent, rows, syntax, writableNames, policy
+                  );
+            return {
+              ...revision,
+              dispose() {
+                try {
+                  revision.dispose();
+                } finally {
+                  releaseImports();
+                }
+              },
+            };
           } catch (error) {
             releaseImports();
             throw error;

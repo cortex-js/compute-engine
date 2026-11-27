@@ -35,6 +35,12 @@
 
 ### New Features
 
+- **Document hosts can promote inferred types within one `prepare()` call.**
+  Pass `{ typePolicy }` as the fourth argument to propose row types from the
+  current document. For a list argument, a scalar formal maps the function
+  over the list and a compatible list formal binds the whole list. The revision
+  reports accepted annotations in `promotedContracts`.
+
 - **`table` takes an index over a collection, as `sum` and `product` do.**
   `table(k^2, k in 1..5)` is `[1, 4, 9, 16, 25]`, where it was an
   `incompatible-type` error; `table(i * j, i in 1..3, j in 1..i)` is
