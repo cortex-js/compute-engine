@@ -50,6 +50,7 @@ import {
 import { spellingOf, type Spelling, type Syntax } from './print.js';
 import { narrow } from './narrow.js';
 import { outline, type Outline } from './outline.js';
+import type { ParallelLoopFallbackReason } from '../types.js';
 import { plain } from './plain.js';
 import { effects, effectTrace, sameTrace } from './effects.js';
 import {
@@ -994,6 +995,7 @@ export function compileSlice(
   program: Program;
   /** The loops that `runAsync()` can send to the worker pool (`outline()`). */
   pool?: Outline;
+  parallelLoopFallbacks?: readonly ParallelLoopFallbackReason[];
 };
 export function compileSlice(
   expr: Expression,
@@ -1022,13 +1024,25 @@ export function compileSlice(
   // passes for a call, which workers cannot share), for an expression (a
   // root function literal has no `runAsync()`), and with no call of a
   // function of the host (a worker has no engine). `run()` does not change.
+  const fallbacks = new Set<ParallelLoopFallbackReason>();
   const pool =
     options.target === 'javascript' &&
-    p.hosts === undefined &&
-    (options.mode ?? 'strict') === 'strict' &&
-    options.iterationBudget === undefined &&
+    options.mode !== 'interval' &&
     entryOf(p).literal !== true
-      ? outline(p, rows, syntax, expr.engine as never)
+      ? outline(
+          p,
+          rows,
+          syntax,
+          expr.engine as never,
+          fallbacks,
+          p.hosts !== undefined
+            ? 'host-function'
+            : (options.mode ?? 'strict') !== 'strict'
+              ? 'numeric-mode'
+              : options.iterationBudget !== undefined
+                ? 'iteration-budget'
+                : undefined
+        )
       : undefined;
   const printed =
     options.mode === 'interval'
@@ -1072,5 +1086,8 @@ export function compileSlice(
     warnings: p.warnings,
     program: p,
     ...(pool === undefined ? {} : { pool }),
+    ...(fallbacks.size === 0
+      ? {}
+      : { parallelLoopFallbacks: Object.freeze([...fallbacks]) }),
   };
 }

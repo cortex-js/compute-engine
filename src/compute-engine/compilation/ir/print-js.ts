@@ -172,11 +172,17 @@ const builds = (z: Ints, count: Wrap): Syntax['regions'] => {
     `const ${out} = ${filter ? '[]' : `new Array(${toNumber(`${out}_n`)})`};`,
     blocks(z, k, `${out}_n`),
   ];
+  const build: RegionSpelling = ({
+    outs: [out],
+    args: [n],
+    params: [k],
+  }) => ({
+    open: open(out, n, k, false),
+    close: ([y]) => [`  ${out}[${toNumber(k)}] = ${y};`, '}'],
+  });
   return {
-    'build': ({ outs: [out], args: [n], params: [k] }) => ({
-      open: open(out, n, k, false),
-      close: ([y]) => [`  ${out}[${toNumber(k)}] = ${y};`, '}'],
-    }),
+    build,
+    'parallel.build': build,
     'filter': ({ outs: [c, out], args: [n], params: [k] }) => ({
       open: open(out, n, k, true),
       close: ([keep, y]) => [

@@ -1400,6 +1400,38 @@ export function listLowering(cx: Lowering) {
     return v;
   };
 
+  /** An eager build of one scalar per pass of the first clause. */
+  const parallelComprehension = (e: Fn): V => {
+    const c = e.ops[1];
+    if (
+      e.nops !== 2 ||
+      !isFunction(c, 'Element') ||
+      c.nops !== 2 ||
+      !isSymbol(c.ops[0])
+    )
+      decline(e, 'a parallel comprehension needs one unguarded Element clause');
+    const name = c.ops[0].symbol;
+    const before = b.effects;
+    const s = source(c.ops[1]);
+    const k = b.newValue(scalarType('integer'));
+    const [v] = cx.region(
+      'parallel.build',
+      [s.length],
+      [k],
+      () => {
+        const y = indexed(name, s.at(k), () => cx.value(e.ops[0])!);
+        const t = type(y);
+        if (t.shape.length !== 0 || (t.lane !== 'real' && t.lane !== 'integer'))
+          decline(e, 'a parallel comprehension whose body is not a real scalar');
+        return [y];
+      },
+      e
+    );
+    if (b.effects > before)
+      decline(e, 'a parallel comprehension with an effect');
+    return v;
+  };
+
   /** A `Comprehension` of several clauses `Element(i, L)`, none of whose
    *  lists reads an index (`README.md`, "Lists"): one build over the
    *  product of the lengths, whose index `k` gives the index of the clause
@@ -3770,6 +3802,7 @@ export function listLowering(cx: Lowering) {
     mask,
     over,
     comprehension,
+    parallelComprehension,
     join,
     rowsLiteral,
     rowsList,

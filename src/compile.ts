@@ -24,6 +24,7 @@ export type {
   LambdaRunner,
   CompileDiagnostic,
   CompileDiagnosticKind,
+  ParallelLoopFallbackReason,
   StorageHint,
   StorageKind,
 } from './compute-engine/compilation/types.js';

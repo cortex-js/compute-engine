@@ -472,6 +472,7 @@ function compileIr(
     warnings: Warning[];
     program: Program;
     pool?: Outline;
+    parallelLoopFallbacks?: CompilationResult<'javascript'>['parallelLoopFallbacks'];
   };
   try {
     slice = inDigits(() =>
@@ -751,6 +752,9 @@ function compileIr(
     profile: 'ir',
     shippable,
     ...(warnings.length > 0 ? { warnings } : {}),
+    ...(slice.parallelLoopFallbacks === undefined
+      ? {}
+      : { parallelLoopFallbacks: slice.parallelLoopFallbacks }),
   };
   if (literal) return result;
 
@@ -823,9 +827,10 @@ function compileIr(
   const asyncCode = slice.asyncCode;
   const runAsyncSpec: RunAsyncSpec = {
     run: run as (inputs: unknown) => unknown,
-    loops: (pool?.loops ?? []).map(({ printed }) => {
+    loops: (pool?.loops ?? []).map(({ loop, printed }) => {
       const own = printed.preambleOnce;
       return {
+        ...(loop.k === 'region' ? { comprehension: true } : {}),
         stored: {
           runtimeVersion: RUNTIME_VERSION,
           code:

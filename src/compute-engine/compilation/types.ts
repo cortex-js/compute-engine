@@ -975,7 +975,8 @@ export type BroadcastAsyncReason =
  * - `'below-threshold'`: the loop has fewer passes than
  *   `RunAsyncOptions.minPasses`.
  * - `'too-large'`: the private lists of the workers (one copy of each list
- *   accumulator and of each list that the passes read, for each sub-range)
+ *   accumulator and list that the passes read per sub-range, plus the
+ *   output slices of a comprehension)
  *   would hold more than 16 million numbers together.
  * - `'pool-declined'`: the loop went to the pool, and a worker refused or
  *   failed a sub-range of the passes (or a pass threw there): the calling
@@ -989,9 +990,22 @@ export type ParallelLoopReason =
   | 'too-large'
   | 'pool-declined';
 
+/** Why a compiled parallel loop or comprehension may run in order. */
+export type ParallelLoopFallbackReason =
+  | 'numeric-mode'
+  | 'iteration-budget'
+  | 'host-function'
+  | 'unsupported-position'
+  | 'unsupported-accumulator'
+  | 'accumulator-dependency'
+  | 'no-accumulator'
+  | 'host-input'
+  | 'unsupported-capture'
+  | 'unshippable-body';
+
 /**
- * What `RunAsyncOptions.onLoop` receives for each run of a `parallel for`
- * that can run on the pool: the count of passes of this run, where the
+ * What `RunAsyncOptions.onLoop` receives for each run of a parallel loop
+ * or comprehension that can run on the pool: the count of passes, where the
  * passes ran, and with `route: 'calling-thread'`, why the pool did not run
  * them all.
  */
@@ -1014,13 +1028,13 @@ export interface RunAsyncOptions {
    */
   signal?: AbortSignal;
   /**
-   * The smallest count of passes of a `parallel for` that goes to the
+   * The smallest count of passes of a loop or comprehension that goes to the
    * pool. A positive integer, default 20 000; another value rejects the
    * promise with a `TypeError`.
    */
   minPasses?: number;
   /**
-   * Called once for each run of a `parallel for` that can run on the pool,
+   * Called once for each run of a parallel loop or comprehension that can use the pool,
    * when its route is known: `'pool'` when every sub-range was answered by
    * a worker, `'calling-thread'` with the reason when a condition at run
    * time kept the loop in order or a sub-range ran again on the calling
@@ -1581,6 +1595,8 @@ export type CompilationResult<
    * `for`); a body that reads no name of the `vars` option and
    * computes no numeric integral; the default mode and no
    * `iterationBudget`. Every other loop runs in order, as `run()` runs it.
+   * A compiled numeric parallel comprehension uses the same placement and
+   * runtime rules and joins the consecutive output slices in domain order.
    * At run time, the loop goes to the pool when the pool is usable, the call
    * is not inside `ce.withStepBudget()`, the count of passes is at least
    * `options.minPasses`, and the private lists of all workers together hold
@@ -1600,8 +1616,8 @@ export type CompilationResult<
   ) => Promise<unknown>;
 
   /**
-   * Whether `runAsync()` would send a `parallel for` of this program to the
-   * pool now: the program has a loop that can run on the pool (also inside
+   * Whether `runAsync()` would send a parallel loop or comprehension to the
+   * pool now: the program has work that can run on the pool (also inside
    * a function that it calls), the engine has a usable pool (`ce.workers`),
    * the call is not inside `ce.withStepBudget()`, and `passes`, when it is
    * given, is at least `minPasses` (default 20 000; a value that is not a
@@ -1610,6 +1626,15 @@ export type CompilationResult<
    * fail later. Present where `runAsync` is.
    */
   willParallelize?: (passes?: number, minPasses?: number) => boolean;
+
+  /**
+   * The distinct compile-time reasons a surviving parallel loop or
+   * comprehension can run serially in `runAsync()`. Present on JavaScript expression results
+   * with at least one such reason. This is static information, so a reason
+   * can describe a branch the current call does not take. `onLoop` reports
+   * the runtime route of worker-eligible loops.
+   */
+  readonly parallelLoopFallbacks?: readonly ParallelLoopFallbackReason[];
 } & (T extends ExecutableTarget
   ? { calling: 'expression' | 'lambda'; run: CompiledRunner<R, V> }
   : // eslint-disable-next-line @typescript-eslint/no-empty-object-type

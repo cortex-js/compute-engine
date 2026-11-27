@@ -118,6 +118,7 @@ export type {
   RunAsyncOptions,
   ParallelLoopReport,
   ParallelLoopReason,
+  ParallelLoopFallbackReason,
 } from './compute-engine/compilation/types.js';
 
 // ── Worker pool for `result.broadcastAsync()` (`ce.workers`) ────────

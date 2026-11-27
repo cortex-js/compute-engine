@@ -57,6 +57,15 @@
 
 ### Improvements
 
+- **JavaScript compiles numeric parallel comprehensions.** For example,
+  `[k^2 parallel for k in 1..n]` builds a list in domain order. When a
+  worker pool is available and the comprehension qualifies, `runAsync()`
+  builds the slices on workers and joins them in the same order.
+
+- **JavaScript compilation reports why a `parallel for` stays serial.**
+  Read `parallelLoopFallbacks` for compile-time reasons such as
+  `'accumulator-dependency'` and `'unsupported-position'`.
+
 - **GLSL and interval compilation accept sequential `parallel for` loops.**
   A scalar reduction such as `parallel for k in 1..4 { s += k * x }`
   compiles with the target's usual support for `for` loops.

@@ -22,14 +22,16 @@ export const DEFAULT_MIN_PASSES = 20_000;
 
 /** The most numbers that the private lists of all the workers hold together
  * for one loop (the list accumulators and the lists that the body reads,
- * one copy per sub-range). */
+ * one copy per sub-range, plus the slices of a comprehension). */
 const MAX_PRIVATE_NUMBERS = 16_000_000;
 
 /** A pool loop of the program, as `runAsync()` runs it. */
 export interface RunAsyncLoop {
+  /** The worker returns one slice of a comprehension. */
+  readonly comprehension?: boolean;
   /** The worker program as stored code: a lambda of `i0`, `i1`, `lo` and
    * the values passed, which returns the partial sums, then the partial
-   * arrays, of the passes `i0 <= i < i1`. */
+   * arrays or the comprehension slice of the passes `i0 <= i < i1`. */
   readonly stored: StoredResult;
   /** The worker program on the calling thread, over the engine's runtime
    * (a sub-range that the pool did not complete). */
@@ -86,6 +88,7 @@ export type RunState = {
   ) => Promise<unknown[][]> | undefined;
   addNumber: (acc: number, sums: unknown[][], j: number) => number;
   addList: (list: number[], sums: unknown[][], j: number) => ArrayLike<number>;
+  joinSlices: (parts: unknown[][]) => number[];
 };
 
 /** `acc` plus result `j` of each sub-range, in the order of the
@@ -105,6 +108,18 @@ function addList(list: number[], sums: unknown[][], j: number): number[] {
     for (let i = 0; i < values.length; i++) list[i] = list[i] + values[i];
   }
   return list;
+}
+
+/** Consecutive slices give the comprehension's results in domain order. */
+function joinSlices(parts: unknown[][]): number[] {
+  const slices = parts.map((part) => part[0] as number[]);
+  const result = new Array<number>(
+    slices.reduce((n, slice) => n + slice.length, 0)
+  );
+  let index = 0;
+  for (const slice of slices)
+    for (const value of slice) result[index++] = value;
+  return result;
 }
 
 /** The count of numbers in the value `v` passed to a worker: the product
@@ -243,6 +258,7 @@ export function makeRunAsync(
       d: leave,
       addNumber,
       addList,
+      joinSlices,
       loop: (id, lo, hi, values, lists) => {
         // An abort while the calling thread ran statements is seen here.
         if (signal?.aborted) throw signal.reason;
@@ -279,7 +295,8 @@ export function makeRunAsync(
         const numbers =
           (lists.reduce((a, l) => a + l.length, 0) +
             values.reduce<number>((a, v) => a + numbersOf(v), 0)) *
-          parts;
+            parts +
+          (record.comprehension ? count : 0);
         if (numbers > MAX_PRIVATE_NUMBERS) return off('too-large');
         // One sub-range of pass counts for each worker, in order.
         const ranges: [number, number][] = [];

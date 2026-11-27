@@ -247,6 +247,7 @@ const CONSTRUCTS = new Set([
   'Tuple',
   'PointList',
   'Comprehension',
+  'ParallelComprehension',
   'Repeat',
   'Iterate',
   // The list operators (`lists.collection()`, and `At` of `First`, ...).
@@ -411,6 +412,7 @@ const LOOPS = new Set([
   'Loop',
   'ParallelLoop',
   'Comprehension',
+  'ParallelComprehension',
   'Repeat',
   'Iterate',
   'Scan',
@@ -2659,6 +2661,11 @@ function lowerOnce(
         return pointList(e);
       case 'Comprehension':
         return lists.comprehension(e);
+      case 'ParallelComprehension':
+        if (!options.javascript)
+          decline(e, 'a parallel comprehension (JavaScript only)');
+        parallel ??= e;
+        return lists.parallelComprehension(e);
       // The list of the tuples of the elements at each index, as long as
       // the shortest list: the value of `PointList` of lists. The
       // interpreter stops at the shortest list, so a list with an effect
@@ -8386,10 +8393,14 @@ function lowerOnce(
    *  is thrown as it is. */
   const program = (f: () => V | V[]): Program => {
     const p = b.program(f);
+    const parallelKind =
+      parallel?.operator === 'ParallelLoop'
+        ? 'parallel for'
+        : 'parallel comprehension';
     if (parallel !== undefined && p.functions.some((g) => draws(g.body)))
       decline(
         parallel,
-        'a parallel for in a program that draws or has a random frame: the interpreter runs each pass in a random frame of its own'
+        `a ${parallelKind} in a program that draws or has a random frame: the interpreter runs each pass in a random frame of its own`
       );
     const names = [...seen].filter((name) => !typed.has(name));
     if (names.length > 0) throw new UntypedInputs(names);
@@ -8397,8 +8408,7 @@ function lowerOnce(
     if (used !== undefined) {
       // An array is a reference of the engine, which a pool loop and the
       // result of the code do not hold (spec section 10.6).
-      if (parallel !== undefined)
-        decline(parallel, 'an array in a parallel for');
+      if (parallel !== undefined) decline(parallel, `an array in a ${parallelKind}`);
       if (
         entryOf(p).literal !== true &&
         used.makers.length > 0 &&

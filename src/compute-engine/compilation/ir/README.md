@@ -3240,6 +3240,13 @@ is marked `parallel`, which every pass keeps (`cse` keys
 it); `runAsync()` can send such a loop to the worker pool ("Batches and
 `runAsync()`").
 
+A single-clause `ParallelComprehension` with a pure numeric scalar body
+lowers on JavaScript to `parallel.build`. This region uses the same serial
+printer as `build`. The worker outliner gives each worker a build of its
+slice length and adds the slice offset to the body's index. The asynchronous
+printer uses the same driver as a parallel loop and joins the returned
+slices in order. The caller's memory limit includes the output slices.
+
 `Integrate(f, Limits(t, a, b))` and `NIntegrate(f, a, b)` of real bounds
 (infinite ones too) and a real integrand (a function literal of one parameter,
 or a body in the name of the `Limits`) are the region `integrate`: the integrand

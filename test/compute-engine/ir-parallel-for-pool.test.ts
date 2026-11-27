@@ -34,6 +34,7 @@ import type {
   Region,
 } from '../../src/compute-engine/compilation/ir/ir';
 import type {
+  ParallelLoopFallbackReason,
   ParallelLoopReport,
   RunAsyncOptions,
 } from '../../src/compute-engine/compilation/types';
@@ -115,6 +116,7 @@ type Result = {
   run: (inputs: object) => unknown;
   runAsync: (inputs: object, options?: RunAsyncOptions) => Promise<unknown>;
   willParallelize: (passes?: number, minPasses?: number) => boolean;
+  parallelLoopFallbacks?: readonly ParallelLoopFallbackReason[];
 };
 
 /** The Epsil function `f` of `source`, on an engine of its own with the
@@ -389,6 +391,7 @@ describe('A parallel for on the pool', () => {
       }`,
       { n: 'integer' }
     );
+    expect(code.parallelLoopFallbacks).toEqual(['unsupported-position']);
     await agrees(code, { n: 20_000 }, [
       pool(20_000),
       pool(20_000),
@@ -441,6 +444,7 @@ describe('A loop that runs in order', () => {
     ).code;
     await agrees(scalar, { n: 30_000 }, []);
     expect(scalar.willParallelize()).toBe(false);
+    expect(scalar.parallelLoopFallbacks).toEqual(['accumulator-dependency']);
     const list = program(
       `function f(H: list<integer>, n: integer) -> list<integer> {
         let L = H
@@ -451,6 +455,7 @@ describe('A loop that runs in order', () => {
       { diagnostics: ['parallel-accumulator-read'] }
     ).code;
     await agrees(list, { H: [1, 0, 0], n: 30 }, [], { minPasses: 1 });
+    expect(list.parallelLoopFallbacks).toEqual(['accumulator-dependency']);
   }, 60_000);
 
   test('an inner loop that reads an outer accumulator', async () => {
@@ -479,6 +484,7 @@ describe('A loop that runs in order', () => {
       { H: 'list<integer>', n: 'integer' }
     ).code;
     await agrees(none, { H: [1], n: 30 }, [], { minPasses: 1 });
+    expect(none.parallelLoopFallbacks).toBeUndefined();
     // The inner loop runs in order, on the worker that runs the outer one.
     const nested = program(
       `function f(n: integer) -> integer {
@@ -489,6 +495,7 @@ describe('A loop that runs in order', () => {
       { n: 'integer' }
     ).code;
     await agrees(nested, { n: 20 }, [pool(20)], { minPasses: 1 });
+    expect(nested.parallelLoopFallbacks).toEqual(['unsupported-position']);
   }, 60_000);
 
   test('the bigint and complex modes, and an iterationBudget', async () => {
@@ -508,10 +515,14 @@ describe('A loop that runs in order', () => {
       );
       await agrees(code, { n: 30_000 }, []);
       expect(code.willParallelize()).toBe(false);
+      expect(code.parallelLoopFallbacks).toEqual([
+        'mode' in compileOptions ? 'numeric-mode' : 'iteration-budget',
+      ]);
     }
     const big = program(source, { n: 'integer' }, { compile: { mode: 'bigint' } })
       .code;
     expect(await big.runAsync({ n: 30_000 })).toEqual(big.run({ n: 30_000 }));
+    expect(big.parallelLoopFallbacks).toEqual(['numeric-mode']);
   }, 60_000);
 
   test('a body that reads a name of vars, and a body that is not shippable', async () => {
@@ -530,6 +541,7 @@ describe('A loop that runs in order', () => {
       vars: { w: '_.w' },
     } as never) as unknown as Result;
     expect(host.success).toBe(true);
+    expect(host.parallelLoopFallbacks).toEqual(['host-input']);
     await agrees(host, { n: 30_000, w: 2 }, []);
     const integral = compile(
       loop([
@@ -540,6 +552,7 @@ describe('A loop that runs in order', () => {
       { fallback: false } as never
     ) as unknown as Result;
     expect(integral.success).toBe(true);
+    expect(integral.parallelLoopFallbacks).toEqual(['unshippable-body']);
     await agrees(integral, { n: 30 }, [], { minPasses: 1 });
   }, 60_000);
 
@@ -626,6 +639,79 @@ describe('A loop that runs in order', () => {
     const arms = find((p as Program).functions[0].body)!;
     arms.then.yields.reverse();
     expect(outline(p, OPERATORS, JS)).toBeUndefined();
+  });
+});
+
+describe('A numeric parallel comprehension', () => {
+  test('builds ordered slices from a range and from a captured input list', async () => {
+    const range = program(
+      'function f(n: integer) -> list<integer> { [k^2 parallel for k in 1..n] }',
+      { n: 'integer' }
+    ).code;
+    const squares = [1, 4, 9, 16, 25];
+    expect(range.run({ n: 5 })).toEqual(squares);
+    expect(
+      await agrees(range, { n: 5 }, [pool(5)], { minPasses: 1 })
+    ).toEqual(squares);
+    expect(shared.log.results).toHaveLength(2);
+    expect(shared.log.results).toEqual(
+      expect.arrayContaining([[[1, 4]], [[9, 16, 25]]])
+    );
+    expect(await agrees(range, { n: 5 }, [off(5, 'below-threshold')])).toEqual(
+      squares
+    );
+    expect(await agrees(range, { n: 0 }, [off(0, 'below-threshold')])).toEqual(
+      []
+    );
+
+    const list = program(
+      'function f(L: list<real>, x: real) -> list<real> { [k + x parallel for k in L] }',
+      { L: 'list<real>', x: 'real' }
+    ).code;
+    const inputs = { L: [3, -2, 1.5], x: 0.25 };
+    expect(await agrees(list, inputs, [pool(3)], { minPasses: 1 })).toEqual([
+      3.25, -1.75, 1.75,
+    ]);
+  });
+
+  test('reuses the same slice on the calling thread when a worker fails', async () => {
+    const workers = watchedPool({ onCall: () => 'fail' });
+    pools.push(workers.pool);
+    const { code } = program(
+      'function f(n: integer) -> list<integer> { [k + 1 parallel for k in 1..n] }',
+      { n: 'integer' },
+      { pool: workers.pool }
+    );
+    expect(
+      await agrees(code, { n: 5 }, [off(5, 'pool-declined')], { minPasses: 1 })
+    ).toEqual([2, 3, 4, 5, 6]);
+  });
+
+  test('MathJSON takes the same route and guards and random bodies decline', async () => {
+    const ce = new ComputeEngine({ workers: shared.pool });
+    ce.declare('n', 'integer');
+    const domain = ['Range', 1, 'n'];
+    const clause = ['Element', 'k', domain];
+    const expression = ce.box([
+      'ParallelComprehension',
+      ['Multiply', 'k', 2],
+      clause,
+    ]);
+    const result = compile(expression, {
+      fallback: false,
+    }) as unknown as Result;
+    expect(await agrees(result, { n: 3 }, [pool(3)], { minPasses: 1 })).toEqual([
+      2, 4, 6,
+    ]);
+    for (const unsupported of [
+      ['ParallelComprehension', 'k', [...clause, ['Greater', 'k', 1]]],
+      ['ParallelComprehension', ['Random'], clause],
+      ['ParallelComprehension', ['List', 'k', 'k'], clause],
+    ]) {
+      expect(compile(ce.box(unsupported as never)).success).toBe(false);
+    }
+    expect(compile(expression, { to: 'glsl' }).success).toBe(false);
+    expect(compile(expression, { to: 'interval-js' }).success).toBe(false);
   });
 });
 

@@ -1,6 +1,7 @@
 /**
- * The outliner of the `parallel for` loops that `runAsync()` can send to the
- * worker pool (design: `docs/plans/2026-11-18-ir-parallel-for-and-list-locals.md`,
+ * The outliner of the parallel loops and comprehensions that `runAsync()`
+ * can send to the worker pool (design:
+ * `docs/plans/2026-11-18-ir-parallel-for-and-list-locals.md`,
  * section 6; README, "Batches and `runAsync()`").
  *
  * It reads the program after the passes and changes nothing in it: `run()`
@@ -12,12 +13,14 @@
  * loop, whose body is the same loop restricted to the passes `i0 <= i < i1`
  * (`window`), each scalar accumulator from `-0` and each list accumulator a
  * new array of `-0` (`zeros`), and which returns the partial sums, then the
- * partial arrays. A loop that fails a condition is not outlined: it runs in
- * order, as `run()` runs it. No condition declines the compilation.
+ * partial arrays. A `parallel.build` returns the slice of values for those
+ * passes instead. A loop or comprehension that fails a condition runs in
+ * order, as `run()` runs it.
  */
 
 import { isShippableCode } from '../../kernel-pool.js';
 import type { IComputeEngine as ComputeEngine } from '../../global-types.js';
+import type { ParallelLoopFallbackReason } from '../types.js';
 import { passChecksOn, verify } from './verify.js';
 import { printJavaScript, type JavaScriptResult } from './print-js.js';
 import type { Syntax } from './print.js';
@@ -39,11 +42,18 @@ import {
 } from './ir.js';
 
 type Loop = Instr & { k: 'loop' };
+type ParallelWork = Loop | (Instr & { k: 'region' });
 
-/** A loop that `runAsync()` can send to the pool. */
+function isParallelWork(i: Instr): i is ParallelWork {
+  return i.k === 'loop'
+    ? i.parallel === true
+    : i.k === 'region' && i.op === 'parallel.build';
+}
+
+/** A loop or comprehension that `runAsync()` can send to the pool. */
 export type PoolLoop = {
   /** The loop of the program. */
-  readonly loop: Loop;
+  readonly loop: ParallelWork;
   /** The values of the program that a worker program reads, after `i0`,
    *  `i1` and `lo`, in the order of its parameters. */
   readonly passed: readonly V[];
@@ -81,24 +91,42 @@ export function outline(
   p: Program,
   rows: readonly OperatorRow[],
   syntax: Syntax,
-  ce?: ComputeEngine
+  ce?: ComputeEngine,
+  fallbacks?: Set<ParallelLoopFallbackReason>,
+  disabled?: ParallelLoopFallbackReason
 ): Outline | undefined {
+  if (disabled !== undefined) {
+    const hasParallelLoop = (r: Region): boolean =>
+      r.body.some(
+        (i) => isParallelWork(i) || regionsOf(i).some(hasParallelLoop)
+      );
+    if (p.functions.some((f) => hasParallelLoop(f.body)))
+      fallbacks?.add(disabled);
+    return undefined;
+  }
   const fns = new Map(p.functions.map((f) => [f.name, f]));
   const { def, uses } = useIndex(p);
   type Calls = { fn: string; waiting: boolean }[];
   const calls = new Map<string, Calls>();
   /** The marked loops at a waiting position of each function, not yet
    *  refused. */
-  const marked = new Map<string, Loop[]>();
+  const marked = new Map<string, ParallelWork[]>();
+  const serial = new Set<string>();
   for (const f of p.functions) {
     const own: Calls = [];
-    const loops: Loop[] = [];
+    const loops: ParallelWork[] = [];
     // A waiting position: the regions up to the function's body are only
     // `if` arms and bodies of loops that are not marked.
     const walk = (r: Region, waiting: boolean): void => {
       for (const i of r.body) {
-        if (i.k === 'call') own.push({ fn: i.fn, waiting });
-        if (i.k === 'loop' && i.parallel === true && waiting) loops.push(i);
+        if (i.k === 'call') {
+          own.push({ fn: i.fn, waiting });
+          if (!waiting) serial.add(i.fn);
+        }
+        if (isParallelWork(i)) {
+          if (waiting) loops.push(i);
+          else fallbacks?.add('unsupported-position');
+        }
         const inner =
           i.k === 'if' || (i.k === 'loop' && i.parallel !== true)
             ? waiting
@@ -110,11 +138,16 @@ export function outline(
     calls.set(f.name, own);
     marked.set(f.name, loops);
   }
+  if (fallbacks !== undefined)
+    for (const name of serial) {
+      if (marked.get(name)?.length) fallbacks.add('unsupported-position');
+      for (const call of calls.get(name) ?? []) serial.add(call.fn);
+    }
 
   // The worker programs are built only for the loops of the functions that
   // the entry reaches; a loop refused there can change which functions wait,
   // so the reach is computed again until no loop is refused.
-  const built = new Map<Loop, PoolLoop>();
+  const built = new Map<ParallelWork, PoolLoop>();
   for (;;) {
     // A function waits when it holds a pool loop or a waiting call of a
     // function that waits (a fixed point; recursion included).
@@ -146,8 +179,9 @@ export function outline(
       for (const loop of [...loops]) {
         if (built.has(loop)) continue;
         const x = outlined(loop);
-        if (x !== undefined) built.set(loop, x);
+        if (typeof x !== 'string') built.set(loop, x);
         else {
+          fallbacks?.add(x);
           loops.splice(loops.indexOf(loop), 1);
           refused = true;
         }
@@ -162,23 +196,29 @@ export function outline(
       };
   }
 
-  /** The worker program of the marked loop `loop`, or `undefined` when it
-   *  runs in order. */
-  function outlined(loop: Loop): PoolLoop | undefined {
-    if (loop.exit !== undefined || loop.window !== undefined) return undefined;
-    const lanes: Lane[] = ['real', 'integer'];
-    const carried = loop.body.params.slice(1);
-    if (
-      !carried.every((v) => {
-        const t = p.types[v];
-        return t.shape.length === 0 && lanes.includes(t.lane);
-      })
-    )
-      return undefined;
-    if (!scalarAccumulators(loop)) return undefined;
-    const lists = listAccumulators(loop);
-    if (lists === undefined) return undefined;
-    if (carried.length + lists.length === 0) return undefined;
+  /** The worker program of the marked loop, or the reason it runs in order. */
+  function outlined(loop: ParallelWork): PoolLoop | ParallelLoopFallbackReason {
+    const region = loop.k === 'loop' ? loop.body : loop.regions[0];
+    const carried = region.params.slice(1);
+    let lists: V[] = [];
+    if (loop.k === 'loop') {
+      if (loop.exit !== undefined || loop.window !== undefined)
+        return 'unsupported-position';
+      if (
+        !carried.every((v) => {
+          const t = p.types[v];
+          return (
+            t.shape.length === 0 && (t.lane === 'real' || t.lane === 'integer')
+          );
+        })
+      )
+        return 'unsupported-accumulator';
+      if (!scalarAccumulators(loop)) return 'accumulator-dependency';
+      const accumulators = listAccumulators(loop);
+      if (accumulators === undefined) return 'accumulator-dependency';
+      lists = accumulators;
+      if (carried.length + lists.length === 0) return 'no-accumulator';
+    }
 
     // The values that the body reads from outside the loop: the operands,
     // the yields and the lengths of the types of its values, and of the
@@ -198,12 +238,12 @@ export function outline(
       }
       r.yields.forEach((v) => read.add(v));
     };
-    scan(loop.body);
+    scan(region);
     for (const v of [...inside, ...read])
       lengthValues(p.types[v]).forEach((n) => read.add(n));
     for (const name of called) {
       const g = fns.get(name);
-      if (g === undefined || g.name === 'main') return undefined;
+      if (g === undefined || g.name === 'main') return 'unshippable-body';
       const inner = (r: Region): void =>
         r.body.forEach((i) => {
           if (i.k === 'call') called.add(i.fn);
@@ -213,7 +253,7 @@ export function outline(
       inner(g.body);
     }
     // The body reads no name of `vars`: a worker has no inputs object.
-    if (ops.some((op) => HOST.test(op))) return undefined;
+    if (ops.some((op) => HOST.test(op))) return 'host-input';
     const listSet = new Set(lists);
     const free: V[] = [];
     const seen = new Set<V>();
@@ -255,7 +295,7 @@ export function outline(
       else if (
         !(['real', 'integer', 'boolean'] as Lane[]).includes(p.types[v].lane)
       )
-        return undefined;
+        return 'unsupported-capture';
       else passed.push(v);
     }
     // The scalars first: a length is a parameter before its list.
@@ -287,18 +327,50 @@ export function outline(
       body.push(i);
       return c;
     });
-    body.push({
-      k: 'loop',
-      outs: loop.outs,
-      lo,
-      hi: lo,
-      init,
-      body: loop.body,
-      passes: true,
-      window: [i0, i1],
-    });
+    let yields: V[];
+    if (loop.k === 'loop') {
+      body.push({
+        k: 'loop',
+        outs: loop.outs,
+        lo,
+        hi: lo,
+        init,
+        body: region,
+        passes: true,
+        window: [i0, i1],
+      });
+      yields = [...loop.outs, ...lists];
+    } else {
+      // A worker allocates only its slice. The body receives the original
+      // pass index, and the worker writes its result at the slice's index.
+      const count = fresh(scalarType('integer'));
+      const k = fresh(scalarType('integer'));
+      const out = fresh({
+        lane: p.types[region.yields[0]].lane,
+        shape: [{ v: count }],
+      });
+      body.push(
+        { k: 'op', op: 'sub.int', out: count, args: [i1, i0] },
+        {
+          k: 'region',
+          op: 'build',
+          args: [count],
+          outs: [out],
+          regions: [
+            {
+              params: [k],
+              body: [
+                { k: 'op', op: 'add.int', out: region.params[0], args: [i0, k] },
+                ...region.body,
+              ],
+              yields: region.yields,
+            },
+          ],
+        }
+      );
+      yields = [out];
+    }
     const params = [i0, i1, lo, ...passed];
-    const yields = [...loop.outs, ...lists];
     const main: IRFunction = {
       name: 'main',
       paramNames: params.map((v) => `v${v}`),
@@ -320,7 +392,7 @@ export function outline(
       // A defect of the outliner: the loop runs in order, and the checks of
       // the test suite report it.
       if (passChecksOn()) throw e;
-      return undefined;
+      return 'unshippable-body';
     }
     // Its `run` is built at the first sub-range that the calling thread
     // runs again.
@@ -334,7 +406,7 @@ export function outline(
       true
     );
     if (!isShippableCode(`${printed.preambleOnce}\n${printed.code}`))
-      return undefined;
+      return 'unshippable-body';
     return { loop, passed, lists, printed };
   }
 

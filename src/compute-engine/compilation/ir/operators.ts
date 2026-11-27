@@ -730,6 +730,18 @@ export const REGION_ROWS: readonly RegionRow[] = deepFreeze([
       ys.length === 1 ? [listOf(ys[0], { v: n })] : undefined,
   },
   {
+    op: 'parallel.build',
+    effect: 'may-fail',
+    args: [I],
+    params: [I],
+    results: ([n], ys) =>
+      ys.length === 1 &&
+      ys[0].shape.length === 0 &&
+      (ys[0].lane === R || ys[0].lane === I)
+        ? [listOf(ys[0], { v: n })]
+        : undefined,
+  },
+  {
     op: 'filter',
     effect: 'may-fail',
     args: [I],

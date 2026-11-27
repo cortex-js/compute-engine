@@ -728,8 +728,18 @@ export function printProgram(
         }
       } else if (i.k === 'region') {
         const [inner] = i.regions;
+        const pooled = waiting ? wait?.loops.get(i) : undefined;
+        const out = name(i.outs[0]);
+        const local = `${out}_serial`;
+        if (pooled !== undefined) {
+          line(`let ${out};`);
+          line(
+            `const ${out}_p = _run.loop(${pooled.id}, 0, (${use(i.args[0])}) - 1, [${pooled.passed.map(use).join(', ')}], []);`
+          );
+          line(`if (${out}_p === undefined) {`);
+        }
         const s = syntax.regions[i.op]({
-          outs: i.outs.map(name),
+          outs: pooled === undefined ? i.outs.map(name) : [local],
           args: i.args.map(use),
           params: inner.params.map(name),
           pieces: i.pieces,
@@ -743,6 +753,12 @@ export function printProgram(
           lines.push(...body(last, depth + 1));
         }
         s.close(last.yields.map(use)).forEach((x) => line(x));
+        if (pooled !== undefined) {
+          line(`  ${out} = ${local};`);
+          line('} else {');
+          line(`  ${out} = _run.joinSlices(${awaited(`${out}_p`)});`);
+          line('}');
+        }
       } else if (i.k === 'call' && i.outs.length === 2) {
         // The list, then its length (`lower-functions.ts`).
         const [n, list] = i.outs.map(name);

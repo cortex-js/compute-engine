@@ -1132,9 +1132,9 @@ See [Comprehensions](/epsil/syntax/#comprehensions).
 
 ### Parallel loops {#parallel-loops}
 
-`parallel for x in xs { … }` runs the body once for each element, as `for`
-does, but the passes are independent: they can run in any order, and a later
-version of the engine can split them between workers. The value is `nothing`.
+`parallel for x in xs { … }` runs the body once for each element. The passes
+are independent and can run in any order. Compiled JavaScript can split
+eligible loops among workers. The value is `nothing`.
 
 ```epsil-live
 let L = [0, 0, 0]
@@ -1258,8 +1258,10 @@ JavaScript's `runAsync()` sends a loop to the engine's worker pool when
 its passes only add to numbers
 (`s += e`) and to the elements of a list declared outside the loop
 (`L[i] += e`), with no other read of them: each worker runs a range of the
-passes, and the partial sums are added in order. A parallel comprehension
-does not compile.
+passes, and the partial sums are added in order. JavaScript also compiles a
+parallel comprehension with one unguarded clause and a pure real scalar
+body. `run()` evaluates it in order. When eligible for the worker pool,
+`runAsync()` returns the slices of results in domain order.
 
 ```epsil-live
 function count(H: list<integer>, n: integer) -> list<integer> {

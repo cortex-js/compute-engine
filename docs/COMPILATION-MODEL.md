@@ -835,6 +835,21 @@ at least `minPasses`. A stored result loaded with
 `createJavaScriptRuntime()` has no asynchronous text: its `runAsync()` is
 `run()`.
 
+A compiled JavaScript expression exposes `parallelLoopFallbacks` when a
+surviving loop or comprehension has a compile-time reason to stay serial, such as
+`'accumulator-dependency'` or `'unsupported-position'`. This list describes
+the compiled program, including branches a given call may skip. `onLoop`
+reports the runtime route of loops eligible for the pool.
+
+JavaScript also compiles a `ParallelComprehension` with one unguarded
+`Element` clause that binds a single name and a pure real scalar body, as
+in `[k^2 parallel for k in 1..n]`. It builds a list in domain order.
+`runAsync()` uses the same pool rules as a loop, with one output slice per
+worker and the total output size counted toward the 16 million number
+limit. The calling thread joins the slices in domain order. Guards,
+additional clauses, random effects, and other result shapes decline in
+this implementation. GLSL and `interval-js` decline parallel comprehensions.
+
 ```js
 const ce = new ComputeEngine({ workers: createKernelPool({ create }) });
 executeEpsil(ce, `function f(n: integer) -> integer {
