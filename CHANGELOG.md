@@ -82,6 +82,11 @@
 
 ### Behavior Changes
 
+- **JavaScript compiles polygon results.** A `Polygon` returns
+  `{ __tag: "Polygon", geom: [x0, y0, x1, y1, …] }`. Lists and
+  comprehensions of polygons return those records in source order, including
+  polygons whose vertex counts vary at run time.
+
 - **Whole-collection calls inside local initializers keep list arguments whole.**
   With `function f(xs) { let m = mean(xs); m }`, `f([1, 3])` now returns `2`.
 

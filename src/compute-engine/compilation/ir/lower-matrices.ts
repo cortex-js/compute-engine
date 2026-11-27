@@ -110,7 +110,7 @@ export function matrixLowering(
     return r;
   };
 
-  /** The elements of the matrix `m`, row by row. */
+  /** The elements of the matrix or list of points `m`, row by row. */
   const flatten = (e: Fn, m: V): V => {
     const [r, c] = type(m).shape;
     if (typeof c !== 'number') decline(e, 'a list of lists of run-time length');
@@ -582,5 +582,5 @@ export function matrixLowering(
     return cx.apply(e, op('mpower'), [m, exponent(e)]);
   };
 
-  return { matrix, elementwise };
+  return { matrix, elementwise, flatten };
 }

@@ -634,6 +634,10 @@ export const JS: Syntax = deepFreeze({
   loopOpen: loopOpen(NUMBERS),
   retTuple: (values) => `return [${values.join(', ')}];`,
   record: recordResult,
+  polygon: (value, kind) =>
+    kind === 'single'
+      ? `{ __tag: "Polygon", geom: ${value} }`
+      : `(${value}).map((geom) => ({ __tag: "Polygon", geom }))`,
   call: (fn, args) => `${fn}(${args.join(', ')})`,
   fn: (name, params, _result, body) =>
     [

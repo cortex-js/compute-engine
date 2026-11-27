@@ -139,6 +139,7 @@ export type Syntax = {
    *  host reads it (`README.md`, "Records"), or `undefined` when the value
    *  is returned as it is. */
   record?(value: string, type: IRType): string | undefined;
+  polygon?(value: string, kind: NonNullable<Program['polygonResult']>): string;
   /** `types`: the type of each argument (GLSL passes an array as a
    *  sampler and its count). */
   call(fn: string, args: string[], types?: IRType[]): string;
@@ -730,6 +731,8 @@ export function printProgram(
     // through a name.
     const named: string[] = [];
     const result = (y: V, k: number): string => {
+      if (f.name === p.entry && k === 0 && p.polygonResult !== undefined)
+        return syntax.polygon!(use(y), p.polygonResult);
       const t = type(y);
       if (f.name !== p.entry || t.lane !== 'record') return use(y);
       const r = `_record${k}`;

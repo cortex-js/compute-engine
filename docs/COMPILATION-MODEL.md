@@ -3122,6 +3122,17 @@ returned by `run()` compiles.
 
 ### Records
 
+JavaScript compiles a `Polygon`, a list of polygon literals, or a
+comprehension whose body is a `Polygon` at the result of the expression or
+entry function (CE-1894). The operands of a polygon are real 2-D points, or
+one list of such points. The result for `Polygon((1,2), (3,4), (5,6))` is
+`{ __tag: "Polygon", geom: [1, 2, 3, 4, 5, 6] }`. A polygon list or
+comprehension returns an array of those records in source order. The
+`geom` arrays can have different lengths, including zero. Missing vertices
+keep their slots as two `NaN`s, and non-finite coordinates keep their
+positions so the host can split paths. The compiler knows the result shape
+before running it. Polygon results do not support numeric batching.
+
 A value of a named tuple type of the program is a record on JavaScript
 (`compilation/ir/README.md`, "Records"; CE-1652): each field has a settled
 shape, from its declared type, or, for a field typed `any`, `list` or

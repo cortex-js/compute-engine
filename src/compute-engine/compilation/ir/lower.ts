@@ -2093,8 +2093,9 @@ function lowerOnce(
     return v;
   };
 
-  /** Lower `e`. With `want` false its value is not used (a statement). */
-  const value = (e: Expression, want = true): V | undefined => {
+  /** Lower `e`. With `want` false its value is not used (a statement).
+   *  `entryResult` admits the geometry representation at the return site. */
+  const value = (e: Expression, want = true, entryResult = false): V | undefined => {
     // A name is admitted by `symbol()`; another node here, and the node
     // that passes its value on (`rowsNode`) by its handler.
     const admitted = !isSymbol(e) && rowsRead === e;
@@ -2103,6 +2104,7 @@ function lowerOnce(
     // The root `Tuple` is lowered where it is (`rootParts`).
     const shared =
       want &&
+      !entryResult &&
       isFunction(e) &&
       e !== rootTuple &&
       facts(e).writes.size === 0 &&
@@ -2132,7 +2134,7 @@ function lowerOnce(
     if (scope !== undefined) scopes.push(scope);
     let v: V | undefined;
     try {
-      v = wholeOnly(e, node(e, want), admitted);
+      v = wholeOnly(e, node(e, want, entryResult), admitted);
     } finally {
       if (scope !== undefined) scopes.pop();
       rowsNode = undefined;
@@ -2224,13 +2226,13 @@ function lowerOnce(
 
   /** The value of `e`, where a name of the lane `rows` may be read whole
    *  (`symbol()`). */
-  const wholeRows = (e: Expression): V => {
+  const wholeRows = (e: Expression, entryResult = false): V => {
     rowsRead = e;
     try {
       // A matrix of run-time size is read as its rows where a value of the
       // lane `rows` is read whole (a reader of the rows, a local, an arm,
       // the result).
-      const v = value(e)!;
+      const v = value(e, true, entryResult)!;
       return freeMatrix(v) ? rowsOfMatrix(v) : v;
     } finally {
       rowsRead = undefined;
@@ -2331,8 +2333,80 @@ function lowerOnce(
     return out;
   };
 
+  let polygonResult: Program['polygonResult'];
+  const isPolygon = (
+    e: Expression | undefined
+  ): e is Fn & { operator: 'Polygon' } =>
+    isFunction(e, 'Polygon') &&
+    options.vars?.includes('Polygon') !== true &&
+    isLibrary(e) &&
+    isLibraryOperator(e as never, 'Polygon', { customLibrary: false });
+
+  /** One flat row of coordinates. The tuple mark establishes that the
+   *  input contains 2-D points. A missing vertex keeps two slots. */
+  const polygonVertices = (e: Fn): V => {
+    if (!e.isValid || e.nops === 0) decline(e, 'Polygon with invalid operands');
+    const missing = (x: Expression) =>
+      isSymbol(x, 'Missing') &&
+      !isShadowedSymbol(x as never) &&
+      held('Missing')?.library === true;
+    const gap = () => b.constant(NaN, 'real');
+    const coordinates = (x: Expression, v: V): V[] => {
+      const t = type(v);
+      if (
+        tuples.get(v) !== 0 ||
+        t.shape.length !== 1 ||
+        t.shape[0] !== 2 ||
+        !isSubLane(t.lane, 'real')
+      )
+        decline(x, 'a Polygon vertex that is not a real point of two coordinates');
+      const point = lists.listSource(v);
+      return [
+        point.at(b.constant(0, 'integer')),
+        point.at(b.constant(1, 'integer')),
+      ];
+    };
+    const point = (x: Expression): V[] => {
+      if (missing(x)) return [gap(), gap()];
+      // Outside geometry, a tuple with a Missing coordinate declines.
+      if (
+        isFunction(x, 'Tuple') &&
+        isLibrary(x) &&
+        x.nops === 2 &&
+        x.ops.some(missing)
+      )
+        return x.ops.map((op) => {
+          const v = scalar(op);
+          if (!isSubLane(type(v).lane, 'real'))
+            decline(op, 'a Polygon coordinate that is not a real number');
+          return v;
+        });
+      return coordinates(x, value(x)!);
+    };
+    const first = e.ops[0];
+    if (e.nops === 1 && isFunction(first, 'List') && isLibrary(first)) {
+      if (first.nops === 0) return emptyList(e, 'real');
+      return list(e, first.ops.flatMap(point));
+    }
+    if (e.nops !== 1 || missing(first)) return list(e, e.ops.flatMap(point));
+    const v = value(first)!;
+    const t = type(v);
+    if (
+      tuples.get(v) === 1 &&
+      t.shape.length === 2 &&
+      t.shape[1] === 2 &&
+      isSubLane(t.lane, 'real')
+    )
+      return matrices.flatten(e, v);
+    return list(e, coordinates(first, v));
+  };
+
   let lowered = 0;
-  const node = (e: Expression, want: boolean): V | undefined => {
+  const node = (
+    e: Expression,
+    want: boolean,
+    entryResult: boolean
+  ): V | undefined => {
     if (++lowered > NODE_LIMIT)
       decline(root, `more than ${NODE_LIMIT} nodes to lower`);
     // A number literal, or a structural `Rational(p, q)` of the library: the
@@ -2449,6 +2523,23 @@ function lowerOnce(
     if (interval && isEnclosureCollection(e.type.type)) decline(e, COLLECTION);
     if (interval && isEnclosureNode(e)) return enclosures(e);
     checkTextDomains(e);
+    // Geometry is opaque to constant folding. Lower the vertex expressions
+    // through their normal numeric paths and tag only the entry result.
+    if (entryResult && javascript) {
+      if (isPolygon(e)) {
+        polygonResult = 'single';
+        return polygonVertices(e);
+      }
+      if (e.operator === 'List' && e.nops > 0 && e.ops.every(isPolygon)) {
+        polygonResult = 'list';
+        return lists.rowsList(e, e.ops.map(polygonVertices));
+      }
+      const member = e.ops[0];
+      if (e.operator === 'Comprehension' && isPolygon(member)) {
+        polygonResult = 'list';
+        return lists.comprehension(e, () => polygonVertices(member));
+      }
+    }
     const closed = closedValue(e);
     if (closed !== undefined) return closed;
     switch (e.operator) {
@@ -2508,7 +2599,7 @@ function lowerOnce(
         );
       }
       case 'Block':
-        return block(e, want);
+        return block(e, want, entryResult);
       case 'List': {
         // A list, or a record of elements of several lanes; a list of
         // lists of run-time length is of the lane `rows` (CE-1736).
@@ -6391,7 +6482,7 @@ function lowerOnce(
     return xs.some(power) ? 'real' : t;
   };
 
-  const block = (e: Fn, want: boolean): V | undefined => {
+  const block = (e: Fn, want: boolean, entryResult: boolean): V | undefined => {
     // The value of the block, admitted whole where the block is.
     const wholeValue = passesWhole(e);
     return withFrame(false, (frame) => {
@@ -6650,7 +6741,7 @@ function lowerOnce(
           try {
             result =
               wholeValue && want && i === e.nops - 1
-                ? wholeRows(s)
+                ? wholeRows(s, entryResult)
                 : value(s, want && i === e.nops - 1);
           } finally {
             whole = before;
@@ -8303,6 +8394,7 @@ function lowerOnce(
     return {
       ...p,
       inputs,
+      ...(polygonResult === undefined ? {} : { polygonResult }),
       ...(inputBounds.size > 0 ? { inputBounds } : {}),
       ...(enclosure ? { valueKinds: ['enclosure'] } : {}),
       ...(assigns.length > 0 ? { assigns } : {}),
@@ -8955,7 +9047,7 @@ function lowerOnce(
       // The result is read whole: a list of lists of run-time length is the
       // host's array of arrays (CE-1736).
       if (states.length === 0) {
-        if (want) return result(wholeRows(body));
+        if (want) return result(wholeRows(body, true));
         value(body, false);
         return b.constant(NaN, 'real');
       }
@@ -9016,7 +9108,7 @@ function lowerOnce(
       known = new WeakMap();
       const hidden = Object.fromEntries(states.map((s) => [s.name, true]));
       const v = withVarsValuesHidden(root, hidden, () =>
-        want ? wholeRows(body) : value(body, false)
+        want ? wholeRows(body, true) : value(body, false)
       );
       return [
         want && v !== undefined ? result(v) : b.constant(NaN, 'real'),
@@ -9025,7 +9117,7 @@ function lowerOnce(
     });
   }
   return program(() => {
-    const v = wholeRows(root);
+    const v = wholeRows(root, true);
     return result(rootParts ?? v);
   });
 }

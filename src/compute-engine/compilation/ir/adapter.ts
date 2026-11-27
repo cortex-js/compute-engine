@@ -541,8 +541,12 @@ function compileIr(
   let strings = entry.results.some((t) => t.lane === 'string');
   // A list of rows of different lengths as the result: no batch either;
   // nor a record (README, "Records"), which a batch cannot write.
-  const rows = entry.results.some((t) => t.lane === 'rows');
-  const records = entry.results.some((t) => t.lane === 'record');
+  const rows =
+    p.polygonResult === undefined &&
+    entry.results.some((t) => t.lane === 'rows');
+  const records =
+    p.polygonResult !== undefined ||
+    entry.results.some((t) => t.lane === 'record');
   entry.paramNames.forEach((name, k) => {
     const t = p.types[entry.body.params[k]];
     const i = argumentIndex(entry, k);

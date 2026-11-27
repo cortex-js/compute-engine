@@ -232,6 +232,9 @@ export type Program = {
   types: IRType[];
   readonly functions: IRFunction[];
   readonly entry: string;
+  /** The JavaScript entry returns a flat polygon row or a list of rows.
+   *  The printer attaches the operator tag to each row at return. */
+  readonly polygonResult?: 'single' | 'list';
   /** The names whose engine value the program holds as a literal. */
   readonly captures?: readonly string[];
   /** The names read as inputs (of the entry, lifted into a function,
