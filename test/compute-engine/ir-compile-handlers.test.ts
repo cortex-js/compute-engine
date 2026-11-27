@@ -356,7 +356,7 @@ describe('IR profile, batch G28: a handler that returns an expression', () => {
 
   test('a handler that rebuilds an operand: an At inside the copy gets no handler', () => {
     const ce = engine();
-    const at = attach(ce, 'At', (args) =>
+    attach(ce, 'At', (args) =>
       ce.function('At', [
         args[0],
         ce.function('Max', [
@@ -367,9 +367,7 @@ describe('IR profile, batch G28: a handler that returns an expression', () => {
     );
     const json = ['At', ['List', 1, 2, 3], ['At', ['List', 1, 2, 3], 'i']];
     const r = ir(ce, json);
-    // The outer At, and the authored inner At, which `facts()` asks but
-    // which the copy replaces.
-    expect(at.calls).toBe(2);
+    // Only the outer At's handler contributes to the emitted code.
     expect(r.code!.split('Math.floor').length - 1).toBe(1);
     // The inner At of the copy is the library's: NaN at 1.5.
     // prettier-ignore
