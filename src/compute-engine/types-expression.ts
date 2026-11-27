@@ -3788,6 +3788,57 @@ export interface ArrayInterface {
    */
   swapCells<S extends Exclude<ArrayCells, Expression[]>>(storage: S): S;
 
+  /**
+   * Record that the cells are out of date, for storage that the host keeps
+   * elsewhere (a texture of the GPU): `fetch` gives the latest cells. It
+   * counts as a store (the version, the results of the engine, one state
+   * event), and writes no cell.
+   *
+   * At the next access of the cells, the engine clears the mark and calls
+   * `fetch(array)` once. The accesses are a read, a store, a `Swap`, a
+   * `ListFrom`, a slice and the serialization of the cells in the engine,
+   * the getter {@link cells}, and compiled code, which tests the mark of
+   * each array it reads or stores when `run()` starts, after each call of
+   * a function of the host and after each construction of an array, not
+   * in its loops: an array of its inputs, one that a value of a name holds,
+   * and one that entered the code in the same call of `run()` (one that it
+   * made, or that a name it assigns held after a call of the host), also
+   * when only a local holds it. When no array of the engine is stale, each
+   * of those points costs one test, and each array that is made or read
+   * after a call of the host costs one add to a `WeakSet`, so that it can be
+   * found when it is marked later. The fetch writes the latest
+   * cells through {@link cells}, or gives new storage with
+   * {@link swapCells}. A {@link noteStore} or `swapCells()` made by the
+   * fetch is part of the store that `markStale()` was, and does not
+   * increment the version again. A fetch that throws leaves the array
+   * stale, with the same fetch, unless it marked the array again or gave
+   * the cells: the next access calls it again.
+   *
+   * An array of expression cells throws a `TypeError`: a fetch has no
+   * machine cells to write.
+   *
+   * A second call before the fetch replaces the pending fetch. A
+   * `swapCells()` while the array is stale clears the mark and calls no
+   * fetch: the host gave the cells. A `markStale()` made while compiled code
+   * runs between two of its tests (from another thread or a timer) is
+   * unspecified.
+   *
+   * ```ts
+   * // The GPU wrote the next generation into a texture.
+   * board.markStale((a) => readPixelsInto(a.cells as Uint8Array));
+   * ```
+   */
+  markStale(fetch: (array: ArrayInterface) => void): void;
+
+  /** True from a {@link markStale} until its fetch runs. */
+  readonly stale: boolean;
+
+  /** The fetch that `markStale()` recorded, until it runs. @internal */
+  readonly _fetch: ((array: ArrayInterface) => void) | undefined;
+
+  /** Run the pending fetch, after clearing the mark. @internal */
+  _refresh(): void;
+
   /** The storage kind that the cell type selects (`arrayStorageKind()`).
    * @internal */
   readonly _storage:

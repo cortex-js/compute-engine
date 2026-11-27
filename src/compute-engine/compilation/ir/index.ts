@@ -65,6 +65,7 @@ import {
   argsOf,
   entryOf,
   lengthValues,
+  mapDirectArgs,
   outsOf,
   recursiveFunctions,
   regionsOf,
@@ -655,10 +656,14 @@ function holdArrays(
 ): string | undefined {
   const entry = entryOf(p);
   const isArray = (v: V) => p.types[v].lane === 'array';
+  // The field of a record input is named by its path (`board.pixels`).
+  const paths = new Map<string, string>();
+  for (const [name, fields] of p.fieldInputs ?? [])
+    for (const { field, param } of fields) paths.set(param, `${name}.${field}`);
   for (const [k, v] of entry.body.params.entries()) {
     const t = p.types[v];
     if (t.lane !== 'array') continue;
-    const name = entry.paramNames[k];
+    const name = paths.get(entry.paramNames[k]) ?? entry.paramNames[k];
     const { storage } = arrayStorageKind(t.array!.type);
     if (normalized.includes(name)) {
       if (storage !== 'uint8')
@@ -711,6 +716,213 @@ function holdArrays(
   };
   while (p.functions.map((f) => walk(f.body, false)).some((c) => c));
   p.functions.forEach((f) => walk(f.body, true));
+  return refusal;
+}
+
+/** On GLSL, the refusal of a name of `storage` (the normalized texture of
+ *  `holdArrays()`) that is a record input of numbers and arrays, or a path
+ *  (`board.pixels`) that names no array field of one (`splitRecords()`):
+ *  such a record is in storage by its array fields. */
+function fieldStorage(
+  p: Program,
+  names: readonly string[]
+): string | undefined {
+  const entry = entryOf(p);
+  const arrays = new Map<string, string[]>();
+  for (const [name, fields] of p.fieldInputs ?? [])
+    arrays.set(
+      name,
+      fields
+        .filter(({ param }) => {
+          const v = entry.body.params[entry.paramNames.indexOf(param)];
+          return p.types[v].lane === 'array';
+        })
+        .map(({ field }) => `${name}.${field}`)
+    );
+  for (const name of names) {
+    const record = /^(.+)\.[^.]+$/.exec(name)?.[1] ?? name;
+    const paths = arrays.get(name) ?? arrays.get(record);
+    if (paths?.includes(name) === false)
+      return `the storage sampler2D of ${name}: a record input is in storage by its array fields, each named by its path (${paths.join(', ') || 'none'})`;
+    if (
+      paths === undefined &&
+      record !== name &&
+      !entry.paramNames.includes(name)
+    )
+      return `the storage sampler2D of ${name}, which names no array field of a record input`;
+  }
+  return undefined;
+}
+
+/** A record of a named tuple type whose fields are numbers and arrays, one
+ *  of them at least an array (`fieldRecordInput()` of `lower-records.ts`). */
+function isFieldRecord(t: IRType): boolean {
+  return (
+    t.lane === 'record' &&
+    t.shape.length === 0 &&
+    t.nominal !== undefined &&
+    t.names !== undefined &&
+    (t.fields ?? []).some((f) => f.lane === 'array') &&
+    (t.fields ?? []).every(
+      (f) =>
+        f.lane === 'array' ||
+        ((f.lane === 'integer' || f.lane === 'real') && f.shape.length === 0)
+    )
+  );
+}
+
+/**
+ * On GLSL, a record input whose fields are numbers and arrays (`type
+ * Raster = tuple<width: integer, height: integer, pixels: array<Pixel>>`,
+ * `fieldRecordInput()` of `lower-records.ts`) is one input per field: each
+ * record parameter of the entry and of a function becomes one parameter
+ * per field, in declared order (at the entry, `<name>_<field>`), a read of
+ * a field is that parameter, and a call passes the fields as separate
+ * arguments. Any other use of such a record (an operand of another
+ * operation, a result, an arm, a carried value) is refused. Sets
+ * `Program.fieldInputs`. Returns the refusal, or `undefined`.
+ */
+function splitRecords(p: Program): string | undefined {
+  const split = (v: V) => isFieldRecord(p.types[v]);
+  if (!p.functions.some((f) => f.body.params.some(split))) return undefined;
+  const entry = entryOf(p);
+  const { def } = useIndex(p);
+  const before = new Map(p.functions.map((f) => [f.name, f]));
+  /** The parameters of the fields of each record parameter. */
+  const parts = new Map<V, V[]>();
+  const fieldInputs = new Map<string, { field: string; param: string }[]>();
+  // The uniforms of the fields of the entry (`board_pixels_count` too),
+  // each with the path of its field.
+  const uniforms = new Map<string, string>();
+  let clash: string | undefined;
+  const nominal = (v: V) => p.types[v].nominal!;
+  const functions = p.functions.map((f) => {
+    const params: V[] = [];
+    const paramNames: string[] = [];
+    const lengthOf: boolean[] = [];
+    const widthOf: boolean[] = [];
+    const partOf: (number | undefined)[] = [];
+    let { lifted, positional } = f;
+    f.body.params.forEach((v, k) => {
+      const t = p.types[v];
+      const name = f.paramNames[k];
+      if (!split(v)) {
+        params.push(v);
+        paramNames.push(name);
+        lengthOf.push(f.lengthOf[k]);
+        widthOf.push(f.widthOf?.[k] === true);
+        partOf.push(f.partOf?.[k]);
+        return;
+      }
+      const own = t.fields!.map((x, j) => ({
+        v: p.types.push(x) - 1,
+        name: `${name}_${t.names![j]}`,
+      }));
+      parts.set(
+        v,
+        own.map((x) => x.v)
+      );
+      if (f === entry) {
+        fieldInputs.set(
+          name,
+          own.map((x, j) => ({ field: t.names![j], param: x.name }))
+        );
+        own.forEach((x, j) => {
+          const path = `${name}.${t.names![j]}`;
+          const array = t.fields![j].lane === 'array';
+          for (const u of array ? [x.name, `${x.name}_count`] : [x.name]) {
+            if (uniforms.has(u))
+              clash ??= `the uniform ${u} of the fields ${uniforms.get(u)} and ${path}`;
+            uniforms.set(u, path);
+          }
+        });
+      }
+      // `k` is an index of `f`: compare it with the indices of `f`.
+      if (lifted !== undefined && k < f.lifted!) lifted += own.length - 1;
+      if (positional !== undefined && k < f.positional!)
+        positional += own.length - 1;
+      for (const x of own) {
+        params.push(x.v);
+        paramNames.push(x.name);
+        lengthOf.push(false);
+        widthOf.push(false);
+        partOf.push(undefined);
+      }
+    });
+    return {
+      ...f,
+      paramNames,
+      lengthOf,
+      ...(f.widthOf === undefined ? {} : { widthOf }),
+      ...(f.partOf === undefined ? {} : { partOf }),
+      ...(lifted === undefined ? {} : { lifted }),
+      ...(positional === undefined ? {} : { positional }),
+      body: { ...f.body, params },
+    };
+  });
+  // A field is a uniform of the shader (an array, also its count): no
+  // other input has its name.
+  const others = new Set(
+    entry.paramNames.filter((_, k) => !split(entry.body.params[k]))
+  );
+  if (clash !== undefined) return clash;
+  for (const [uniform, field] of uniforms)
+    if (others.has(uniform))
+      return `the input ${uniform}, which is the name of a uniform of the field ${field}`;
+  const value = (v: V) => valueOf(nominal(v));
+  const valueOf = (nominal: string) =>
+    `a record of the type ${nominal} as a value (a result, an arm of an If, a local assigned in a loop): its fields are inputs of the shader, read one by one`;
+  let refusal: string | undefined;
+  // The read of a field: the parameter of that field.
+  const sub = new Map<V, V>();
+  const at = (v: V) => sub.get(v) ?? v;
+  const walk = (r: Region, body: boolean): void => {
+    if (!body) {
+      const v = r.params.find(split);
+      if (v !== undefined) refusal ??= value(v);
+    }
+    r.body = r.body.filter((i) => {
+      mapDirectArgs(i, at);
+      if (i.k === 'op' && i.op === 'field' && parts.has(i.args[0])) {
+        const c = def.get(i.args[1]);
+        const k = c?.k === 'const' ? Number(c.value.value) : -1;
+        const field = parts.get(i.args[0])![k];
+        if (field === undefined)
+          refusal ??= `a read of a field of a record of the type ${nominal(i.args[0])} at an index that is not a constant`;
+        else sub.set(i.out, field);
+        return field === undefined;
+      }
+      if (i.k === 'call' && i.args.some((a) => parts.has(a))) {
+        const callee = before.get(i.fn)!;
+        if (
+          i.args.some((a, k) => parts.has(a) && !split(callee.body.params[k]))
+        )
+          refusal ??= `a call of ${callee.source ?? i.fn} with a record of the type ${nominal(i.args.find((a) => parts.has(a))!)} for a parameter that is not one`;
+        i.args = i.args.flatMap((a) => parts.get(a) ?? [a]);
+      } else {
+        const a = argsOf(i).find((x) => parts.has(x));
+        if (a !== undefined) {
+          const head =
+            i.k === 'op' ? (rowOfOp(OPERATORS, i.op)?.row.head ?? i.op) : i.k;
+          refusal ??= `a read of a record of the type ${nominal(a)} by ${head} (its fields are inputs of the shader: a field read and a call read it)`;
+        }
+      }
+      const out = outsOf(i).find(split);
+      if (out !== undefined) refusal ??= value(out);
+      regionsOf(i).forEach((x) => walk(x, false));
+      return true;
+    });
+    r.yields = r.yields.map(at);
+    const y = r.yields.find((v) => parts.has(v) || split(v));
+    if (y !== undefined) refusal ??= value(y);
+  };
+  for (const f of functions) {
+    walk(f.body, true);
+    const t = f.results.find(isFieldRecord);
+    if (t !== undefined) refusal ??= valueOf(t.nominal!);
+  }
+  p.functions.splice(0, Infinity, ...functions);
+  Object.assign(p, { fieldInputs });
   return refusal;
 }
 
@@ -952,6 +1164,11 @@ export function sliceProgram(
     if (refused !== undefined)
       throw new Decline('program', `${refused} on interval-js`);
   }
+  if (options.target === 'glsl') {
+    const refused = splitRecords(p);
+    if (refused !== undefined)
+      throw new Decline('program', `${refused} on glsl`);
+  }
   verify(p, rows);
   const lanes: Lane[] = bigint
     ? ['integer', 'boolean']
@@ -1014,6 +1231,11 @@ export function compileSlice(
   program: Program;
 } {
   const p = sliceProgram(expr, options);
+  const fields =
+    options.target === 'glsl'
+      ? fieldStorage(p, options.storage ?? [])
+      : undefined;
+  if (fields) throw new Decline('program', `${fields} on glsl`);
   const arrays =
     options.target === 'glsl' && p.arrays !== undefined
       ? holdArrays(p, options.storage ?? [])
@@ -1073,9 +1295,14 @@ export function compileSlice(
             options.bareInputs
               ? {
                   ...syntax,
+                  // A field of a record input is always the uniform
+                  // `<name>_<field>`: `vars` does not rename it.
                   input: (name) =>
                     typeof options.bareInputs === 'object' &&
-                    Object.hasOwn(options.bareInputs, name)
+                    Object.hasOwn(options.bareInputs, name) &&
+                    ![...(p.fieldInputs?.values() ?? [])].some((fields) =>
+                      fields.some(({ param }) => param === name)
+                    )
                       ? options.bareInputs[name]
                       : name,
                 }

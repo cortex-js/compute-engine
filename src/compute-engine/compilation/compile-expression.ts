@@ -34,6 +34,7 @@ import {
 } from './vars-inputs.js';
 import { compileWithIrProfile, type IR_OPTIONS } from './ir/adapter.js';
 import { compileWithIrProfileGlsl } from './ir/adapter-glsl.js';
+import { fieldRecordInput } from './ir/lower-records.js';
 import { compileWithIrProfileInterval } from './ir/adapter-interval.js';
 import { BUILT_IN_TARGETS } from './targets.js';
 import { isLibraryOperator } from '../library-shadowing.js';
@@ -307,8 +308,20 @@ function withCompileInputs<O extends CompileExpressionOptions, X>(
   const types = new Map(
     names.map((name) => [name, ce.type(inputs[name]).type])
   );
+  // On GLSL, a constant named tuple with a mutable-array field is an input
+  // (CE-1892): its cells change after the compilation.
+  const constants =
+    options.to === 'glsl'
+      ? new Set(
+          names.filter(
+            (name) =>
+              fieldRecordInput(ce, types.get(name)!, () => undefined) !==
+              undefined
+          )
+        )
+      : undefined;
   const run = (): X | CompileDeclineError =>
-    withTypedInputs(types, () => runWithInputs());
+    withTypedInputs(types, () => runWithInputs(), constants);
   const runWithInputs = (): X | CompileDeclineError => {
     ce.pushScope();
     try {

@@ -364,6 +364,20 @@ export function compileWithIrProfileGlsl(
     const code =
       expressionOf(body) ?? body.map((line) => line.slice(2)).join('\n');
     const inputs = entry.paramNames;
+    // A record input of numbers and arrays (`splitRecords()` of
+    // `index.ts`): the record of each field parameter, and its path
+    // (`board.width`). `vars` does not rename a field parameter.
+    const owner = new Map<string, string>();
+    const path = new Map<string, string>();
+    for (const [name, fields] of p.fieldInputs ?? [])
+      for (const { field, param } of fields) {
+        owner.set(param, name);
+        path.set(param, `${name}.${field}`);
+        delete vars[param];
+      }
+    /** An input in a message: a field parameter is its field. */
+    const what = (name: string) =>
+      path.has(name) ? `the field ${path.get(name)}` : `the input ${name}`;
     const lowered: Record<string, string> = {};
     // The uniform of the count of each array input (`A_count`).
     const counts: Record<string, string> = {};
@@ -385,8 +399,8 @@ export function compileWithIrProfileGlsl(
         const id = /^[^.[]*/.exec(vars[other] ?? other)![0];
         if (id === array || id === count)
           throw decline(
-            `the input ${other}, spelled ${id}, which is the name of the ${id === array ? 'sampler' : 'count'} of the array ${array}, on glsl`,
-            { binding: other }
+            `${what(other)}, spelled ${id}, which is the name of the ${id === array ? 'sampler' : 'count'} of ${path.has(array) ? `the field ${path.get(array)}` : `the array ${array}`}, on glsl`,
+            { binding: owner.get(other) ?? other }
           );
       }
     entry.body.params.forEach((v, k) => {
@@ -406,7 +420,10 @@ export function compileWithIrProfileGlsl(
         // `A__count` holds `__`, which GLSL reserves.
         (counts[name] !== undefined && id.endsWith('_'))
       )
-        throw decline(`the input name \`${id}\` on glsl`, { binding: name });
+        throw decline(
+          `the input name \`${id}\`${path.has(name) ? ` of the field ${path.get(name)}` : ''} on glsl`,
+          { binding: owner.get(name) ?? name }
+        );
       // A list in storage: its array type (`float[5]`); an array: its
       // sampler (`highp usampler2D`).
       lowered[name] = typeName(
@@ -415,12 +432,39 @@ export function compileWithIrProfileGlsl(
           : { ...p.types[v], storage: undefined }
       );
     });
+    // A record input of numbers and arrays: a uniform, or a sampler and its
+    // count, per field, whose names no other input has.
+    for (const [param, name] of owner)
+      for (const other of inputs) {
+        if (owner.has(other)) continue;
+        const id = /^[^.[]*/.exec(vars[other] ?? other)![0];
+        if (id === param || id === counts[param])
+          throw decline(
+            `the input ${other}, spelled ${id}, which is the name of a uniform of the field ${param.slice(name.length + 1)} of ${name}, on glsl`,
+            { binding: other }
+          );
+      }
     addSymbolDeps(p, options?.symbolDeps);
     // A name of `vars` is an entry parameter (`bareInputs`); `lowered` is
     // the GLSL type of the parameter, which the host binds the uniform as.
-    const report = inputReport(p, inputs, (name) => lowered[name]);
+    const report = inputReport(
+      p,
+      inputs.map((name) => owner.get(name) ?? name),
+      (name) => (p.fieldInputs?.has(name) ? 'fields' : lowered[name])
+    );
     for (const [name, count] of Object.entries(counts))
-      report.freeSymbolTypes[name].count = count;
+      if (!owner.has(name)) report.freeSymbolTypes[name].count = count;
+    for (const [name, fields] of p.fieldInputs ?? [])
+      report.freeSymbolTypes[name].fields = Object.fromEntries(
+        fields.map(({ field, param }) => [
+          field,
+          {
+            name: param,
+            lowered: lowered[param],
+            ...(counts[param] === undefined ? {} : { count: counts[param] }),
+          },
+        ])
+      );
     const warnings = float32Warnings(expr, options?.constantFold !== false);
     return {
       target: 'glsl',

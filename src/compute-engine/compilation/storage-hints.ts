@@ -101,7 +101,10 @@ function storageHintsOf(
 
   const hints = new Map<MathJsonSymbol, StorageKind>();
   for (const name of names) {
-    if (!free.has(name)) {
+    // A field of a record input, by its path (`board.pixels`): the GLSL
+    // compiler checks that it names an array field.
+    const record = /^(.+)\.[^.]+$/.exec(name)?.[1];
+    if (!free.has(name) && (record === undefined || !free.has(record))) {
       const listed =
         free.size === 0
           ? 'the expression has no free symbol'

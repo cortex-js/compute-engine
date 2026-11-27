@@ -520,7 +520,10 @@ export type FreeSymbolType = {
    *   `matN` is emitted. A mutable array (`array<T>`) is a sampler:
    *   `highp usampler2D`, `highp isampler2D` or `highp sampler2D` (see
    *   `count`). A named tuple of two to four real or integer fields is
-   *   `vec2` to `vec4` in declared field order.
+   *   `vec2` to `vec4` in declared field order. Another named tuple whose
+   *   fields are each a real or an integer number or a mutable array of
+   *   machine cells (`tuple<width: integer, height: integer, pixels:
+   *   array<Pixel>>`) is `fields`: one uniform per field (see `fields`).
    * - `javascript`: the runner value convention: `number`, `complex` (a
    *   `{ re, im }` object), `boolean`, `string`, `point` (an array of
    *   numbers of a fixed width), `record` (an object keyed by the fields
@@ -543,6 +546,19 @@ export type FreeSymbolType = {
    * cells (`A_count`), which the host binds beside the sampler.
    */
   count?: string;
+
+  /**
+   * `glsl`, for a named tuple input whose `lowered` is `fields`: each field
+   * by its name, in declared order, with the uniform that the host binds
+   * for it (`name`, `<symbol>_<field>`), the shader type of that uniform
+   * (`lowered`, as above: `float` for a real or an integer number, a
+   * sampler for an array) and, for an array field, the `int` uniform of its
+   * count of cells (`count`, `<symbol>_<field>_count`). The option
+   * `storage: { "<symbol>.<field>": "sampler2D" }` selects the normalized
+   * texture for an array field of bytes. A new value of the symbol is a
+   * new binding of the same uniforms.
+   */
+  fields?: Record<string, { name: string; lowered: string; count?: string }>;
 
   /**
    * `'declared'` when the symbol has an explicit declaration (`ce.declare`),

@@ -2138,7 +2138,7 @@ export function functionLowering(
           b.entryOp('rows.width', [v], scalarType('integer'))
         );
     }
-    if (tupleAxis(t) === 0) cx.tuples.set(v, 0);
+    if (tupleAxis(t) === 0 && ir.lane !== 'record') cx.tuples.set(v, 0);
     fn.inputs.push(t);
     fn.defs.push(def);
     if (hidden) fn.hidden.set(name, v);

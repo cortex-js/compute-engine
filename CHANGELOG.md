@@ -13,6 +13,44 @@
   can return a dictionary with a literal `__tag` and fields of runtime
   length. Lists and comprehensions return one object per member, in order.
 
+- **GLSL reads a named tuple input whose fields hold arrays.** With
+  `type Raster = tuple<width: integer, height: integer, pixels: array<Pixel>>`
+  and `board: Raster` (declared with no value, or named by `inputs`, a
+  constant too: its cells change after the compilation),
+  `board.width`, `board.pixels[i]`, `length(board.pixels)` and a function or
+  a protocol method that takes a `Raster` compile on `glsl`. Each number
+  field is a uniform (`board_width`), each array field a sampler and its
+  count (`board_pixels`, `board_pixels_count`), and
+  `freeSymbolTypes.board.fields` names them:
+
+  ```js
+  r.freeSymbolTypes.board.fields.pixels;
+  // { name: 'board_pixels', lowered: 'highp usampler2D', count: 'board_pixels_count' }
+  ```
+
+  `storage: { 'board.pixels': 'sampler2D' }` reads that field from a
+  normalized texture. A new raster is a new binding of the same uniforms. A
+  store to the raster, the whole raster as a result, and `Equal` of two
+  rasters decline.
+
+- **A host that keeps the cells of an array elsewhere marks the array stale,
+  and the engine fetches the cells at their next use.** `array.markStale(fetch)`
+  counts as a store (the `version` increases and the results that read the
+  array are computed again) and writes no cell; `array.stale` is `true` until
+  the fetch runs. At the next read, store, `Swap`, `ListFrom`, slice or
+  serialization of the cells, at the next read of `cells`, and in compiled
+  JavaScript when `run()` starts and after each call of a function of the
+  host, the engine calls `fetch(array)` once. The fetch writes the latest cells
+  through `cells`, or gives new storage with `swapCells()`. A `swapCells()`
+  while the array is stale gives the cells and calls no fetch. An array that is
+  never marked costs one test of a field at each access.
+
+  ```ts
+  // The GPU computed the next generation of the board in a texture.
+  board.markStale((a) => readTexture(texture, a.cells as Uint8Array));
+  board.cells[0]; // the fetch runs here, once
+  ```
+
 ### Improvements
 
 - **In Epsil, a library spelling at the head of a call pattern names the

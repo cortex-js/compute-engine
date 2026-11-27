@@ -21,6 +21,7 @@
  */
 
 import type {
+  ArrayInterface,
   IComputeEngine as ComputeEngine,
   Expression,
 } from '../../global-types.js';
@@ -75,6 +76,7 @@ import {
 } from './print.js';
 import { TEXT, TEXT_REGIONS } from './print-js-text.js';
 import { arrayEntryCheck } from './lower-arrays.js';
+import { staleArrays } from '../../boxed-expression/boxed-array.js';
 
 const IDENTIFIER = /^[A-Za-z_$][\w$]*$/;
 
@@ -772,7 +774,8 @@ export function runtimeOf(
   hosts?: readonly HostCall[],
   arrays?: ArrayUse,
   assigns?: readonly Assigned[],
-  pending?: ReturnType<typeof assignmentState>
+  pending?: ReturnType<typeof assignmentState>,
+  sync?: ArraySync
 ): SysHelpers {
   if (ce === undefined) {
     if (hosts !== undefined)
@@ -792,7 +795,9 @@ export function runtimeOf(
         };
   if (hosts !== undefined)
     Object.defineProperty(sys, 'hosts', {
-      value: Object.freeze(hosts.map((h) => hostCaller(ce, h, before))),
+      value: Object.freeze(
+        hosts.map((h) => hostCaller(ce, h, before, sync?.after))
+      ),
     });
   if (
     assigns !== undefined &&
@@ -806,7 +811,13 @@ export function runtimeOf(
           pending!.put(j, y);
           return NaN;
         },
-        get: (j: number) => readAssigned(ce, assigns[j]),
+        get: (j: number) => {
+          const v = readAssigned(ce, assigns[j]);
+          // An array that a call of the host gave to the name: the code can
+          // keep it in a local (`arraySync()`).
+          if (assigns[j].array !== undefined) sync?.enter(v);
+          return v;
+        },
       }),
     });
   if (arrays !== undefined)
@@ -818,13 +829,169 @@ export function runtimeOf(
             const make = arrayMaker(ce, m);
             return (...args: unknown[]) => {
               before?.();
-              return make(...args);
+              const a = make(...args);
+              // The allocation function and `ce.arrayCreated` of the host
+              // ran: the new array and the arrays of the code, as after a
+              // call of the host (`arraySync()`).
+              syncArray(a);
+              sync?.enter(a);
+              sync?.after();
+              return a;
             };
           })
         ),
       }),
     });
   return sys;
+}
+
+/** The synchronization of the arrays that the code reads or stores with a
+ *  host that marked one stale (`ArrayInterface.markStale()`), at the points
+ *  where the code reads its arrays again: `run` when `run()` starts, and
+ *  `after` after each call of a function of the host and each construction
+ *  of an array. `enter` records an array that enters the code in this call
+ *  (a construction, or a read of an assigned name after a call of the host),
+ *  which no input holds. */
+type ArraySync = {
+  readonly run: (body: JavaScriptResult['run']) => JavaScriptResult['run'];
+  readonly after: () => void;
+  readonly enter: (a: unknown) => void;
+};
+
+/** One test of the mark of the array `a`, and its fetch when it is set. */
+function syncArray(a: unknown): void {
+  const x = a as ArrayInterface | undefined;
+  if (x?._fetch !== undefined) x._refresh();
+}
+
+/**
+ * The synchronization of the arrays of the program `p` (`ArraySync`), or
+ * `undefined` when the code reaches no array. An array enters the code
+ * during a call in one of these ways, and each one is reached:
+ * - an input of the entry (a parameter, a name of `ArrayUse.names` or an
+ *   assigned name, which `run()` reads and gives the code; a record input
+ *   that holds an array declines): `places`, from the arguments;
+ * - a value of a name that the program holds (`ArrayUse.refs`): `refs`;
+ * - a construction (`_SYS.arrays.make`): `entered`;
+ * - the read of an assigned name after a call of the host
+ *   (`_SYS.state.get`, `readAssigned()`), which can give another array
+ *   than the input, and which the code can keep in a local: `entered`.
+ * A call of the host gives no array (its value is a number or a boolean),
+ * and receives none that the code did not reach in one of these ways.
+ * `entered` is a `WeakSet` of the current call, which keeps none of them.
+ *
+ * Each point first tests the size of the stale arrays of the engine
+ * (`staleArrays()`): when no array is stale it does nothing more. Otherwise
+ * it runs the fetch of each array of the inputs and `refs` that is stale,
+ * and, when an array entered the call, walks the stale arrays: it deletes
+ * the entry of an array that was collected, and runs the fetch of one in
+ * `entered`. A stale array that the code cannot reach stays stale. The cost
+ * when nothing is stale is one test at each point and one `WeakSet` add for
+ * each array that enters the code by `entered`; no test runs in the code.
+ * While an array that the code cannot reach stays stale, each point also
+ * tests the inputs and `refs`, and walks the stale arrays when an array
+ * entered the call.
+ */
+function arraySync(
+  ce: ComputeEngine,
+  p: Program
+): ArraySync | undefined {
+  const entry = entryOf(p);
+  const literal = entry.literal === true;
+  const positional = argumentIndex(entry, entry.positional ?? 0);
+  // Where each array input is: the argument, and its key in the inputs
+  // object.
+  const places: { arg: number; key?: string }[] = [];
+  entry.paramNames.forEach((name, k) => {
+    if (entry.lengthOf[k] || p.types[entry.body.params[k]].lane !== 'array')
+      return;
+    const i = argumentIndex(entry, k);
+    places.push(
+      literal && i < positional
+        ? { arg: i }
+        : { arg: literal ? positional : 0, key: name }
+    );
+  });
+  const refs = p.arrays?.refs ?? [];
+  const makes = (p.arrays?.makers.length ?? 0) > 0;
+  if (places.length === 0 && refs.length === 0 && !makes) return undefined;
+  // The code runs host code while it runs: a call of the host, or the
+  // allocation function and `ce.arrayCreated` of a construction.
+  const hosts = (p.hosts?.length ?? 0) > 0 || makes;
+  const stale = staleArrays(ce);
+  const syncAll = (args: unknown[]) => {
+    for (const r of refs) syncArray(r);
+    for (const x of places) {
+      let v: unknown = args[x.arg];
+      if (x.key !== undefined)
+        v = (v as Record<string, unknown> | undefined)?.[x.key];
+      syncArray(v);
+    }
+  };
+  // The arguments of the current call, while it runs, and the arrays that
+  // entered it; a call of the code from host code has its own.
+  let args: unknown[] | undefined;
+  let entered: WeakSet<object> | undefined;
+  // The inputs and `refs`, then, when an array entered the call, the walk
+  // of the stale arrays. A copy: a fetch can mark an array again. With no
+  // array entered, the walk could only drop the entries of collected
+  // arrays, which `staleCollected` drops.
+  const syncStale = (given: unknown[]) => {
+    syncAll(given);
+    if (entered === undefined) return;
+    for (const ref of Array.from(stale)) {
+      const a = ref.deref();
+      if (a === undefined) stale.delete(ref);
+      else if (entered?.has(a)) syncArray(a);
+    }
+  };
+  const after = () => {
+    if (stale.size !== 0 && args !== undefined) syncStale(args);
+  };
+  return {
+    run: (body) =>
+      hosts
+        ? (...given) => {
+            const callerArgs = args;
+            const callerEntered = entered;
+            args = given;
+            entered = undefined;
+            try {
+              if (stale.size !== 0) syncStale(given);
+              return body(...given);
+            } finally {
+              args = callerArgs;
+              entered = callerEntered;
+            }
+          }
+        : (...given) => {
+            if (stale.size !== 0) syncStale(given);
+            return body(...given);
+          },
+    after,
+    enter: (a) => {
+      if (args !== undefined && typeof a === 'object' && a !== null)
+        (entered ??= new WeakSet()).add(a);
+    },
+  };
+}
+
+/** Whether a value of the IR type `t` holds an array of the engine: an
+ *  array, or a record with such a field. */
+function holdsArray(t: IRType): boolean {
+  return (
+    t.lane === 'array' ||
+    (t.lane === 'record' && (t.fields ?? []).some(holdsArray))
+  );
+}
+
+/** The fetch of each array that the value `x` of the IR type `t` holds
+ *  (`holdsArray()`), as `boxValue()` gives them to the engine. */
+function syncValue(t: IRType, x: unknown): void {
+  if (t.lane === 'array') return syncArray(x);
+  if (t.lane !== 'record') return;
+  const xs = x as readonly unknown[];
+  (t.fields ?? []).forEach((f, k) => syncValue(f, xs[k]));
 }
 
 /** Actual writes of the current call. Recursive entry from a host callback
@@ -983,11 +1150,15 @@ function boxValue(
 function hostCaller(
   ce: ComputeEngine,
   h: HostCall,
-  before?: () => void
+  before?: () => void,
+  after?: () => void
 ): (...args: unknown[]) => number | boolean {
   const call = h.call as unknown as {
     _withSameBinding(ops: ReadonlyArray<Expression>): Expression;
   };
+  // The arguments that hold an array, which the call can mark stale.
+  const arrayArgs = h.types.flatMap((t, k) => (holdsArray(t) ? [k] : []));
+  const stale = staleArrays(ce);
   return (...args) => {
     // The stores of the unit before the call (`arrayNote()`).
     before?.();
@@ -1006,6 +1177,12 @@ function hostCaller(
             : ce.number(x as number)
     );
     const value = call._withSameBinding(ops).evaluate();
+    // The arrays that the call marked stale: those it received, and those
+    // of the code (`arraySync()`). One test when no array is stale.
+    if (stale.size !== 0) {
+      for (const k of arrayArgs) syncValue(h.types[k], args[k]);
+      after?.();
+    }
     if (h.result === 'nothing') return NaN;
     if (h.result === 'boolean') {
       if (isSymbol(value, 'True')) return true;
@@ -1047,6 +1224,7 @@ export function readAssigned(
   const v = x.definition.value;
   if (x.array !== undefined) {
     arrayEntryCheck(ce, x.array, `The variable "${x.name}"`)(v);
+    syncArray(v);
     return v!;
   }
   // The machine value of the element `y` of the lane of `x`, or `undefined`.
@@ -1273,12 +1451,14 @@ export function printJavaScript(
         ce !== undefined && p.stagedAssignments
           ? assignmentState(ce, p.assigns!)
           : undefined;
-      const sys = runtimeOf(ce, p.hosts, p.arrays, p.assigns, pending);
-      const run = (
+      const sync = ce !== undefined ? arraySync(ce, p) : undefined;
+      const sys = runtimeOf(ce, p.hosts, p.arrays, p.assigns, pending, sync);
+      const raw = (
         literal
           ? twoStageRunner(sys, preambleOnce, [], `return (${code});`)()
           : twoStageRunner(sys, preambleOnce, ['_'], `return ${code};`)
       ) as JavaScriptResult['run'];
+      const run = sync?.run(raw) ?? raw;
       return pending?.run(run) ?? run;
     } catch (e) {
       // A deadline that expires while the values computed once are computed.

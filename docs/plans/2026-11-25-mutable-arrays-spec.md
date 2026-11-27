@@ -453,6 +453,28 @@ A host function receives an array argument as the engine's value, in the
 interpreter and from compiled code. In the interpreter, a host function can
 return an array.
 
+**Cells kept elsewhere (CE-1893).** A host whose latest cells are in other
+storage (a texture of the GPU) calls `markStale(fetch)`: it counts as a store
+(the version, the store epoch, one state event) and writes no cell, and
+`stale` is `true` until the fetch runs; a second `markStale()` replaces the
+pending fetch. At the next access of the cells, the engine clears the mark and
+calls `fetch(array)` once; the fetch writes through `cells` or calls
+`swapCells()`, and neither increments the version again. The accesses are a
+read, a store, `Swap`, `ListFrom`, a slice and the serialization of the cells
+in the interpreter, the getter `cells`, and, in compiled JavaScript, each
+array that the code reads or stores (a parameter, a name of `arrays`, an
+assigned name, an array that a value of a name holds, an array that the code
+made or read again from an assigned name during the call), tested when
+`run()` starts, after each call of a function of the host and after each
+construction of an array, never in a loop; a stale array that the code cannot
+reach is not fetched. A fetch that throws leaves the array stale. An array of
+expression cells refuses `markStale()`. A `swapCells()` while
+the array is stale clears the mark and calls no fetch. A `markStale()` made
+while compiled code runs between two of those points (another thread, a
+timer) is unspecified. When no array of the engine is stale, an access of the
+interpreter costs one test of a field, and each of those points in compiled
+code one test of the size of the engine's set of stale arrays.
+
 ## 10. Compiled JavaScript (extends B9; T3, T4, T6)
 
 Arrays of machine cells compile on the `javascript` target, in the default

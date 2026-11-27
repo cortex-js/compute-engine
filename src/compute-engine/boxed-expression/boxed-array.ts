@@ -160,6 +160,15 @@ export class BoxedArray extends _BoxedExpression implements ArrayInterface {
   /** Per-array cache currency, as `BoxedObject._version`. */
   _version: number;
 
+  /** The fetch that {@link markStale} recorded, until it runs: `undefined`
+   * when the cells are current. Each access of the cells tests it, and
+   * calls {@link _refresh} only when it is set. */
+  _fetch: ((array: ArrayInterface) => void) | undefined;
+
+  /** The entry of the array in the stale arrays of its engine
+   * ({@link staleArrays}), made at the first {@link markStale}. */
+  private _staleRef: WeakRef<BoxedArray> | undefined;
+
   /** Per-engine construction serial, from the counter of objects; the sole
    * input to {@link hash}. */
   readonly _serial: number;
@@ -183,6 +192,8 @@ export class BoxedArray extends _BoxedExpression implements ArrayInterface {
     this._cells = cells;
     this._count = count;
     this._version = 0;
+    this._fetch = undefined;
+    this._staleRef = undefined;
     this._serial = nextSerial(ce);
     this._type = type;
     noteObjectConstructed(ce);
@@ -219,7 +230,13 @@ export class BoxedArray extends _BoxedExpression implements ArrayInterface {
   /** The storage, by reference: a typed array for machine cells, with four
    * bytes for each tuple cell, a read-only array for expression cells. */
   get cells(): ArrayCells {
+    if (this._fetch !== undefined) this._refresh();
     return this._cells;
+  }
+
+  /** True from a {@link markStale} until its fetch runs. */
+  get stale(): boolean {
+    return this._fetch !== undefined;
   }
 
   /** The change signal: a store that changes a cell increments it. */
@@ -368,10 +385,11 @@ export class BoxedArray extends _BoxedExpression implements ArrayInterface {
    * as `BoxedObject._field()` reports one.
    */
   _read(index: number): Expression {
+    if (this._fetch !== undefined) this._refresh();
     recordObjectRead(this, this._version);
     const i = cellOffset(index, this._count);
     if (i < 0) return absentCell(this.engine, this._spec);
-    return this._peek(i);
+    return this._cell(i);
   }
 
   /**
@@ -380,6 +398,13 @@ export class BoxedArray extends _BoxedExpression implements ArrayInterface {
    * results are never memoized. A program reads with {@link _read}.
    */
   _peek(i: number): Expression {
+    if (this._fetch !== undefined) this._refresh();
+    return this._cell(i);
+  }
+
+  /** The cell at the 0-based offset `i`, in range, of cells that are
+   * current. */
+  private _cell(i: number): Expression {
     const spec = this._spec;
     const cells = this._cells;
     if (spec.storage === 'expression') return (cells as Expression[])[i];
@@ -431,6 +456,8 @@ export class BoxedArray extends _BoxedExpression implements ArrayInterface {
     const i = cellOffset(index, this._count);
     if (i < 0) return outOfRange(this.engine, index, this._count);
     if (!value.isValid) return value;
+    // The cells that the store compares with and keeps are current.
+    if (this._fetch !== undefined) this._refresh();
 
     const spec = this._spec;
     if (spec.storage === 'expression') {
@@ -498,6 +525,10 @@ export class BoxedArray extends _BoxedExpression implements ArrayInterface {
       !isSubtype(b.cellType.type, a.cellType.type)
     )
       return false;
+    // The cells that move with each identity are current: a pending fetch
+    // belongs to the array, not to the storage.
+    if (this._fetch !== undefined) this._refresh();
+    if (other._fetch !== undefined) other._refresh();
     this._beforeChange();
     other._beforeChange();
     const cells = this._cells;
@@ -517,8 +548,64 @@ export class BoxedArray extends _BoxedExpression implements ArrayInterface {
    * engine and one state event).
    */
   noteStore(): void {
+    // The fetch of this array is part of the store that `markStale()` was.
+    if (fetching === this) return;
     this._beforeChange();
     this._afterChange();
+  }
+
+  /**
+   * Record that the cells are out of date, and that `fetch` gives the
+   * latest ones: what a store does (the version, the store epoch, one state
+   * event), with no write. At the next access of the cells, by the engine,
+   * by compiled code or through {@link cells}, the mark is cleared and
+   * `fetch(this)` is called once. A second call before the fetch replaces
+   * the pending fetch. A fetch that throws leaves the array stale, with the
+   * same fetch, unless the fetch itself marked it again or gave the cells
+   * ({@link swapCells}). An array of expression cells throws a `TypeError`:
+   * a fetch has no machine cells to write.
+   */
+  markStale(fetch: (array: ArrayInterface) => void): void {
+    if (typeof fetch !== 'function')
+      throw new TypeError(
+        `markStale(): the fetch must be a function, not ${describeStorage(fetch)}`
+      );
+    if (this._spec.storage === 'expression')
+      throw new TypeError(
+        `markStale(): the cells of an array of ${this.cellType.toString()} are expressions, not machine cells that a fetch can write`
+      );
+    this._beforeChange();
+    this._fetch = fetch;
+    this._markListed(true);
+    this._afterChange();
+  }
+
+  /**
+   * Run the pending fetch: clear the mark first, so that the fetch reads and
+   * writes {@link cells} with no new fetch, then call it. Its writes, and a
+   * {@link swapCells} of it, count as the store that {@link markStale} was.
+   * @internal
+   */
+  _refresh(): void {
+    const fetch = this._fetch!;
+    this._fetch = undefined;
+    this._markListed(false);
+    const caller = fetching;
+    const held = this._cells;
+    fetching = this;
+    try {
+      fetch(this);
+    } catch (e) {
+      // The cells are still out of date, unless the fetch marked the array
+      // again or gave the cells.
+      if (this._fetch === undefined && this._cells === held) {
+        this._fetch = fetch;
+        this._markListed(true);
+      }
+      throw e;
+    } finally {
+      fetching = caller;
+    }
   }
 
   /**
@@ -550,6 +637,16 @@ export class BoxedArray extends _BoxedExpression implements ArrayInterface {
       throw new TypeError(
         `swapCells(): the storage must have the length of the cells, ${this._cells.length}, not ${storage.length}`
       );
+    // The host gives the cells: a pending fetch is not called.
+    if (this._fetch !== undefined) {
+      this._fetch = undefined;
+      this._markListed(false);
+    }
+    if (fetching === this) {
+      const held = this._cells as S;
+      this._cells = storage;
+      return held;
+    }
     this._beforeChange();
     // The cells that the array held have the storage kind of `storage`
     // (checked above), which is what `S` states for a host that passes a
@@ -558,6 +655,17 @@ export class BoxedArray extends _BoxedExpression implements ArrayInterface {
     this._cells = storage;
     this._afterChange();
     return cells;
+  }
+
+  /** Add the array to the stale arrays of its engine, or remove it. */
+  private _markListed(stale: boolean): void {
+    const ref = (this._staleRef ??= new WeakRef(this));
+    const set = staleArrays(this.engine);
+    if (stale) {
+      if (set.has(ref)) return;
+      set.add(ref);
+      staleCollected.register(this, { set, ref }, ref);
+    } else if (set.delete(ref)) staleCollected.unregister(ref);
   }
 
   /** The overflow guard of `BoxedObject._store()`, before a write. */
@@ -576,6 +684,49 @@ export class BoxedArray extends _BoxedExpression implements ArrayInterface {
     this.engine._objectStoreEpoch += 1;
     this.engine._noteStateEvent({ kind: 'object-store' });
   }
+}
+
+/** The array whose fetch runs now (`BoxedArray._refresh()`), or
+ * `undefined`. */
+let fetching: BoxedArray | undefined = undefined;
+
+/** The stale arrays of each engine (`staleArrays()`). */
+const staleByEngine = new WeakMap<ComputeEngine, Set<WeakRef<BoxedArray>>>();
+
+/** An entry of the stale arrays of an engine (`staleArrays()`). */
+type StaleEntry = {
+  readonly set: Set<WeakRef<BoxedArray>>;
+  readonly ref: WeakRef<BoxedArray>;
+};
+
+/** The deletion of the entry of a stale array that was collected: the
+ * cleanup of `staleCollected`. Exported for a test, which cannot wait for a
+ * collection. @internal */
+export function dropCollectedStale(entry: StaleEntry): void {
+  entry.set.delete(entry.ref);
+}
+
+/** Each stale array, with its entry, until it is no longer stale (the
+ * unregister token is its `WeakRef`) or is collected. */
+const staleCollected = new FinalizationRegistry<StaleEntry>(
+  dropCollectedStale
+);
+
+/**
+ * The arrays of the engine `ce` that are stale (`markStale()` with a fetch
+ * that has not run), each by a weak reference, so that the set does not keep
+ * an array that nothing else holds: the entry of an array that is collected
+ * is deleted by `staleCollected`, or earlier by a walk of the set
+ * (`print-js.ts`, `arraySync()`), so that the size returns to 0. The same
+ * set for each call, so that compiled code holds it and tests its size.
+ */
+export function staleArrays(ce: ComputeEngine): Set<WeakRef<BoxedArray>> {
+  let set = staleByEngine.get(ce);
+  if (set === undefined) {
+    set = new Set();
+    staleByEngine.set(ce, set);
+  }
+  return set;
 }
 
 /**

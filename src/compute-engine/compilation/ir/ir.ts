@@ -276,6 +276,14 @@ export type Program = {
   /** The mutable arrays that the program reads or writes
    *  (`lower-arrays.ts`); absent when it touches none. */
   readonly arrays?: ArrayUse;
+  /** GLSL: each record input whose fields are numbers and arrays
+   *  (`fieldRecordInput()` of `lower-records.ts`), by its name, with the
+   *  entry parameter of each field, in declared order (`splitRecords()` of
+   *  `index.ts`). */
+  readonly fieldInputs?: ReadonlyMap<
+    string,
+    readonly { readonly field: string; readonly param: string }[]
+  >;
 };
 
 /** The arrays of a program: `names`, the names of the engine whose value is

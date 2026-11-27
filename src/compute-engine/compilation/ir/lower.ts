@@ -204,6 +204,7 @@ import { MATRIX_HEADS, matrixLowering } from './lower-matrices.js';
 import { matchLowering } from './lower-match.js';
 import { protocolLowering } from './lower-protocols.js';
 import {
+  fieldRecordInput,
   numericRecordInput,
   recordConstructor,
   recordLowering,
@@ -4941,7 +4942,9 @@ function lowerOnce(
       name,
       e.type.type,
       readAs(e.type.type, resolvedValueDefinition(e)),
-      resolvedValueDefinition(e)
+      resolvedValueDefinition(e),
+      false,
+      fieldRecord(e, e.type.type)
     );
   };
 
@@ -5062,7 +5065,8 @@ function lowerOnce(
           t,
           readAs(t, held(name)?.definition),
           def,
-          true
+          true,
+          fieldRecord(e, t)
         );
       }
       known = outer;
@@ -5089,7 +5093,15 @@ function lowerOnce(
     // parameter.
     return cx.inFunction === undefined
       ? input(e, name, held(name)?.definition.type.type ?? t)
-      : fns.capture(e, name, t, readAs(t, held(name)?.definition), def);
+      : fns.capture(
+          e,
+          name,
+          t,
+          readAs(t, held(name)?.definition),
+          def,
+          false,
+          fieldRecord(e, t)
+        );
   };
 
   /** The IR type of an input of the engine type `t`; a tuple is the list of
@@ -5133,12 +5145,20 @@ function lowerOnce(
     return lane === 'real' || lane === 'integer' ? t : 'real';
   };
 
+  /** On GLSL in the default mode, the record of a named tuple input whose
+   *  fields are numbers and arrays (`fieldRecordInput()`), read field by
+   *  field (`splitRecords()` of `index.ts`). */
+  const fieldRecord = (e: Expression, t: Type): IRType | undefined =>
+    options.glsl === true && cx.wide !== 'complex'
+      ? fieldRecordInput(ce, t, (f) => arrays.cellsOf(e, f))
+      : undefined;
+
   /** `ir`, the type of an input, is the IR type of the engine type `t`. */
   const sameInput = (ir: IRType, t: Type): boolean => {
     if (ir.lane === 'array')
       return sameArrayCells(arrayIRType(t)?.array, ir.array);
     if (ir.lane === 'record') {
-      const record = numericRecordInput(ce, t);
+      const record = numericRecordInput(ce, t) ?? fieldRecord(cx.root, t);
       return record !== undefined && sameFields(ir, record);
     }
     const x = inputIR(t) ?? rowsInput(t);
@@ -5187,7 +5207,7 @@ function lowerOnce(
       return v;
     }
     if (javascript || (options.glsl && cx.wide !== 'complex')) {
-      const record = numericRecordInput(ce, t);
+      const record = numericRecordInput(ce, t) ?? fieldRecord(e, t);
       if (record !== undefined) {
         const v = b.param(name, record);
         if (positional) b.positional += 1;

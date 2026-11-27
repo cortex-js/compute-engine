@@ -979,7 +979,12 @@ compilation and the type kept, if the given type is a subtype of it: with
 `inputs` that such a body reads as a constant, or that is a function,
 declines, as a name of `symbolic` does: a constant has no value to leave
 out. The message names the option `inputs`, and `diagnostic.binding` is the
-name; without the name in `inputs`, the compilation reads the constant.
+name; without the name in `inputs`, the compilation reads the constant. One
+constant is an input, on `glsl` only: a named tuple with a mutable-array
+field (a raster, "Arrays", "On GLSL") given in `inputs` with its own type is
+lowered as that input and its value is hidden, because the cells of the
+array change after the compilation, so the binding being constant leaves
+nothing to fold.
 
 The option does not make the expression canonical again. The canonical form
 was chosen with the types that the names had when the expression was boxed,
@@ -3220,6 +3225,11 @@ number: on glsl a record is a value of a nominal tuple type of two to four
 real or integer numbers (a vec2 to a vec4)"; a string, a list, an array, a
 complex number or a record in a field, and one field or more than four,
 alike. The nominal pixel of an array is one such type ("Arrays", "On GLSL").
+A host input of a named tuple whose fields are numbers and arrays (a
+raster, `tuple<width: integer, height: integer, pixels: array<Pixel>>`) is
+not a vector: it is one uniform, or one sampler and its count, per field,
+and a function takes its fields as separate parameters ("Arrays", "On
+GLSL").
 
 ```js
 // type P2 = tuple<x: real, y: real>
@@ -3700,6 +3710,36 @@ host read and write the same typed array. `run()` copies no cell. The code
 reads the storage and the count from the array at each use, so an exchange
 of two storages (`Swap`, the host's `swapCells()`) between two uses is seen.
 
+**Cells kept elsewhere.** A host that marked an array stale
+(`markStale(fetch)`, for cells that a GPU computed) gets its fetch called by
+the code before the code reads or stores the cells. The code tests the mark of
+each array that it can reach (a parameter, a name of `arrays`, an assigned
+name, an array that a value of a name holds) when `run()` starts, after each
+call of a function of the host and after each construction of an array (whose
+allocation function and `ce.arrayCreated` are host code), the points where it
+reads its arrays again, and never in a loop. An array also enters the code
+during a call when the code makes it, or when it reads an assigned name again
+after a call of the host, which can give another array than the one the name
+held at `run()`. The runtime records each such array in a weak set of the
+call, so an array that only a local holds is still tested at each of those
+points. The emitted code is the same: the tests are in the runtime of `run()`.
+When no array of the engine is stale, each point costs one test of the size of
+the engine's set of stale arrays, and each array that is made or read again
+after a call of the host costs one addition to the weak set. When an array is
+stale, the runtime tests the arrays of the inputs and of the values of names,
+and, when an array entered the call, walks the set of stale arrays. A stale
+array that the code cannot reach stays stale: its cells are not read back.
+
+```js
+const run = compile(executeEpsil(ce,
+  '(x: array<integer<0..255>>, i: integer) => x[i]').value).run;
+board.markStale((a) => a.cells.set(device));
+run(board, 1);   // the fetch runs once, then the code reads the device bytes
+```
+
+A `markStale()` made while the code runs between two of those points, from
+another thread or a timer, is unspecified.
+
 **How an array reaches the code.**
 
 - A parameter of the root function literal declared `array<T>`: the host
@@ -3898,10 +3938,59 @@ and every record that is not a vector ("Records", "On GLSL"). Unlike the
 other vectors, a `Pixel` can be an out-of-range read, so its discharges
 decline.
 
+A named tuple whose fields are each a real or an integer number or an array
+of machine cells, one of them at least an array
+(`type Raster = tuple<width: integer, height: integer, pixels: array<Pixel>>`),
+is an input field by field (CE-1892), on the same terms as an array: a name
+declared with the type and no value, or a name of the option `inputs`. Each
+number field is a `float` uniform `<name>_<field>`, as an integer input is;
+each array field is a sampler `<name>_<field>` and its count
+`<name>_<field>_count`, bound as above, and
+`storage: { 'board.pixels': 'sampler2D' }` selects the normalized texture of
+that field (a hint on the record, on a number field or on a field it does
+not have declines). A field read, `At` and `Length` of an array field
+compile, and so do they in a user function or a protocol method whose
+parameter has the type: the function takes the fields as separate
+parameters, in declared order, as it takes the sampler and the count of an
+array. `freeSymbolTypes.board` keeps the declared type, has `lowered:
+'fields'`, and gives each field in `fields`: its uniform (`name`), its
+`lowered` type and, for an array field, its `count`. The value of a name
+that holds a raster is never folded into the code: without `inputs` it
+declines, and with `inputs` it is the input, a constant too
+(`ce.declare('board', { type: 'Raster', value, isConstant: true })`). A new value is
+a new binding of the same uniforms, with no new compilation.
+
+```js
+// type Raster = tuple<width: integer, height: integer, pixels: array<Pixel>>
+ce.declare('board', 'Raster');
+ce.declare('i', 'integer');
+ce.declare('x', 'integer');
+const pixels = ['Field', 'board', "'pixels'"];
+const width = ['Field', 'board', "'width'"];
+const r = compile(ce.box(['At', pixels, ['Add', ['Multiply', 'i', width], 'x', 1]]), { to: 'glsl' });
+r.code;
+// float v10 = (((i * board_width) + x) + 1.0);
+// vec4 v11 = (v10 == floor(v10) && v10 != 0.0 && abs(v10) <= float(board_pixels_count) ? _gpu_ir_cell4_u(board_pixels, v10 > 0.0 ? int(v10) - 1 : board_pixels_count + int(v10)) : vec4(uintBitsToFloat(0x7fc00000u)));
+// return v11;
+r.freeSymbolTypes.board.fields;
+// { width: { name: 'board_width', lowered: 'float' },
+//   height: { name: 'board_height', lowered: 'float' },
+//   pixels: { name: 'board_pixels', lowered: 'highp usampler2D', count: 'board_pixels_count' } }
+```
+
+These decline for such a record, each with a message that names it: a store
+to a cell of an array field or to a field, a store of the whole value, the
+whole value as a result, an arm of an `If` or a local assigned in a loop
+("a record of the type Raster as a value"), `Equal` of two such values,
+another input spelled as the uniform of a field (`board_width`) or as the
+count of an array field, and a named tuple with no array field (a vector,
+"Records", "On GLSL", or a decline).
+
 These decline on GLSL, each with a message that names it: a name whose value
 is an array, a read with a range or a list as the index, a store, `AddTo` of
 a cell, `Swap`, `ArrayFrom`, `ListFrom`, an array as a value (a result, an
-arm of an `If`, a local assigned in a loop), an array in a record, a `vars`
+arm of an `If`, a local assigned in a loop), an array in a record other than
+such an input, a `vars`
 entry for an array, another input spelled as the sampler or the count,
 `storage: 'sampler2D'` on cells that are not bytes, a function called with
 arrays in two kinds of texture, and the `complex` mode.

@@ -24,6 +24,7 @@ import {
   type Fn,
   type Lowering,
 } from './lower-context.js';
+import { arrayCells } from './lower-arrays.js';
 import { inputType, tupleAxis, tupleOrInputType } from './lower-functions.js';
 import {
   elementIndex,
@@ -86,6 +87,47 @@ export function numericRecordInput(
       lane: isSubtype(x.type, 'integer') ? 'integer' : 'real',
       shape: [],
     })),
+  };
+}
+
+/** On GLSL, a named tuple input whose fields are each a real or an integer
+ *  number or a mutable array of machine cells, one of them at least an
+ *  array (`type Raster = tuple<width: integer, height: integer, pixels:
+ *  array<Pixel>>`): the record of those fields, which
+ *  `splitRecords()` of `index.ts` gives one uniform, or one sampler and
+ *  its count, per field. `cells` gives the cells of an array field (it
+ *  declines a cell type that the target does not read). */
+export function fieldRecordInput(
+  engine: Expression['engine'],
+  t: Type,
+  cells: (t: Type) => IRType['array']
+): IRType | undefined {
+  const nominal = unfoldAliasOnDescent(t, undefined)?.type;
+  if (typeof nominal !== 'object' || nominal.kind !== 'reference')
+    return undefined;
+  const body = tupleBody(nominal);
+  if (
+    body === undefined ||
+    body.length === 0 ||
+    body.some(
+      (x) =>
+        x.name === undefined ||
+        (!isSubtype(x.type, 'real') && arrayCells(x.type) === undefined)
+    ) ||
+    body.every((x) => arrayCells(x.type) === undefined) ||
+    sumVariantInfo(engine, nominal.name) !== undefined
+  )
+    return undefined;
+  return {
+    lane: 'record',
+    shape: [],
+    nominal: nominal.name,
+    names: body.map((x) => x.name!),
+    fields: body.map((x): IRType =>
+      isSubtype(x.type, 'real')
+        ? { lane: isSubtype(x.type, 'integer') ? 'integer' : 'real', shape: [] }
+        : { lane: 'array', shape: [], array: cells(x.type) }
+    ),
   };
 }
 

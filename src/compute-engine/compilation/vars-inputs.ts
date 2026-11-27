@@ -31,22 +31,51 @@ export function hasTypedCompileInput(name: string): boolean {
 }
 
 /**
+ * The names of the `inputs` option whose constant definition is an input
+ * of the compilation in progress (`isConstantInput()`), or `undefined`.
+ */
+let constantInputs: ReadonlySet<string> | undefined;
+
+/**
  * Run `fn` (one compilation) with the names of the `inputs` option and their
  * types in force: a definition of such a name that a called body reads, with
  * a type inferred from its value, is an input when the given type fits in
- * that type (`isTypedInputValue()`).
+ * that type (`isTypedInputValue()`). A name of `constants` is an input
+ * also when its definition is a constant (`isConstantInput()`).
  */
 export function withTypedInputs<T>(
   types: ReadonlyMap<string, Type>,
-  fn: () => T
+  fn: () => T,
+  constants?: ReadonlySet<string>
 ): T {
-  const saved = typedInputs;
+  const saved = [typedInputs, constantInputs] as const;
   typedInputs = types;
+  constantInputs = constants;
   try {
     return fn();
   } finally {
-    typedInputs = saved;
+    [typedInputs, constantInputs] = saved;
   }
+}
+
+/**
+ * Whether `v`, a constant definition of `name`, is an input of the
+ * compilation in progress: on GLSL, a named tuple with a mutable-array
+ * field (CE-1892, chosen by the caller in `constants` of
+ * `withTypedInputs()`), given in `inputs` with its own type. The cells of
+ * the array change after the compilation, so the binding being a constant
+ * leaves nothing to fold: its value is hidden (`withShieldedValues()`).
+ */
+function isConstantInput(name: string, v: BoxedValueDefinition): boolean {
+  const given = typedInputs?.get(name);
+  return (
+    given !== undefined &&
+    constantInputs?.has(name) === true &&
+    v.isConstant === true &&
+    v.storedValue?.operator !== 'Function' &&
+    isSubtype(given, v.type.type) &&
+    isSubtype(v.type.type, given)
+  );
 }
 
 /**
@@ -182,6 +211,10 @@ export function withVarsValuesHidden<T>(
       (typedShield ??= new Set()).add(v);
       const type = widenedInputType(name, v);
       if (type !== undefined) (widened ??= new Map()).set(v, ce.type(type));
+      continue;
+    }
+    if (isConstantInput(name, v)) {
+      (shielded ??= new Set()).add(v);
       continue;
     }
     if (v.isConstant || v.inferredType) continue;
@@ -395,7 +428,7 @@ export function symbolicInputsRead(
   }
   for (const [v, name] of definitions) {
     if (!read.has(name)) continue;
-    if (isTypedInputValue(name, v)) continue;
+    if (isTypedInputValue(name, v) || isConstantInput(name, v)) continue;
     const stored = v.isConstant ? undefined : v.storedValue;
     const holdsFunction = stored?.operator === 'Function';
     if (!v.isConstant && !holdsFunction) {
