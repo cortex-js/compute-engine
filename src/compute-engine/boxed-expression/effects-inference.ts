@@ -4019,7 +4019,10 @@ class Walker {
    * that is not a name, are visited. False, with nothing recorded, for an
    * `AddTo` whose types prove a list: the caller judges it as a rebinding.
    */
-  private cellStore(expr: Expression & FunctionInterface, ctx: WalkContext): boolean {
+  private cellStore(
+    expr: Expression & FunctionInterface,
+    ctx: WalkContext
+  ): boolean {
     const target = expr.ops[0];
     if (!isFunction(target, 'At') || target.nops < 2) return false;
     const root = target.ops[0];
@@ -4034,7 +4037,11 @@ class Walker {
         if (def !== undefined && 'value' in def) rootType = def.value.type.type;
       }
     } else rootType = this.receiverType(root);
-    const labels = cellStoreLabels(rootType, target.nops - 1, name !== undefined);
+    const labels = cellStoreLabels(
+      rootType,
+      target.nops - 1,
+      name !== undefined
+    );
     if (expr.operator === 'AddTo' && !labels.state) return false;
     if (labels.state)
       this.state.effects = unionEffectSets(this.state.effects, ['state']);

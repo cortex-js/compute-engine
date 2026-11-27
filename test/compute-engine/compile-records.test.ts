@@ -17,7 +17,8 @@
  *   record with no names is an array.
  *
  * Every case is compared with the interpreter's value within 1e-12 on
- * `javascript`; GLSL, `interval-js` and the `bigint` mode decline a record.
+ * `javascript`; `interval-js` and the `bigint` mode decline a record, and
+ * GLSL declines one that is not a vector (`ir-records-glsl.test.ts`).
  */
 
 import { ComputeEngine } from '../../src/compute-engine';
@@ -411,18 +412,21 @@ describe('a record declines', () => {
 
   test('on GLSL and interval-js', () => {
     for (const to of ['glsl', 'interval-js'] as Target[]) {
-      expectDeclines(ce, ['f', 't'], /records compile on javascript only/, to);
+      // On GLSL a `P` of two reals is a `vec2` (`ir-records-glsl.test.ts`).
+      if (to !== 'glsl') {
+        expectDeclines(ce, ['f', 't'], /records compile on javascript only/, to);
+        // A record that a field read would fold away declines too.
+        expectDeclines(
+          ce,
+          ['Field', ['P', 't', 1], { str: 'x' }],
+          /records compile on javascript only/,
+          to
+        );
+      }
       expectDeclines(
         ce,
         ['circle', ['Tuple', 't', 0], 1],
-        /text compiles on javascript only|records compile on javascript only/,
-        to
-      );
-      // A record that a field read would fold away declines too.
-      expectDeclines(
-        ce,
-        ['Field', ['P', 't', 1], { str: 'x' }],
-        /records compile on javascript only/,
+        /text compiles on javascript only|records compile on javascript only|not two to four/,
         to
       );
     }
@@ -598,22 +602,24 @@ describe('records as arguments of user functions', () => {
 
   test('on GLSL and interval-js', () => {
     for (const to of ['glsl', 'interval-js'] as Target[]) {
-      expectDeclines(
-        ce,
-        ['shift', ['P', ['Cos', 't'], ['Sin', 't']], 1],
-        /records compile on javascript only/,
-        to
-      );
+      // On GLSL a `P` of two reals is a `vec2` (`ir-records-glsl.test.ts`).
+      if (to !== 'glsl')
+        expectDeclines(
+          ce,
+          ['shift', ['P', ['Cos', 't'], ['Sin', 't']], 1],
+          /records compile on javascript only/,
+          to
+        );
       expectDeclines(
         ce,
         ['fill', circleAt(['Cos', 't'], 0, 0.1), { str: 'red' }],
-        /records compile on javascript only|text compiles on javascript only/,
+        /records compile on javascript only|text compiles on javascript only|not two to four/,
         to
       );
       expectDeclines(
         ce,
         ['radius', circleAt('t', 0, 2)],
-        /records compile on javascript only|text compiles on javascript only/,
+        /records compile on javascript only|text compiles on javascript only|not two to four/,
         to
       );
     }

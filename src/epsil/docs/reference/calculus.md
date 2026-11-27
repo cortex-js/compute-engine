@@ -198,7 +198,7 @@ MathJSON `Limit` · `(function, point: number, direction: number?) -> number`
 
 - argument 1 — The expression, function literal or function name whose limit is taken. Sample: `x => sin(x) / x`.
 - `point` — The point that the variable approaches, possibly `Infinity` or `-Infinity`; in the form `Limit(f, x, a)`, the variable. Sample: `0`.
-- `direction` — 1 for the limit from above, -1 for the limit from below; by default, the two-sided limit, which stays unevaluated when the one-sided limits differ; in the form `Limit(f, x, a)`, the point, and the direction is a fourth argument. Sample: `1`.
+- `direction` — 1 for the limit from above, -1 for the limit from below; by default, the two-sided limit, which stays unevaluated when the one-sided limits differ (its numeric value is `NaN`); in the form `Limit(f, x, a)`, the point, and the direction is a fourth argument. Sample: `1`.
 
 Limit of a function.
 
@@ -308,9 +308,7 @@ MathJSON `NLimit` · `(function, point: number, direction: number?) -> number`
 
 Numerical approximation of the limit of a function.
 
-NLimit(f, a) finds its variable with the same rule as Limit(f, a):
-
-the first of the symbols written in the expression f, in sorted order, also when it has an assigned value. A bare symbol f names a function, or, when it holds a formula (G := sin(x)), is read as that formula, whose variable is chosen with the same rule.
+NLimit(f, a) finds its variable with the same rule as Limit(f, a): the first of the symbols written in the expression f, in sorted order, also when it has an assigned value. A bare symbol f names a function, or, when it holds a formula (G := sin(x)), is read as that formula, whose variable is chosen with the same rule.
 
 ```epsil
 nLimit((1 + 1/x)^x, Infinity)

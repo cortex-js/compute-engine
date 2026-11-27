@@ -144,8 +144,7 @@ function matchHead(
     // match `array<tuple<integer, integer>>`.
     case 'array': {
       const cell = (subject as ArrayType).elements;
-      if (!matchHead(pattern.elements, cell, variables, bindings))
-        return false;
+      if (!matchHead(pattern.elements, cell, variables, bindings)) return false;
       const instantiated = substituteTypeVariables(pattern.elements, bindings);
       return isSubtype(cell, instantiated) && isSubtype(instantiated, cell);
     }

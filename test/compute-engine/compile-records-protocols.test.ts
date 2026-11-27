@@ -533,7 +533,7 @@ describe('a protocol method declines', () => {
         expectDeclines(
           ce,
           source,
-          /records compile on javascript only|text compiles on javascript only/,
+          /records compile on javascript only|text compiles on javascript only|not two to four/,
           to
         );
   });

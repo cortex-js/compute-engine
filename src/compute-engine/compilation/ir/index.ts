@@ -69,6 +69,7 @@ import {
   regionsOf,
   typeToString,
   useIndex,
+  vectorRecord,
   type IRType,
   type Instr,
   type Lane,
@@ -105,6 +106,10 @@ export type Profile = {
    *  rows have 2 to 4 elements: on GLSL an array of vectors (`vec2[3]`, a
    *  list of points). */
   readonly vectorArrays?: boolean;
+  /** Of the lane `record`, only a record that is a vector
+   *  (`vectorRecord()`): on GLSL a `vec2` to a `vec4`, the value of a
+   *  nominal tuple type of two to four numbers. */
+  readonly vectorRecords?: boolean;
   /** The operations whose value is admitted only as the result of the
    *  entry, each with the cause of a refusal elsewhere: on GLSL a colour is
    *  an OKLCh `vec3` with no tag of its space, so a conversion to another
@@ -146,15 +151,24 @@ export const TARGETS: Readonly<Record<Target, Profile>> = deepFreeze({
     syntax: JS,
   },
   glsl: {
-    lanes: ['real', 'integer', 'boolean', 'complex', 'color', 'array'],
+    lanes: [
+      'real',
+      'integer',
+      'boolean',
+      'complex',
+      'color',
+      'array',
+      'record',
+    ],
     rank: 1,
     runtimeLengths: false,
     draws: false,
     frames: false,
     recursion: false,
     elementwise: false,
-    scalarLanes: ['color', 'complex', 'array'],
+    scalarLanes: ['color', 'complex', 'array', 'record'],
     vectorArrays: true,
+    vectorRecords: true,
     resultOnly: Object.fromEntries(
       ['asoklab', 'asrgb', 'ashsv', 'ashsl', 'ashsv.own', 'ashsl.own'].map(
         (op) => [
@@ -185,7 +199,12 @@ export function admits(
   // Read by the `resultOnly` check only.
   let uses: ReturnType<typeof useIndex>['uses'] | undefined;
   const type = (t: IRType, what: string): Refusal | undefined => {
-    if (!profile.lanes.includes(t.lane))
+    if (
+      !profile.lanes.includes(t.lane) ||
+      (t.lane === 'record' &&
+        profile.vectorRecords === true &&
+        vectorRecord(t) === undefined)
+    )
       return { cause: `${what}: the lane ${t.lane}` };
     if (profile.scalarLanes.includes(t.lane) && t.shape.length > 0)
       return {

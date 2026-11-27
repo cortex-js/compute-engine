@@ -512,9 +512,7 @@ export function isMutableArray(
  * Is this expression an object or a mutable array: a value whose identity is
  * the instance, compared by reference, never cached, and never rebuilt?
  */
-export function isObjectOrArray(
-  expr: Expression | null | undefined
-): boolean {
+export function isObjectOrArray(expr: Expression | null | undefined): boolean {
   const kind = expr?._kind;
   return kind === 'object' || kind === 'array';
 }

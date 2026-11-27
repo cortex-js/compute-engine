@@ -904,7 +904,9 @@ function isArrayType(t: Type): boolean {
 function typeCouldBeArray(t: Type): boolean {
   if (isArrayType(t)) return true;
   return (
-    typeof t !== 'string' && t.kind === 'union' && t.types.some(typeCouldBeArray)
+    typeof t !== 'string' &&
+    t.kind === 'union' &&
+    t.types.some(typeCouldBeArray)
   );
 }
 
@@ -1029,11 +1031,11 @@ function arrayFromTypeOperand(
   if (!isString(t))
     return {
       error: ce.error(
-      [
-        'invalid-type-declaration',
-        'the type of the cells is a string literal, such as "integer<0..255>"',
-      ],
-      t.toString()
+        [
+          'invalid-type-declaration',
+          'the type of the cells is a string literal, such as "integer<0..255>"',
+        ],
+        t.toString()
       ),
     };
   try {
@@ -18716,7 +18718,8 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
 
         // An array: one index at each step (`arrayAt()`).
         if (isMutableArray(expr)) {
-          const v = key === undefined ? arrayAt(ce, expr, opAtIndex) : undefined;
+          const v =
+            key === undefined ? arrayAt(ce, expr, opAtIndex) : undefined;
           if (v === undefined) return undefined;
           expr = v;
           index += 1;
@@ -23712,13 +23715,12 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // The type operand is a string literal that names a type, checked here
     // so that a type that does not parse is a static error.
     canonical: (ops, { engine: ce }) => {
-      const args = validateAgainstDeclaration(ce, 'ArrayFrom', ops) ?? [
-        ...ops,
-      ];
+      const args = validateAgainstDeclaration(ce, 'ArrayFrom', ops) ?? [...ops];
       const t = args[1];
       if (t !== undefined && t.isValid) {
         const parsed = arrayFromTypeOperand(ce, t);
-        if ('error' in parsed) return ce._fn('ArrayFrom', [args[0], parsed.error]);
+        if ('error' in parsed)
+          return ce._fn('ArrayFrom', [args[0], parsed.error]);
       }
       return ce._fn('ArrayFrom', args);
     },

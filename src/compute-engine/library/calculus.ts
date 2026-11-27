@@ -6419,10 +6419,7 @@ function implicitLiteralParameters(
  * from above and 0 from below). A function that is real on neither side
  * keeps both sides, and its limit is `NaN`.
  */
-function limitDirection(
-  isNotReal: (x: number) => boolean,
-  x: number
-): number {
+function limitDirection(isNotReal: (x: number) => boolean, x: number): number {
   const scale = Math.max(1, Math.abs(x));
   const notReal = (side: 1 | -1): boolean =>
     [1e-3, 1e-6, 1e-9].every((h) => isNotReal(x + side * h * scale));

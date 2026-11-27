@@ -52,7 +52,7 @@ const PINNED: [rule: string, program: unknown][] = [
 ];
 
 describe('IR slice: GLSL text', () => {
-  test('every IR operation has a spelling in both printers (GLSL declines a draw, a Range, a run-time index of a list of booleans, of points or of lists, a real function with no GLSL form, an integer row of reals, the Fibonacci number of an integer, a complex function with no GLSL form, a colour map, a sort, an ordering, a median and the other statistics of a list, the run-time test of a real count of a rotation, the length of a list that is not built, the rounding of a real count, the samples of a Linspace, the operations of a list local written in place, the matrix kernels, the rows of Chunk and Partition, and the records)', () => {
+  test('every IR operation has a spelling in both printers (GLSL declines a draw, a Range, a run-time index of a list of booleans, of points or of lists, a real function with no GLSL form, an integer row of reals, the Fibonacci number of an integer, a complex function with no GLSL form, a colour map, a sort, an ordering, a median and the other statistics of a list, the run-time test of a real count of a rotation, the length of a list that is not built, the rounding of a real count, the samples of a Linspace, the operations of a list local written in place, the matrix kernels, the rows of Chunk and Partition, and the records other than a pixel)', () => {
     // prettier-ignore
     const jsOnly = new Set(['draw', 'shuffle', 'rangecount', 'colormap', 'atu', 'atp', 'atrow',
       'sort', 'sort.int', 'ordering', 'median',
@@ -84,8 +84,9 @@ describe('IR slice: GLSL text', () => {
       'rows.join',
       // A row of it at an index known at run time.
       'rows.row', 'rows.rowlen', 'rows.rowlen.nan',
-      // A record and its `Nothing` field (CE-1652).
-      'field', 'nothing',
+      // The `Nothing` field of a record (CE-1652); a `field` is spelled on
+      // GLSL for the record of a pixel, a `vec4`.
+      'nothing',
       // The array lane: the cells of a mutable array are written on
       // JavaScript only; GLSL reads a cell and the count of an input.
       ...OPERATORS.flatMap((r) => r.signatures.map(([, , op]) => op)).filter((op) => op.startsWith('arr.') &&

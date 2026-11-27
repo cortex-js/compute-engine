@@ -187,7 +187,7 @@ export function stripNumericRanges(t: Type): Type {
  * carry bounds: echoing `real<0..>` for `−|x|` claimed a sign the value
  * contradicts.
  */
-export function negateNumericType(t: Type): Type {
+export function negateNumericType(t: Type, seen?: Set<TypeReference>): Type {
   if (typeof t === 'string') return t;
   switch (t.kind) {
     case 'numeric': {
@@ -210,12 +210,12 @@ export function negateNumericType(t: Type): Type {
       return v === 0 ? t : { kind: 'value', value: -v };
     }
     case 'negation': {
-      const inner = negateNumericType(t.type);
+      const inner = negateNumericType(t.type, seen);
       return inner === t.type ? t : { ...t, type: inner };
     }
     case 'union':
     case 'intersection': {
-      const types = t.types.map((x) => negateNumericType(x));
+      const types = t.types.map((x) => negateNumericType(x, seen));
       if (types.every((x, i) => x === t.types[i])) return t;
       return { ...t, types };
     }
@@ -224,16 +224,37 @@ export function negateNumericType(t: Type): Type {
     case 'collection':
     case 'indexed_collection':
     case 'broadcastable': {
-      const elements = negateNumericType(t.elements);
+      const elements = negateNumericType(t.elements, seen);
       return elements === t.elements ? t : { ...t, elements };
     }
     case 'tuple': {
       const elements = t.elements.map((el) => {
-        const type = negateNumericType(el.type);
+        const type = negateNumericType(el.type, seen);
         return type === el.type ? el : { ...el, type };
       });
       if (elements.every((el, i) => el === t.elements[i])) return t;
       return { ...t, elements };
+    }
+    case 'reference': {
+      // A transparent alias is reflected through its definition. It keeps
+      // its name only when the reflection is its definition again (an alias
+      // of `real`, or of a range symmetric about zero): `-b` for `b: Byte`,
+      // an alias of `integer<0..255>`, is `integer<-255..0>`, not `Byte`.
+      // A nominal reference is opaque and is its own negation. `seen` ends
+      // the walk of a recursive alias, which reaches itself through its
+      // definition: the inner occurrence keeps its name, so the type is not
+      // exact for a value nested in it (CE-1874).
+      const unfolded = resolveTypeAlias(t);
+      if (unfolded === t) return t;
+      const decl = declarationOf(t);
+      if (seen?.has(decl)) return t;
+      const reflected = negateNumericType(unfolded, new Set(seen).add(decl));
+      if (
+        reflected === unfolded ||
+        typeToDedupKey(reflected) === typeToDedupKey(unfolded)
+      )
+        return t;
+      return reflected;
     }
     default:
       return t;

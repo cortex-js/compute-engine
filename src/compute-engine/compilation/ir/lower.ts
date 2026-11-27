@@ -532,7 +532,6 @@ type Misuse = 'write' | 'read' | undefined;
 const worse = (a: Misuse, b: Misuse): Misuse =>
   a === 'write' || b === 'write' ? 'write' : (a ?? b);
 
-
 /** The decline of a call of a function of the host with a list, a tuple
  *  or a record as an argument in a lowering that does not track the
  *  `Listed` of its values (`Lowering.trackListed`): `lowerWide()` lowers
@@ -1061,7 +1060,8 @@ function lowerOnce(
   /** The values of the lane `rows` (a list of lists of two lengths not
    *  stated, `rowsElementLane()`): the inputs, the parameters and the
    *  values that the program makes (CE-1736). `rowsRead` is the occurrence
-   *  that `wholeRows()` lowers, the only one that may read one whole. */
+   *  that `wholeRows()` lowers, the only one that may read one whole;
+   *  another read is a read of a matrix (`asMatrix()`) or declines. */
   const rowsParams = new Set<V>();
   /** The tests decided by the IR types of their operands
    *  (`Lowering.typeTests`). */
@@ -1105,6 +1105,13 @@ function lowerOnce(
   const rowsElements = new Map<V, 'integer' | 'real'>();
   const rowWidths = new Map<V, V>();
   const rowCounts = new Map<V, V>();
+  /** The list of rank 2 that a value of the lane `rows` reads (`rows.of`):
+   *  an input of the entry of a matrix type (`input()`). */
+  const matrixOf = new Map<V, V>();
+  /** The value of the lane `rows` that a list of rank 2 was read from
+   *  (`asMatrix()`), which is visible wherever that list is: an input of
+   *  the entry, the operand of a region `rows.matrix`. */
+  const rowsFrom = new Map<V, V>();
   let rowsRead: Expression | undefined;
   /** The count of the elements of a row `At(g, i)` of such a name at an
    *  index known at run time (0 where `i` is out of range), and the value
@@ -1445,11 +1452,6 @@ function lowerOnce(
     const n = args.length;
     if (typeof r.arity === 'number' ? n !== r.arity : n < 2)
       decline(node, `${r.head} with ${n} operands`);
-    // A matrix of run-time size (the lane `rows`): the operation on the
-    // elements at each row and column (`elementwise()` of
-    // `lower-matrices.ts`).
-    if (r.threads && args.some((v) => type(v).lane === 'rows'))
-      return matrices.elementwise(node, r, args, (xs) => apply(node, r, xs));
     // `Abs` of a real proved `>= 0` (`nonnegative()`, also by the declared
     // range of an input) is its operand. Not in the interval mode, where a
     // value `>= 0` can have an enclosure that reaches below 0.
@@ -1656,7 +1658,16 @@ function lowerOnce(
         return a === 'list' ? v : widen(v, a);
       });
       const t = resultType(signature, operands.map(type), same);
-      if (t === undefined) decline(node, 'lists of different lengths or ranks');
+      if (t === undefined) {
+        // Matrices whose lengths are not proved equal: element by element,
+        // after the check of their lengths.
+        const out =
+          tuple === undefined && r.threads && !lanes.includes('list')
+            ? matrices.elementwise(node, operands, operation)
+            : undefined;
+        if (out !== undefined) return out;
+        decline(node, 'lists of different lengths or ranks');
+      }
       // Flat lists whose lengths are not one value or equal constants: on
       // JavaScript, a build of the operation at each index, whose length
       // reads the check of their lengths (`agree()` of `lower-lists.ts`);
@@ -1787,8 +1798,8 @@ function lowerOnce(
       ) &&
       [...(s.marks ?? []), ...(t.marks ?? [])].every((m) => m === undefined)
     )
-      return s.fields!
-        .map((_, k) =>
+      return s
+        .fields!.map((_, k) =>
           apply(node, 'Equal', [
             records.field(node, x, k),
             records.field(node, y, k),
@@ -1981,7 +1992,10 @@ function lowerOnce(
     const a = arrayBase(cell.ops[0]);
     if (a === undefined || !arrays.tupleCells(a)) return undefined;
     if (k === undefined)
-      decline(e, 'an element of a tuple cell of an array at an index that is not a constant');
+      decline(
+        e,
+        'an element of a tuple cell of an array at an index that is not a constant'
+      );
     return arrays.element(e, a, cell.ops[1], k);
   };
 
@@ -2202,10 +2216,47 @@ function lowerOnce(
   const wholeRows = (e: Expression): V => {
     rowsRead = e;
     try {
-      return value(e)!;
+      // A matrix of run-time size is read as its rows where a value of the
+      // lane `rows` is read whole (a reader of the rows, a local, an arm,
+      // the result).
+      const v = value(e)!;
+      return freeMatrix(v) ? rowsOfMatrix(v) : v;
     } finally {
       rowsRead = undefined;
     }
+  };
+
+  /** `v` is a matrix whose rows have a run-time length: a list of rank 2 of
+   *  reals or integers, no list of points, whose second length is a
+   *  value. */
+  const freeMatrix = (v: V): boolean => {
+    const t = type(v);
+    return (
+      t.shape.length === 2 &&
+      typeof t.shape[1] === 'object' &&
+      (t.lane === 'real' || t.lane === 'integer') &&
+      !tuples.has(v)
+    );
+  };
+
+  /** The list of rank 2 `v` of reals or integers as a value of the lane
+   *  `rows` (`rows.of`): the same array of arrays, whose count and whose
+   *  row length are its two lengths, and which `asMatrix()` reads as `v`
+   *  again (`matrixOf`). */
+  const rowsOfMatrix = (v: V): V => {
+    const made = rowsFrom.get(v);
+    if (made !== undefined) return made;
+    const t = type(v);
+    const [n, w] = t.shape.map((x) =>
+      typeof x === 'number' ? b.constant(x, 'integer') : x.v
+    );
+    const out = b.op('rows.of', [v], scalarType('rows'));
+    rowsParams.add(out);
+    rowsElements.set(out, t.lane as 'integer' | 'real');
+    matrixOf.set(out, v);
+    rowCounts.set(out, n);
+    rowWidths.set(out, w);
+    return out;
   };
 
   /** The node whose value `value()` admits whole (`wholeRows()`) while it
@@ -2225,18 +2276,48 @@ function lowerOnce(
 
   /** `v`, the value of the node `e` other than a name (`symbol()` checks a
    *  name): a value of the lane `rows` that the program made (`rowsParams`)
-   *  is read whole only where `wholeRows()` admits it (`admitted`). */
+   *  is read whole only where `wholeRows()` admits it (`admitted`).
+   *  Elsewhere it is read as a matrix where its rows have one length
+   *  (`asMatrix()`), and declines otherwise. */
   const wholeOnly = (
     e: Expression,
     v: V | undefined,
     admitted: boolean
   ): V | undefined => {
     if (v !== undefined && !admitted && !isSymbol(e) && rowsParams.has(v))
-      decline(
-        e,
-        'a list of lists of run-time length read whole other than by a reader of its rows (Map, Filter, Length, Count, At, Flatten, FlatMap, Reduce, Fold), as the result, as the value of a local, or as an argument of a parameter of that type'
+      return (
+        asMatrix(e, v) ??
+        decline(
+          e,
+          'a list of lists of run-time length read whole other than by a reader of its rows (Map, Filter, Length, Count, At, Flatten, FlatMap, Reduce, Fold), as the result, as the value of a local, or as an argument of a parameter of that type'
+        )
       );
     return v;
+  };
+
+  /** The value `v` of the lane `rows` as a list of rank 2, where its rows
+   *  have one length (`rowWidths`) and its elements are reals or integers:
+   *  the matrix that it reads (`matrixOf`), or the same array of arrays
+   *  with its number of rows and the length of its rows as its two lengths
+   *  (`rows.matrix`). `undefined` for another value, whose rows can have
+   *  different lengths. */
+  const asMatrix = (site: Expression, v: V): V | undefined => {
+    const [w, lane] = [rowWidths.get(v), rowsElements.get(v)];
+    if (w === undefined || lane === undefined) return undefined;
+    const matrix = matrixOf.get(v);
+    if (matrix !== undefined) return matrix;
+    const n =
+      rowCounts.get(v) ?? b.op('rows.count', [v], scalarType('integer'));
+    const [out] = region(
+      lane === 'integer' ? 'rows.matrix.int' : 'rows.matrix',
+      [v, n, w],
+      [],
+      () => [],
+      site
+    );
+    // `v` is visible wherever `out` is: its rows are `v` (`rowsOfMatrix()`).
+    rowsFrom.set(out, v);
+    return out;
   };
 
   let lowered = 0;
@@ -3889,16 +3970,9 @@ function lowerOnce(
     return apply(
       e,
       r,
-      e.ops.map((op) => (r.threads ? operand(op) : value(op)!))
+      e.ops.map((op) => value(op)!)
     );
   };
-
-  /** The value of `x`, an operand of an operation that threads. An operand
-   *  of a matrix type is read whole on JavaScript: a matrix of run-time
-   *  size is a value of the lane `rows` (`elementwise()` of
-   *  `lower-matrices.ts`). */
-  const operand = (x: Expression): V =>
-    lists.checks && x.type.matches('matrix') ? wholeRows(x) : value(x)!;
 
   /** The number of `x`: a literal (`literalNumber()`), or the value a free
    *  name holds. */
@@ -3934,7 +4008,7 @@ function lowerOnce(
       is.reduce(([m, n], i) => [m * rs[i]![0], n * rs[i]![1]], [1, 1]);
     if (!of(ks).every(Number.isSafeInteger)) ks = ks.slice(0, 1);
     const values = e.ops.map((x, i) =>
-      ks.includes(i) ? undefined : operand(x)
+      ks.includes(i) ? undefined : value(x)!
     );
     const rest = values.filter((v): v is V => v !== undefined);
     if (ks.length === 0 || rest.some((v) => type(v).lane === 'complex'))
@@ -4637,11 +4711,14 @@ function lowerOnce(
       partsDecline(e, e.symbol);
     // A list of rows whose lengths can differ is read by `rows.at` and
     // passed whole only: `Length`, `Map` or arithmetic of it would read it
-    // as a scalar.
+    // as a scalar. One whose rows have one length is a matrix there.
     if (v !== undefined && rowsParams.has(v) && !admitted)
-      decline(
-        e,
-        `${e.symbol} of type ${engineTypeToString(e.type.type)} other than in an element read ${e.symbol}[i][j] or as an argument of a parameter of that type`
+      return (
+        asMatrix(e, v) ??
+        decline(
+          e,
+          `${e.symbol} of type ${engineTypeToString(e.type.type)} other than in an element read ${e.symbol}[i][j] or as an argument of a parameter of that type`
+        )
       );
     return v;
   };
@@ -4950,7 +5027,8 @@ function lowerOnce(
 
   /** `ir`, the type of an input, is the IR type of the engine type `t`. */
   const sameInput = (ir: IRType, t: Type): boolean => {
-    if (ir.lane === 'array') return arrayIRType(t)?.array?.cell === ir.array?.cell;
+    if (ir.lane === 'array')
+      return arrayIRType(t)?.array?.cell === ir.array?.cell;
     const x = inputIR(t) ?? rowsInput(t);
     return (
       x !== undefined &&
@@ -5079,6 +5157,8 @@ function lowerOnce(
         shape: [{ v: rows }, { v: columns }],
       });
       param = b.entryOp('rows.of', [matrix], scalarType('rows'));
+      matrixOf.set(param, matrix);
+      rowsFrom.set(matrix, param);
       rowCounts.set(param, rows);
       rowWidths.set(param, columns);
     } else param = b.param(name, { lane: ir.lane, shape });
@@ -5292,6 +5372,21 @@ function lowerOnce(
           out,
           ex === 'real' || ey === 'real' ? 'real' : 'integer'
         );
+        // Arms of one number of rows, or of one row length, give a value
+        // that has it (two matrices of one size): one value, which is made
+        // outside the arms, or equal constants.
+        const one = (table: Map<V, V>): V | undefined => {
+          const [p, q] = [table.get(x), table.get(y)];
+          if (p === undefined || q === undefined) return undefined;
+          if (p === q) return p;
+          const [cp, cq] = [constant(p), constant(q)];
+          return cp !== undefined && cp === cq
+            ? b.constant(cp, 'integer')
+            : undefined;
+        };
+        const [count, width] = [one(rowCounts), one(rowWidths)];
+        if (count !== undefined) rowCounts.set(out, count);
+        if (width !== undefined) rowWidths.set(out, width);
       }
       return out;
     };
@@ -6417,7 +6512,10 @@ function lowerOnce(
               : undefined;
           // A local of an array type: an array of those cells, which a write
           // replaces with another (`assign()`).
-          if (!scalarLocal && arrayCells(ce.type(typeName).type) !== undefined) {
+          if (
+            !scalarLocal &&
+            arrayCells(ce.type(typeName).type) !== undefined
+          ) {
             const cells = arrays.cellsOf(s, ce.type(typeName).type)!;
             const v = cx.value(value)!;
             if (type(v).array?.cell !== cells.cell)
@@ -7333,7 +7431,10 @@ function lowerOnce(
         ? lookup(target.ops[0].symbol)
         : undefined;
       // A cell of an array (`lower-arrays.ts`).
-      if (owned?.binding.whole === undefined && owned?.binding.role !== 'list') {
+      if (
+        owned?.binding.whole === undefined &&
+        owned?.binding.role !== 'list'
+      ) {
         const stored = arrays.addTo(e);
         if (stored !== undefined) return stored;
       }
@@ -8004,6 +8105,8 @@ function lowerOnce(
     value,
     scalar,
     wholeRows,
+    asMatrix,
+    rowsOfMatrix,
     rowsParams,
     root,
     heldParams: new Set<V>(),
@@ -8078,7 +8181,13 @@ function lowerOnce(
   // `bigint` mode).
   const javascript = options.javascript === true && !bigint && !interval;
   const fns = functionLowering(cx, lists, javascript);
-  const records = recordLowering(cx, javascript);
+  // On GLSL, the records of a nominal tuple type of two to four numbers
+  // (vectors), in the default mode as for the arrays below.
+  const records = recordLowering(
+    cx,
+    javascript,
+    options.glsl === true && cx.wide !== 'complex'
+  );
   const matches = matchLowering(cx, records);
   const protocols = protocolLowering(cx);
   // The program reads or makes an enclosure (`Program.valueKinds`).

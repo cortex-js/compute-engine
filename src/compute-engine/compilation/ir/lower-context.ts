@@ -20,14 +20,7 @@ import {
   isExpression,
   isFunction,
 } from '../../boxed-expression/type-guards.js';
-import type {
-  Assigned,
-  Builder,
-  IRType,
-  Lane,
-  Region,
-  V,
-} from './ir.js';
+import type { Assigned, Builder, IRType, Lane, Region, V } from './ir.js';
 import type { OperatorRow } from './operators.js';
 import { STANDARD_LIBRARIES } from '../../library/library.js';
 
@@ -436,6 +429,15 @@ export type Lowering = {
    *  declared type can state no lane (`g: list`, CE-1721), or else that of
    *  its engine type (`rowsElementLane()`). */
   rowsLaneOf(e: Expression): 'integer' | 'real' | undefined;
+  /** The value `v` of the lane `rows` as a list of rank 2 of its number of
+   *  rows and the length of its rows, where its rows have one length
+   *  (`rowWidths`) and its elements are reals or integers; `undefined` for
+   *  another value. `site` is the node of the region that it makes. */
+  asMatrix(site: Expression, v: V): V | undefined;
+  /** The list of rank 2 `v` of reals or integers as a value of the lane
+   *  `rows` whose count and row length are its two lengths (`rows.of`, the
+   *  same array of arrays). */
+  rowsOfMatrix(v: V): V;
   /** Apply the row `r`, or the row of the library head of that name, to
    *  `args`. */
   apply(node: Expression, r: OperatorRow | string, args: V[]): V;

@@ -22,7 +22,10 @@
  * is checked too, and the indexes NaN, +Infinity and -Infinity (a uniform
  * array). The last case reads the unsigned cells through a user function
  * `rd(x, k) = x[k] + Length(x)`, whose parameters are the sampler and the
- * count.
+ * count. The case of a nominal type (`array<Pixel>`, `RGBA8UI`) runs the
+ * user function `invert(p: Pixel) -> Pixel` of the cell, a `vec4`, and
+ * `A[i] == Pixel(255, 255, 255, 255)`, the equality of the four bytes,
+ * whose value out of range is false (the interpreter's `False`).
  *
  * Then the read-back of a framebuffer of each tuple format: the shader
  * writes the cells that it reads (`RGBA8UI`: the `vec4` as a `uvec4`;
@@ -44,7 +47,13 @@ const WIDTH = 8;
 
 const ce = new ComputeEngine();
 ce.declare('i', 'real');
-executeEpsil(ce, 'let rd = (x, k) => x[k] + length(x)');
+executeEpsil(
+  ce,
+  `let rd = (x, k) => x[k] + length(x)
+type alias Byte = integer<0..255>
+type Pixel = tuple<r: Byte, g: Byte, b: Byte, a: Byte>
+function invert(p: Pixel) -> Pixel { Pixel(min(max(255 - p.r, 0), 255), min(max(255 - p.g, 0), 255), min(max(255 - p.b, 0), 255), p.a) }`
+);
 
 const BYTE = 'integer<0..255>';
 const cells = (f) => Array.from({ length: N }, (_, k) => f(k));
@@ -90,6 +99,18 @@ const CASES = [
     values: cells((k) => (k * 53 + 1) % 256),
   },
   {
+    name: 'Pixel (RGBA8UI) through invert, and == Pixel(255, 255, 255, 255)',
+    type: 'array<Pixel>',
+    format: 'RGBA8UI',
+    tuple: true,
+    pixel: true,
+    values: cells((k) =>
+      k % 5 === 0
+        ? [255, 255, 255, 255]
+        : [k, (k * 7) % 256, (k * 31 + 128) % 256, 255 - k]
+    ),
+  },
+  {
     name: 'unsigned (R16UI) through a user function',
     type: 'array<integer<0..65535>>',
     format: 'R16UI',
@@ -108,10 +129,22 @@ function compiled(c) {
     ...(c.normalized ? { storage: { [name]: 'sampler2D' } } : {}),
   };
   const at = compile(
-    ce.box(c.function ? ['rd', name, 'i'] : ['At', name, 'i']),
+    ce.box(
+      c.function
+        ? ['rd', name, 'i']
+        : c.pixel
+          ? ['invert', ['At', name, 'i']]
+          : ['At', name, 'i']
+    ),
     options
   );
   const length = compile(ce.box(['Length', name]), options);
+  const white = c.pixel
+    ? compile(
+        ce.box(['Equal', ['At', name, 'i'], ['Pixel', 255, 255, 255, 255]]),
+        options
+      )
+    : undefined;
   return {
     ...c,
     uniform: name,
@@ -119,6 +152,9 @@ function compiled(c) {
     count: at.freeSymbolTypes[name].count,
     at: { code: at.code, preamble: at.preamble ?? '' },
     length: { code: length.code, preamble: length.preamble ?? '' },
+    ...(white === undefined
+      ? {}
+      : { white: { code: white.code, preamble: white.preamble ?? '' } }),
   };
 }
 
@@ -221,6 +257,7 @@ uniform int ${c.count};
   const expected = (c, k) => {
     if (!Number.isInteger(k) || k === 0 || Math.abs(k) > n) return null;
     const v = c.values[k > 0 ? k - 1 : n + k];
+    if (c.pixel) return [255 - v[0], 255 - v[1], 255 - v[2], v[3]];
     return c.function ? v + n : v;
   };
   const results = [];
@@ -277,9 +314,42 @@ void main() { color = vec4(f()); }`);
       gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.FLOAT, lv);
       out.length = lv[0];
       if (lv[0] !== n) out.failures.push({ length: lv[0] });
+      // `A[i] == Pixel(255, 255, 255, 255)`: 1 or 0 for each index.
+      if (c.white !== undefined) {
+        const wp = program(`${header(c)}
+uniform float special[3];
+out vec4 color;
+${c.white.preamble}
+bool f(float i) {
+${body(c.white.code)}
+}
+void main() {
+  int x = int(gl_FragCoord.x);
+  float i = gl_FragCoord.y > 2.0 ? special[min(x, 2)] : floor(gl_FragCoord.x) - ${n + 2}.0 + (gl_FragCoord.y > 1.0 ? 0.5 : 0.0);
+  color = vec4(f(i) ? 1.0 : 0.0);
+}`);
+        target(gl.RGBA32F, span, 3);
+        bind(wp, c);
+        gl.uniform1fv(gl.getUniformLocation(wp, 'special'), [NaN, Infinity, -Infinity]);
+        draw(wp);
+        const wv = new Float32Array(span * 3 * 4);
+        gl.readPixels(0, 0, span, 3, gl.RGBA, gl.FLOAT, wv);
+        out.whites = 0;
+        for (let y = 0; y < 3; y++)
+          for (let x = 0; x < (y === 2 ? 3 : span); x++) {
+            const k = y === 2 ? [NaN, Infinity, -Infinity][x] : x - (n + 2) + (y === 1 ? 0.5 : 0);
+            const inRange = Number.isInteger(k) && k !== 0 && Math.abs(k) <= n;
+            const cellAt = inRange ? c.values[k > 0 ? k - 1 : n + k] : undefined;
+            const want = cellAt !== undefined && cellAt.every((b) => b === 255) ? 1 : 0;
+            out.whites += want;
+            out.checked += 1;
+            if (wv[(y * span + x) * 4] !== want)
+              out.failures.push({ equal: k, got: wv[(y * span + x) * 4], want });
+          }
+      }
       // The read-back of a framebuffer of the format of the texture: the
       // cells that the shader reads, and the pixel (1, 2, 128, 255).
-      if (c.tuple) {
+      if (c.tuple && !c.pixel) {
         const integer = !c.normalized;
         const fp = program(`${header(c)}
 out ${integer ? 'uvec4' : 'vec4'} color;
@@ -333,7 +403,7 @@ void main() {
 
 const cases = CASES.map(compiled);
 for (const c of cases)
-  console.log(`--- ${c.name}: uniform ${c.lowered} ${c.uniform}; int ${c.count}\n${c.at.preamble}\n${c.at.code}\n`);
+  console.log(`--- ${c.name}: uniform ${c.lowered} ${c.uniform}; int ${c.count}\n${c.at.preamble}\n${c.at.code}\n${c.white === undefined ? '' : `${c.white.preamble}\n${c.white.code}\n`}`);
 
 const browser = await chromium.launch({
   headless: true,

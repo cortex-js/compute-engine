@@ -1,5 +1,24 @@
 ## [Unreleased]
 
+### Resolved Issues
+
+- **Compiled JavaScript compares the length of the mask of a selection at
+  each position with its list arms.** With `L, N: list<real>`,
+  `If(N > 0, L, 0)` at `N = [1, -1, 1]`, `L = [1, 2]` gave
+  `[1, 0, undefined]` and `Which(N > 0, 1, L > 0, 2, True, 0)` gave
+  `[1, 2, 1]`, where the interpreter gives the error
+  `incompatible-dimensions`; both now throw
+  `RangeError: incompatible-dimensions: lists of lengths 3 and 2`. The
+  length of the first condition is compared once, before the selection,
+  with each list arm and each later list condition whose length the
+  compiler does not prove equal to it. `If(L > 0, L, 0)` compares nothing,
+  and an `If` with no else still reads the shorter of the two lists, as
+  the interpreter. The comparison runs also where no position selects the
+  arm, where the interpreter gives a value. GLSL, the interval target and
+  the `bigint` mode compare no length.
+
+## 0.202.0 _2026-11-26_
+
 ### Breaking Changes
 
 - **A custom function receives a list where an argument is a finite lazy
@@ -136,6 +155,34 @@
     A store, `Swap`, `ArrayFrom`, `ListFrom`, a name whose value is an
     array, an array result, and integer cells whose range is outside
     -16,777,216 to 16,777,216 decline on GLSL.
+  - **A pixel of a nominal type is a `vec4` on GLSL.** A value of a nominal
+    type that is a tuple cell of four bytes
+    (`type Pixel = tuple<r: Byte, g: Byte, b: Byte, a: Byte>`) compiles on
+    `glsl`: the read of a whole cell `src[i]`, the constructor
+    `Pixel(r, g, b, a)`, a parameter and the result of a user function, a
+    local, the arms of an `If`, and `==` and `!=` of two such values, the
+    comparison of the four bytes. The same pixel function compiles on both
+    targets: with `src` declared `array<Pixel>`,
+    `invert(src[i])` of `function invert(p: Pixel) -> Pixel { … }` is a
+    function `vec4 _fn_ir_u0_invert(vec4 v3)` and
+    `src[i] == Pixel(255, 255, 255, 255)` a `bool`. A comparison with an
+    unnamed tuple (`src[i] == (255, 255, 255, 255)`, which the interpreter
+    gives as `False`), the discharges, an input declared `Pixel`, a list of
+    pixels and other nominal tuple types still decline on GLSL.
+  - **A nominal tuple type of two to four numbers is a vector on GLSL.** A
+    value of a nominal tuple type whose two to four fields are each a real or
+    an integer (`type P2 = tuple<x: real, y: real>`,
+    `type C3 = tuple<r: real, g: real, b: real>`) is a `vec2`, a `vec3` or a
+    `vec4`, with the same uses as a pixel: the constructor, a field read, a
+    parameter and the result of a user function, a local, the arms of an
+    `If`, the result of the program, and `==` and `!=` of two values of one
+    type. With `function mid(a: P2, b: P2) -> P2 { … }`,
+    `mid(P2(x, y), P2(y, x))` compiles to
+    `vec2 _fn_ir_u0_mid(vec2 v4, vec2 v5)` and `P2(x, y) == P2(y, x)` to
+    `((x == y) && (y == x))`. Two nominal types of the same fields stay two
+    types: their comparison declines, as does a comparison with an unnamed
+    tuple. A record with a field that is not a number, of one field or of
+    more than four declines with its cause.
   - The cell type is invariant: an `array<integer>` is not an
     `array<number>`. An array is not a collection: `Sum(a)`, `Map(a, f)` and
     `a + 1` are refused, and a program takes `listFrom(a)`.
@@ -377,22 +424,26 @@
   `[[-2, 1], [1.5, -0.5]]`, and for a matrix that is not square
   `Determinant(M)` throws
   `RangeError: expected-square-matrix: a matrix of 2 rows and 3 columns`.
-  Element-wise arithmetic of such matrices compiles too (CE-1834):
-  `M + A`, `M − A`, `2·M`, `M/2`, `−M`, `M + 1`, `Sin(M)` declined with
-  "M of type matrix<real> other than in an element read M[i][j]" and now
-  give the interpreter's value: `M + 2·M` gives
-  `[[3, 6, 9], [12, 15, 18]]`, and `Transpose(M + 1)`, `Shape(M/2)` and
-  `Determinant(A − 2·A)` read the result. The numbers of rows and the
-  lengths of the rows of two matrices are compared at run time where the
-  compiler does not prove them equal: `M + A` throws
-  `RangeError: incompatible-dimensions: lists of lengths 2 and 3`, where the
-  interpreter gives `incompatible-dimensions`. The product of two matrices,
-  a power of a matrix, a matrix with a list (`M + L`), a comparison and a
-  `list<list<real>>` input still decline.
+  Arithmetic and the functions of a number apply to each element of such a
+  matrix, as for a matrix of stated size (CE-1834): with `A, B: matrix<real>`
+  at `A = [[1, 2], [3, 4]]` and `B = [[0, 1], [1, 0]]`, `A + B` gives
+  `[[1, 3], [4, 4]]`, `2A + 1` gives `[[3, 5], [7, 9]]` and
+  `Transpose(A) + B` gives `[[1, 4], [3, 4]]`; the result is read by the
+  matrix operators (`Determinant(A + B)` gives -8). Two matrices whose
+  sizes the compiler does not prove equal are compared once at run time:
+  at `B = [[1, 2, 3]]`, `A + B` throws
+  `RangeError: incompatible-dimensions: lists of lengths 2 and 1`,
+  where the interpreter gives the error `incompatible-dimensions`.
+  The transpose of a list of rows of a stated length compiles too, where
+  it declined ("Transpose of a matrix whose number of rows is known at run
+  time only"): with `P: list<list<real^2>>` at `P = [[1, 2], [3, 4], [5, 6]]`,
+  `Transpose(P)` gives `[[1, 3, 5], [2, 4, 6]]`.
   A `list<list<real>>` argument and a call result at a parameter of a
-  matrix type, `RowReduce` of a matrix of run-time size, matrices of complex numbers or
-  of booleans, a matrix of one stated dimension (`matrix<real^2x?>`), GLSL,
-  the interval target and the `bigint` mode decline.
+  matrix type, `RowReduce` of a matrix of run-time size, a row of the
+  result of such an operation as the value (`(A + B)[1]`), matrices of complex
+  numbers or of booleans, a matrix of one stated dimension
+  (`matrix<real^2x?>`), GLSL, the interval target and the `bigint` mode
+  decline.
 
 - **Compiled JavaScript compares the lengths of two lists of run-time
   length.** With `L, M: list<real>`, a user function of scalar parameters
@@ -411,18 +462,8 @@
   Later operations on the same lists read the first comparison:
   `(L + M)·(L − M)` compares once. Lengths that the compiler proves equal
   (`L + L`, `Dot(L, L)`, `h(L, L)`) compare nothing, and their code is
-  unchanged. A selection at each position compares the length of its first
-  condition with each list arm and each later list condition the same way:
-  with `N: list<real>`, `If(N > 0, L, 0)` at `N = [1, -1, 1]`, `L = [1, 2]`
-  gave `[1, 0, undefined]` and `Which(N > 0, 1, L > 0, 2, True, 0)` gave
-  `[1, 2, 1]`; both now throw
-  `RangeError: incompatible-dimensions: lists of lengths 3 and 2`, the
-  interpreter's error. `If(L > 0, L, 0)` compares nothing, and an `If` with
-  no else still reads the shorter of the two lists, as the interpreter. The
-  comparison runs also where no position selects the arm, where the
-  interpreter gives a value. An element-wise operation of two lists of
-  points compares no length (a selection whose arms are lists of points
-  does); GLSL, the interval target and the `bigint` mode compare no length.
+  unchanged. Lists of points, GLSL, the interval target and the `bigint`
+  mode compare no length.
 
 ### Behavior Changes
 
@@ -445,6 +486,15 @@
   of elements: use `Length` for the number of basis vectors.
 
 ### Resolved Issues
+
+- **The negation of a value whose type is an alias of a range has the
+  reflected range** (CE-1873). With `type alias Byte = integer<0..255>` and
+  `b: Byte`, the type of `-b` was `Byte` and the type of `255 - b` was
+  `integer<255..510>`, so `Pixel(255 - p.r, 255 - p.g, 255 - p.b, p.a)` did
+  not compile ("does not prove Byte"). The type of `-b` is now
+  `integer<-255..0>` and the type of `255 - b` is `integer<0..255>`, as for
+  `b: integer<0..255>`. An alias keeps its name when its negation is its
+  definition: `-m` for `m` of an alias of `real` is still of that alias.
 
 - **A call of `Complex` that names its arguments gives the complex number**
   (CE-1689). `Complex(imaginary: 2, real: 1)`, and `complex(real: 1,

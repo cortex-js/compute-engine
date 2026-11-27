@@ -4368,7 +4368,10 @@ export function isShapedNumericType(t: Type, seen?: AliasDescent): boolean {
  * operand's alias name — the evaluated value carries the structure and no
  * name either. A SCALAR alias is a different case and keeps its name: `-m`
  * for `m: meters` (an alias of `number`) is the same kind of value as `m`,
- * and the scalar arithmetic handlers echo it (`m + 1` is `meters`). The
+ * and the scalar arithmetic handlers echo it (`m + 1` is `meters`); an alias
+ * whose definition carries a range is reflected by `negateNumericType()`
+ * instead (`-b` for `b: Byte`, an alias of `integer<0..255>`, is
+ * `integer<-255..0>`). The
  * split lets a handler that echoes its operand's type (`Negate`) apply the
  * lift policy to shaped operands only. A nominal reference is never
  * unfolded ({@link resolveTypeAlias}).

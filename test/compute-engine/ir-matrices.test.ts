@@ -144,6 +144,8 @@ describe('MATRIX OPERATORS: THE INTERPRETER VALUE ON JAVASCRIPT', () => {
     ['Trace 1x1', ['Trace', 'S'], [{ S: [[-2.5]] }]],
     ['Diagonal of a matrix', ['Diagonal', 'B'], [{ B: B1 }, { B: B2 }]],
     ['Diagonal of rows of run-time count', ['Diagonal', 'P'], [{ P: P1 }]],
+    // Its rows have the number of rows of `P` as their length.
+    ['Transpose of rows of run-time count', ['Transpose', 'P'], [{ P: P1 }, { P: A1 }]],
     // A number of rows known at run time only: rank 2 and its two lengths
     // (the interpreter's empty list of rows has rank 1 and the shape `(0)`,
     // a known limitation of `docs/COMPILATION-MODEL.md`).
@@ -476,8 +478,6 @@ describe('MATRIX OPERATORS: DECLINES', () => {
     // time only.
     [['Trace', 'B'], /not square/],
     [['Determinant', 'B'], /not square/],
-    // The transpose of `P` has rows of run-time length.
-    [['Transpose', 'P'], /known at run time only/],
     [['Diagonal', 'L'], /run-time length/],
     // The interpreter gives a root of the matrix for a half-integer exponent.
     [['MatrixPower', 'A', 'x'], /not an integer/],

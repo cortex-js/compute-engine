@@ -23,6 +23,7 @@ import {
   sameShape,
   scalarType,
   typeToString,
+  vectorRecord,
   type IRFunction,
   type IRType,
   type Instr,
@@ -111,7 +112,10 @@ export function verify(p: Program, rows: readonly OperatorRow[]): void {
       // A record is not an element of a list, nor is an array.
       if (t.lane === 'record' && t.shape.length > 0)
         fail(`v${v}: a list of records`);
-      if ((t.lane === 'array') !== (t.array !== undefined) || (t.lane === 'array' && t.shape.length > 0))
+      if (
+        (t.lane === 'array') !== (t.array !== undefined) ||
+        (t.lane === 'array' && t.shape.length > 0)
+      )
         fail(`v${v}: an array of no cells, or a list of arrays`);
       for (const n of t.shape)
         if (typeof n === 'number' ? !(Number.isInteger(n) && n > 0) : false)
@@ -224,10 +228,14 @@ export function verify(p: Program, rows: readonly OperatorRow[]): void {
           if (!operandFits(row, signature[0], k, type(a), isSubLane))
             fail(`${i.op}: operand ${k} is ${typeToString(type(a))}`);
         });
-        // The read of a tuple cell on GLSL: its four bytes.
+        // The read of a tuple cell on GLSL: its four bytes, or the record
+        // of the nominal type of the cell (`vectorRecord()`).
         const r: IRType =
           i.op === 'arr.get4'
-            ? { lane: 'integer', shape: [4] }
+            ? vectorRecord(type(i.out)) === 4 &&
+              type(i.out).nominal === type(i.args[0]).array?.tuple?.tag
+              ? type(i.out)
+              : { lane: 'integer', shape: [4] }
             : (resultType(found.signature, i.args.map(type), same) ??
               fail(`${i.op}: lists of two shapes`));
         if (!equal(type(i.out), r))
@@ -249,7 +257,10 @@ export function verify(p: Program, rows: readonly OperatorRow[]): void {
         if (t.lane === 'rows' && t.shape.length === 0)
           return i.args.forEach((a) => {
             const r = type(a);
-            if (r.shape.length !== 1 || !(r.lane === 'integer' || r.lane === 'real'))
+            if (
+              r.shape.length !== 1 ||
+              !(r.lane === 'integer' || r.lane === 'real')
+            )
               fail(`rows v${i.out}: a row of type ${typeToString(r)}`);
           });
         const element = elementType(t);

@@ -237,13 +237,19 @@ interpreter's value. A line is removed when the case declines or is fixed.
   (`D, E: list<real>`) is read by the length of the result, so it does not
   run where nothing reads the result: `Block(D + E, 5)` at `D = [1, 2]`,
   `E = [1, 2, 3]` gives `5`, where the interpreter gives
-  `incompatible-dimensions`. The comparisons of the sizes of two matrices
-  of an element-wise operation are read by the two lengths of the result,
-  each by its own length: `Rank(M + A)`, which reads neither, gives `2` at
-  the `M` and `A` above, and `Length(M + A)`, which reads the number of
-  rows only, gives `2` at `M = [[1, 2], [3, 4]]`,
-  `A = [[1, 2, 3], [4, 5, 6]]`, where the interpreter gives
-  `incompatible-dimensions`.
+  `incompatible-dimensions`. The comparison of the sizes of two matrices
+  under an operation on their elements is read by the two lengths of the
+  result, each by one length: `Length(M + A)`, `Count(M + A)` and
+  `Map(r ↦ 1, M + A)` at that `M` and `A`, which have two rows, give `2`,
+  `2` and `[1, 1]`, and `Rank(M + A)`, which reads no length, gives `2`,
+  where the interpreter gives `incompatible-dimensions`.
+- `javascript` (crafted), `A, B: matrix<real>`, `x: real`: the comparison of
+  the row lengths of two matrices under an operation on their elements
+  reads the row lengths of the inputs, also where a `Filter` kept no row of
+  either. `Filter(A, r ↦ Sum(r) > x) + Filter(B, r ↦ Sum(r) > x)` at
+  `A = [[1, 2, 3], [4, 5, 6]]`, `B = [[1, 2], [3, 4]]`, `x = 100` throws
+  `RangeError: incompatible-dimensions: lists of lengths 3 and 2`; the
+  interpreter gives `[]`.
 - `javascript` (crafted): a selection at each position compares the lengths
   of the lists of an element-wise arm, and the length of the mask with the
   length of each list arm and later list condition, once, before it
@@ -1880,27 +1886,9 @@ result is read (`Length(Inverse(M))`, `Shape(MatrixPower(M, 2))`). At `M = [[1, 
 `[1, 5]`, and `Determinant(M)` and `Length(Inverse(M))` throw
 `RangeError: expected-square-matrix: a matrix of 2 rows and 3 columns`.
 `Inverse` of a singular matrix is a matrix of NaN, as for a matrix of
-stated order. `RowReduce`, `Reshape` and the transpose of such a list of
-rank 2 decline.
-An element-wise operation of such a matrix compiles on `javascript`: with a
-scalar (`2·M`, `x·M`, `M/2`, `−M`, `M + 1`, `2^M`, `Sin(M)`), and with another
-matrix of run-time or stated size (`M + A`, `M − A`, `M/A`,
-`Arctan2(M, A)`). Its value is the matrix of the operation on the elements at
-each row and column, as the interpreter's, and the numbers of rows and the
-lengths of the rows of two matrices that the compiler does not prove equal
-are compared once, before the loops: `M + A` compares twice, `M + M` and
-`M + 1` not at all, `M + Transpose(M)` once (its two lengths). At
-`M = [[1, 2, 3], [4, 5, 6]]`, `M + 2·M` gives `[[3, 6, 9], [12, 15, 18]]`;
-at that `M` and `A = [[1, 0], [0, 1]]`, `M + A` throws
-`RangeError: incompatible-dimensions: lists of lengths 2 and 3`, where the
-interpreter gives `incompatible-dimensions`. The matrix operators read the
-result: `Transpose(M + 1)` gives `[[2, 5], [3, 6], [4, 7]]`,
-`Shape(M/2)` gives `(2, 3)`, and `Determinant(A − 2·A)` gives 1. The
-operations whose value is not computed element by element decline: the
-product of two matrices and a power of a matrix (`M·A`, `M^x`: the
-interpreter's matrix product, and its matrix power at an integer exponent),
-a matrix with a flat list (`M + L`, `M·L`), and a comparison, whose value
-is a matrix of booleans.
+stated order. `RowReduce` and `Reshape` of such a list of
+rank 2 decline; its transpose compiles (with `P: list<list<real^2>>` at
+`P = [[1, 2], [3, 4], [5, 6]]`, `Transpose(P)` gives `[[1, 3, 5], [2, 4, 6]]`).
 A `list<list<…>>` input, a value after
 an `If` or a `Coalesce`, a value that a loop carries, the result of a call, a
 join and a literal decline, since their rows can have different lengths:
@@ -1939,6 +1927,30 @@ known limitation). In the interval mode, and for lists of points of
 run-time lengths (`P, Q: list<tuple<real, real>>`), the result is
 unspecified: `P + Q` at lengths that differ gives a list as long as `P` on
 `javascript`, or throws a `TypeError` when `Q` is the shorter list.
+
+Arithmetic and the functions of a number apply to each element of a matrix
+of run-time size, as they do for a matrix of stated size: an input or a
+parameter of a matrix type of no stated dimensions, and a value that the
+program makes whose rows have one length (a `Transpose`, a product, an
+`Inverse`, a `Map` whose row length does not depend on the element). With
+`A, B: matrix<real>` at `A = [[1, 2], [3, 4]]` and `B = [[0, 1], [1, 0]]`,
+`A + B` gives `[[1, 3], [4, 4]]`, `2A + 1` gives `[[3, 5], [7, 9]]` and
+`Transpose(A) + B` gives `[[1, 4], [3, 4]]`. The result is a matrix of
+run-time size, which the readers of the rows and the matrix operators read
+(`Determinant(A + B)` gives -8; `RowReduce` declines). Two matrices whose
+sizes the compiler does not prove equal are compared as two flat lists are,
+the number of rows and the length of the rows, once, before the loops. At
+`B = [[1, 2, 3]]`, `A + B` throws
+`RangeError: incompatible-dimensions: lists of lengths 2 and 1`.
+`A + A` and `A + 2A` compare nothing. These decline: a matrix with a list
+(`A + v` with `v: list<real>`, where the interpreter adds `v[i]` to the row
+`i`), a `list<list<real>>` input (`g + g`: its rows can have different
+lengths; declare it `matrix<real>`), the result of a call
+(`inc(A) + 1`), a row of the result as the value (`(A + B)[1]`), a matrix
+operator of an `If` whose arms are two such results of two sizes, and a
+reduction of a matrix (`Sum(A)`). An element of the result compiles
+(`(A + B)[1][2]`, NaN out of range), and so does such an `If` as the value
+of the program or of a local.
 
 Compiled `Equal` and `NotEqual` on numeric operands are the IEEE 754
 comparison (`===` on JavaScript, `==` on the shader targets), with no
@@ -3106,8 +3118,9 @@ compiled colour. A `Tuple` or a `List` of elements of several lanes
 at a constant position only (`p.x`; `q[1]` of a record with no names). Two
 records of one engine type whose fields have different shapes (a filled and
 an unfilled `Figure`) are two shapes, so an `If` with a run-time condition
-whose arms give them declines (R3). GLSL, `interval-js` and the `bigint` mode
-decline a record (user decision). These decline too:
+whose arms give them declines (R3). `interval-js` and the `bigint` mode
+decline a record (user decision), and so does GLSL, but for a vector ("On
+GLSL" below). These decline too:
 
 - a field of a run-time length (user decision): Tycho's
   `dash(self, pattern: list<real>)` stores `N(pattern, 15)`, so
@@ -3118,6 +3131,48 @@ decline a record (user decision). These decline too:
 - a list of strings in a field, also as a literal: Tycho's invalid figure,
   `figureOf("invalid", ["message"])`;
 - a recursive function whose parameter or result is a record.
+
+**On GLSL.** A value of a nominal tuple type of two to four fields, each
+declared a real or an integer number (`type P2 = tuple<x: real, y: real>`,
+`type C3 = tuple<r: real, g: real, b: real>`, a field type through a
+transparent alias, an integer of any range, as for an integer input), is a
+`vec2`, a `vec3` or a `vec4`. The fields can mix integers and reals, as an
+unnamed tuple `(i, x)` is one `vec2`. The constructor is the vector of its
+operands, a field read by name is one element, and a parameter or the result
+of a user function (typed or not), a block local and the two arms of an `If`
+of one type are the vector; the result of such a program is a `vecN`
+(`returnType` of the slice). `Equal` and `NotEqual` of two values of one
+type compare the elements. A real field of such a value is never NaN in the
+interpreter (`P2(NaN, 1)` is an `incompatible-type` error), so `IsMissing`
+of it is `false` and `Coalesce` and `AssertPresent` give it, as on
+JavaScript. The value keeps its type: `Equal`, `NotEqual` or an `If` of two
+nominal types, also of the same fields (`P2` and
+`type V2 = tuple<x: real, y: real>`: "Equal of P2(x: real, y: real),
+V2(x: real, y: real)"), or of such a value and an unnamed tuple ("Equal of a
+tuple: its value on a tuple is not its value on a list", "arms of two
+types") decline, as on JavaScript, and so do arithmetic on a whole value
+(`p + 1`, an `incompatible-type` error in the interpreter), a list of such
+values ("a list of records"), an input declared with the type (CE-1871) and a
+dictionary. Every other constructor declines with its cause: with
+`type B2 = tuple<x: boolean, y: boolean>`, `B2(c, c)` gives "a value of the
+type B2, a record whose field x is of type boolean, not a real or an integer
+number: on glsl a record is a value of a nominal tuple type of two to four
+real or integer numbers (a vec2 to a vec4)"; a string, a list, an array, a
+complex number or a record in a field, and one field or more than four,
+alike. The nominal pixel of an array is one such type ("Arrays", "On GLSL").
+
+```js
+// type P2 = tuple<x: real, y: real>
+// function mid(a: P2, b: P2) -> P2 { P2((a.x + b.x) / 2, (a.y + b.y) / 2) }
+const r = compile(ce.box(['mid', ['P2', 'x', 'y'], ['P2', 'y', 'x']]), { to: 'glsl' });
+r.preamble;
+// vec2 _fn_ir_u0_mid(vec2 v4, vec2 v5) {
+//   return vec2((0.5 * (v4[int(0.0)] + v5[int(0.0)])), (0.5 * (v4[int(1.0)] + v5[int(1.0)])));
+// }
+r.code;
+// vec2 v18 = _fn_ir_u0_mid(vec2(x, y), vec2(y, x));
+// return v18;
+```
 
 **Parameters.** A parameter of a user function of no stated type, of type
 `any` or of a named tuple type takes a record (one of no stated type or `any`
@@ -3724,8 +3779,53 @@ A cell of an integer type is a float on GLSL, exact within -16,777,216 to
 where an integer is exact within -16777216 to 16777216 only"), so a pixel
 packed in one number does not compile and a tuple cell of four bytes does.
 A field of a tuple cell of a nominal type (`P[i].g` with
-`P: array<Pixel>`) is an element of the texel; the whole cell of a nominal
-type is a record, which GLSL declines.
+`P: array<Pixel>`) is an element of the texel.
+
+A value of a nominal type that is a tuple cell of four bytes
+(`type Pixel = tuple<r: Byte, g: Byte, b: Byte, a: Byte>` with
+`type alias Byte = integer<0..255>`) is a `vec4` on GLSL, by the rule of
+vectors ("Records", "On GLSL"); the read of a whole cell is that `vec4`
+(the texel, one fetch). An operand of
+the constructor must prove `Byte`, as on JavaScript:
+`Pixel(min(max(round(v), 0), 255), 2, 3, 255)` compiles, and
+`Pixel(x % 256, 1, 2, 3)` declines ("the field r of Pixel: a value of type
+integer, which does not prove Byte"). `Equal` and `NotEqual` of two values
+of the type compare the four elements; a read out of range is a `vec4` of
+NaN, which equals nothing, as the interpreter's tuple of NaN equals no
+pixel. The result of such a program is a `vec4`, as for an unnamed tuple of
+four numbers (`returnType` of the slice).
+
+```js
+// type Pixel = …; function invert(p: Pixel) -> Pixel {
+//   Pixel(min(max(255 - p.r, 0), 255), min(max(255 - p.g, 0), 255),
+//         min(max(255 - p.b, 0), 255), p.a) }
+ce.declare('src', 'array<Pixel>');
+ce.declare('i', 'integer');
+const r = compile(ce.box(['invert', ['At', 'src', 'i']]), { to: 'glsl' });
+r.preamble; // …
+// vec4 _fn_ir_u0_invert(vec4 v3) {
+//   return vec4(min(max(((-v3[int(0.0)]) + 255.0), 0.0), 255.0), min(max(((-v3[int(1.0)]) + 255.0), 0.0), 255.0), min(max(((-v3[int(2.0)]) + 255.0), 0.0), 255.0), v3[int(3.0)]);
+// }
+r.code;
+// vec4 v2 = (i == floor(i) && i != 0.0 && abs(i) <= float(src_count) ? _gpu_ir_cell4_u(src, i > 0.0 ? int(i) - 1 : src_count + int(i)) : vec4(uintBitsToFloat(0x7fc00000u)));
+// vec4 v26 = _fn_ir_u0_invert(v2);
+// return v26;
+```
+
+The value keeps its type, and these decline, as on JavaScript: `Equal` or
+`NotEqual` of a `Pixel` and an unnamed tuple (the interpreter gives `False`
+for `px[i] == (255, 255, 255, 255)`, CE-1872: "Equal of a tuple: its value on
+a tuple is not its value on a list") or of two nominal types; an `If` of a
+`Pixel` arm and a tuple arm, or of two nominal types ("arms of two types");
+a `Pixel` for a parameter declared `tuple<…>`, a tuple for a parameter
+declared `Pixel`, a tuple returned or held in a local where `Pixel` is
+declared (each an error in the interpreter); `IsMissing`, `Coalesce` and
+`AssertPresent` of a `Pixel` value; arithmetic on a whole `Pixel`
+(`p + 1`) and `p[2]` (the interpreter gives `incompatible-type`); a list of
+`Pixel` values ("a list of records"); an input declared `Pixel` (CE-1871);
+and every record that is not a vector ("Records", "On GLSL"). Unlike the
+other vectors, a `Pixel` can be an out-of-range read, so its discharges
+decline.
 
 These decline on GLSL, each with a message that names it: a name whose value
 is an array, a read with a range or a list as the index, a store, `AddTo` of

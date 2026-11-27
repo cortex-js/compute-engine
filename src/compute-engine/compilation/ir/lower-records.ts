@@ -96,8 +96,15 @@ export function laneProves(t: IRType, marked: boolean, d: Type): boolean {
 /** `javascript`: the target holds records (JavaScript, not the interval
  *  or the `bigint` mode). Elsewhere a constructor declines and a `Tuple`
  *  or a `List` of several lanes is lowered as before (user decision Q3 of
- *  the plan of CE-1652). */
-export function recordLowering(cx: Lowering, javascript: boolean) {
+ *  the plan of CE-1652). `vectors`: the target holds the records of a
+ *  nominal tuple type of two to four real or integer numbers
+ *  (`type P2 = tuple<x: real, y: real>`, a pixel) and no other (GLSL in
+ *  the default mode, where such a record is a `vec2` to a `vec4`). */
+export function recordLowering(
+  cx: Lowering,
+  javascript: boolean,
+  vectors = false
+) {
   const { b, type, tuples } = cx;
   /** The values of the fields of each record made in this lowering: a
    *  read of a field of one is that value (a constant stays a constant). */
@@ -193,6 +200,30 @@ export function recordLowering(cx: Lowering, javascript: boolean) {
           known && cx.trackListed ? (tuple ? 'Tuple' : 'List') : undefined
         );
 
+  /** Why a value of the nominal tuple type of the constructor `c` is not
+   *  a vector on GLSL (`vectorRecord()` of `ir.ts`): it has two to four
+   *  fields, each declared a real or an integer number (of one lane or
+   *  both, as an unnamed tuple of numbers is one vector); else
+   *  `undefined`. */
+  const notVector = (
+    c: NonNullable<ReturnType<typeof recordConstructor>>
+  ): string | undefined => {
+    const n = c.types.length;
+    if (n < 2 || n > 4)
+      return `of ${n} field${n === 1 ? '' : 's'}, not two to four`;
+    const k = c.types.findIndex((d) => {
+      const t = settledType(d, cx.wide);
+      return (
+        t === undefined ||
+        t.shape.length > 0 ||
+        (t.lane !== 'real' && t.lane !== 'integer')
+      );
+    });
+    return k < 0
+      ? undefined
+      : `whose field ${c.names?.[k] ?? k + 1} is of type ${engineTypeToString(c.types[k])}, not a real or an integer number`;
+  };
+
   /** `P(a, b, …)`, the constructor of the named tuple type `P`: each
    *  operand is lowered for the declared type of its field. An operand
    *  whose static type does not prove that type declines (R5); where the
@@ -201,11 +232,19 @@ export function recordLowering(cx: Lowering, javascript: boolean) {
    *  `nothing`. */
   const construct = (e: Fn): V => {
     const c = recordConstructor(e)!;
-    if (!javascript)
+    if (!javascript && !vectors)
       decline(
         e,
         `a value of the type ${c.nominal}, a record: records compile on javascript only`
       );
+    if (!javascript) {
+      const why = notVector(c);
+      if (why !== undefined)
+        decline(
+          e,
+          `a value of the type ${c.nominal}, a record ${why}: on glsl a record is a value of a nominal tuple type of two to four real or integer numbers (a vec2 to a vec4)`
+        );
+    }
     const fields: (IRType | undefined)[] = [];
     const values = e.ops.map((op, k) => {
       const d = c.types[k];
@@ -279,7 +318,10 @@ export function recordLowering(cx: Lowering, javascript: boolean) {
     const { constant, ...f } = t.fields![k];
     if (f.shape.includes(0)) {
       if (f.shape.length !== 1 || t.marks?.[k] !== undefined)
-        decline(e, 'a read of a field that is an empty list of lists or points');
+        decline(
+          e,
+          'a read of a field that is an empty list of lists or points'
+        );
       return cx.emptyList(e, f.lane);
     }
     const v = b.op('field', [r, b.constant(k, 'integer')], f);
