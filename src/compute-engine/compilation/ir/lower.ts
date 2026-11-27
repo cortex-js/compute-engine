@@ -2095,7 +2095,11 @@ function lowerOnce(
 
   /** Lower `e`. With `want` false its value is not used (a statement).
    *  `entryResult` admits the geometry representation at the return site. */
-  const value = (e: Expression, want = true, entryResult = false): V | undefined => {
+  const value = (
+    e: Expression,
+    want = true,
+    entryResult = false
+  ): V | undefined => {
     // A name is admitted by `symbol()`; another node here, and the node
     // that passes its value on (`rowsNode`) by its handler.
     const admitted = !isSymbol(e) && rowsRead === e;
@@ -2359,7 +2363,10 @@ function lowerOnce(
         t.shape[0] !== 2 ||
         !isSubLane(t.lane, 'real')
       )
-        decline(x, 'a Polygon vertex that is not a real point of two coordinates');
+        decline(
+          x,
+          'a Polygon vertex that is not a real point of two coordinates'
+        );
       const point = lists.listSource(v);
       return [
         point.at(b.constant(0, 'integer')),
@@ -8381,7 +8388,10 @@ function lowerOnce(
         used.makers.length > 0 &&
         used.names.some(({ definition }) => !definition.isConstant)
       )
-        decline(root, 'an expression with an array allocation and a mutable array binding');
+        decline(
+          root,
+          'an expression with an array allocation and a mutable array binding'
+        );
       // The value of an assigned variable after the body is not a result
       // of the code: `run()` writes it to the engine (`assigningRun()`).
       const results = entryOf(p).results;
@@ -8513,10 +8523,16 @@ function lowerOnce(
   const refreshState = (e: Fn, what: string): (() => void) => {
     const list = assigns.find((s) => s.list || s.rows);
     if (list !== undefined)
-      decline(e, `${what}, in a function that assigns the list variable ${list.name} of the engine (a list is not carried to the host)`);
+      decline(
+        e,
+        `${what}, in a function that assigns the list variable ${list.name} of the engine (a list is not carried to the host)`
+      );
     for (const s of assigns)
       if (lookup(s.name)?.outer)
-        decline(e, `${what}, in a body that is evaluated several times (a Sum, a callback of Map or Filter), in a function that assigns the variable ${s.name} of the engine: the body carries no variable`);
+        decline(
+          e,
+          `${what}, in a body that is evaluated several times (a Sum, a callback of Map or Filter), in a function that assigns the variable ${s.name} of the engine: the body carries no variable`
+        );
     const state = assigns.map((s) => stateWrite(e, s.name));
     return () => {
       state.forEach((x, j) => {
@@ -8556,7 +8572,10 @@ function lowerOnce(
     const why = (reason: string, code?: DeclineReason): never =>
       decline(e, `a call of the function ${name} of the host, ${reason}`, code);
     if (!options.javascript || interval || bigint) why('on this target');
-    const refresh = refreshState(e, `a call of the function ${name} of the host`);
+    const refresh = refreshState(
+      e,
+      `a call of the function ${name} of the host`
+    );
     if (e.nops > MAX_HOST_ARGUMENTS)
       why(`with more than ${MAX_HOST_ARGUMENTS} arguments`);
     const t = e.type.type;
@@ -8908,7 +8927,9 @@ function lowerOnce(
         });
       }
     stagedAssignments =
-      callsHost && out.some((s) => !s.read) && !out.some((s) => s.list || s.rows);
+      callsHost &&
+      out.some((s) => !s.read) &&
+      !out.some((s) => s.list || s.rows);
     // The variables that each function reads and writes, through its
     // calls too.
     const closure = (key: object) => {
@@ -9029,9 +9050,14 @@ function lowerOnce(
         input(p, name, declared, true);
       });
       const states = assignedNames(root);
-      const hiddenState = states.find((state) => frames[0].names.has(state.name));
+      const hiddenState = states.find((state) =>
+        frames[0].names.has(state.name)
+      );
       if (hiddenState !== undefined)
-        decline(root, `a parameter that hides the engine variable ${hiddenState.name}`);
+        decline(
+          root,
+          `a parameter that hides the engine variable ${hiddenState.name}`
+        );
       // A body that is a Loop, or a block that ends in a Loop, an assignment
       // or a declaration, is `Nothing`, which the code gives as NaN
       // (`nothingPlace()`): `do { s = s + 1 }`, `do { a[k] = t }`,

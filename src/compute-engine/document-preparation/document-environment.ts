@@ -166,7 +166,12 @@ export function createDocumentEnvironment(
               policy === undefined
                 ? prepareDocument(ce, parent, rows, syntax, writableNames)
                 : prepareWithTypePolicy(
-                    ce, parent, rows, syntax, writableNames, policy
+                    ce,
+                    parent,
+                    rows,
+                    syntax,
+                    writableNames,
+                    policy
                   );
             return {
               ...revision,

@@ -195,7 +195,8 @@ export function inputNamesRead(
   varsKeys?: ReadonlySet<string>,
   skipBodies?: (name: string) => boolean
 ): string[] {
-  const explicit = varsKeys && new Map([...varsKeys].map((name) => [name, undefined]));
+  const explicit =
+    varsKeys && new Map([...varsKeys].map((name) => [name, undefined]));
   return inputsRead(expr, explicit, skipBodies).map((x) => x.name);
 }
 
@@ -213,10 +214,14 @@ function inputsRead(
   const result: { name: string; type?: Type }[] = [];
   for (const [name, sym] of namesRead(expr, skipBodies)) {
     if (explicitTypes?.has(name)) {
-      const def = inferExplicitType ? definitionRead(sym, name, scope) : undefined;
+      const def = inferExplicitType
+        ? definitionRead(sym, name, scope)
+        : undefined;
       result.push({
         name,
-        type: explicitTypes?.get(name) ?? (isValueDef(def) ? def.value.type.type : undefined),
+        type:
+          explicitTypes?.get(name) ??
+          (isValueDef(def) ? def.value.type.type : undefined),
       });
       continue;
     }

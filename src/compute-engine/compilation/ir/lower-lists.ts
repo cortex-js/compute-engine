@@ -263,7 +263,11 @@ export function listLowering(cx: Lowering) {
   const { b, type } = cx;
   const op = (name: string) => rowOfOp(cx.rows, name)!.row;
   const integer = (n: number) => b.constant(n, 'integer');
-  const boundsOf = shaderBounds(cx.constant, (v) => b.defs.get(v), cx.inputBounds);
+  const boundsOf = shaderBounds(
+    cx.constant,
+    (v) => b.defs.get(v),
+    cx.inputBounds
+  );
   // The bodies written out in the program: the elements of the builds on
   // GLSL (`over()`) and the terms of the sums (`writtenOut()`).
   let unrolled = 0;
@@ -503,7 +507,11 @@ export function listLowering(cx: Lowering) {
     const name = clause.ops[0].symbol;
     let range = clause.ops[1];
     let factor: Expression | undefined;
-    if (isFunction(range, 'Multiply') && cx.isLibrary(range) && range.nops === 2) {
+    if (
+      isFunction(range, 'Multiply') &&
+      cx.isLibrary(range) &&
+      range.nops === 2
+    ) {
       const [a, z] = range.ops;
       if (isNumber(a)) [factor, range] = [a, z];
       else if (isNumber(z)) [factor, range] = [z, a];
@@ -524,7 +532,9 @@ export function listLowering(cx: Lowering) {
           type(hi).lane !== 'integer' ||
           a === undefined ||
           z === undefined ||
-          ![...a, ...z].every((x) => Number.isFinite(x) && Math.abs(x) < 2 ** 20) ||
+          ![...a, ...z].every(
+            (x) => Number.isFinite(x) && Math.abs(x) < 2 ** 20
+          ) ||
           Math.max(z[1] - a[0], a[1] - z[0]) >= SCALARIZE_LIMIT
         )
           return undefined;

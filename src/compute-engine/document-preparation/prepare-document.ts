@@ -1831,8 +1831,7 @@ export function prepareDocument(
         ce,
         [...declarations]
           .filter(
-            ([name, { row }]) =>
-              !rowErrors.has(row.id) && !fields.has(name)
+            ([name, { row }]) => !rowErrors.has(row.id) && !fields.has(name)
           )
           .map(([name]) => bodies.get(name)!),
         arities,
@@ -1859,8 +1858,7 @@ export function prepareDocument(
         if (isDictionary(expr))
           return expr.values.some((value) => readsField(value, bound));
         if (!isFunction(expr)) return false;
-        if (!bound.has(expr.operator) && fields.has(expr.operator))
-          return true;
+        if (!bound.has(expr.operator) && fields.has(expr.operator)) return true;
         const names = boundNames(ce, expr);
         const inner =
           names.length === 0 ? bound : new Set([...bound, ...names]);

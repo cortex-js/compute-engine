@@ -1510,7 +1510,9 @@ export function serializeEpsil(
 
       const clauseOp = entries['typeParams'];
       const clause =
-        clauseOp === undefined ? '' : stringValue(clauseOp) ?? symbol(clauseOp);
+        clauseOp === undefined
+          ? ''
+          : (stringValue(clauseOp) ?? symbol(clauseOp));
       if (clauseOp !== undefined && !clause)
         return serializeGenericFunction(expr);
       const line = clause
@@ -1600,7 +1602,8 @@ export function serializeEpsil(
         const text = stringValue(operand(spec, 2)) ?? symbol(operand(spec, 2));
         if (text === null) return serializeGenericFunction(expr);
         const memberDoc = memberDocs.get(member);
-        if (memberDoc !== undefined) members.push(...docCommentLines(memberDoc));
+        if (memberDoc !== undefined)
+          members.push(...docCommentLines(memberDoc));
         if (kind === 'function')
           members.push(fmt.text(`function ${escapeSymbol(member)}${text}`));
         else if (kind === 'readonly' || kind === 'readwrite')

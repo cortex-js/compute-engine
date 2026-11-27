@@ -402,7 +402,10 @@ function assigningRun(
   return (...args: unknown[]) =>
     inDigits(() => {
       const given = Array.from({ length: arity }, (_, k) => args[k]);
-      const r = call([...given, ...assigns.map((x) => readAssigned(ce, x))]) as unknown[];
+      const r = call([
+        ...given,
+        ...assigns.map((x) => readAssigned(ce, x)),
+      ]) as unknown[];
       // A name that the code only reads is not written back.
       if (!stagedAssignments)
         assigns.forEach((x, k) => {

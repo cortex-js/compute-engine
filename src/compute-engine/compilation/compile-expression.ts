@@ -220,11 +220,7 @@ function compileExpression<
     const inputs = options.inputs;
     const fallback = (decline: CompileDeclineError): CompilationResult<T, R> =>
       inCallerScope(expr, () => {
-        const result = compileInScope<T, R>(
-          expr,
-          options,
-          decline
-        );
+        const result = compileInScope<T, R>(expr, options, decline);
         const rows = sealedInputDefinitions(expr, inputs);
         const run = result.run as ((...args: unknown[]) => unknown) | undefined;
         if (rows.size === 0 || run === undefined) return result;

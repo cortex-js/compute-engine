@@ -341,7 +341,10 @@ export function compileInputNames(
       }
     | undefined
 ): Readonly<Record<string, unknown>> | undefined {
-  const extra = [...(options?.symbolic ?? []), ...Object.keys(options?.inputs ?? {})];
+  const extra = [
+    ...(options?.symbolic ?? []),
+    ...Object.keys(options?.inputs ?? {}),
+  ];
   if (extra.length === 0) return options?.vars;
   const names: Record<string, unknown> = { __proto__: null, ...options?.vars };
   for (const name of extra) names[name] = true;

@@ -24,7 +24,10 @@ import { kindTypeNames } from '../boxed-expression/value-kinds.js';
 import type { Type } from '../../common/type/types.js';
 import { isSubtype } from '../../common/type/subtype.js';
 import { isBooleanBindingType } from './type-facts.js';
-import { fallbackInputsRead, interpreterFallback } from './interpreter-fallback.js';
+import {
+  fallbackInputsRead,
+  interpreterFallback,
+} from './interpreter-fallback.js';
 import { compileDiagnosticOf } from './diagnostics.js';
 import { isRecord, hasIntervalBounds } from '../interval/run-support.js';
 import type {
@@ -237,7 +240,6 @@ function hasWideIntervalInput(value: unknown): boolean {
   if (isRecord(value)) return Object.values(value).some(hasWideIntervalInput);
   return false;
 }
-
 
 /**
  * The arguments of the interpreter fallback with the boolean variables

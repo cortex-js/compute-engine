@@ -22128,7 +22128,8 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
             tuple.length > 4
           )
             return null;
-          const [lo, hi] = tuple.length === 2 ? [ce.One, tuple[1]] : tuple.slice(1);
+          const [lo, hi] =
+            tuple.length === 2 ? [ce.One, tuple[1]] : tuple.slice(1);
           clauses.push(
             ce._fn(
               'Element',
@@ -22144,7 +22145,9 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         }
         let acc: Expression = ops[0];
         for (let k = clauses.length - 1; k >= 0; k--)
-          acc = ce._fn('Comprehension', [acc, clauses[k]], { canonical: false });
+          acc = ce._fn('Comprehension', [acc, clauses[k]], {
+            canonical: false,
+          });
         return acc.canonical;
       }
 

@@ -1641,49 +1641,49 @@ the integer lane); so is `List()` at a parameter of `Apply` declared such a list
 rank 1 of no stated length, of integers, reals, booleans or strings
 (`let x: list<string> = []`), an operand of a `Tuple` at the type of its
 position, and an operand of the constructor of a nominal tuple type at the type
-of its field (`Figure("circle", [])`), even when the constructor is inside
-a list literal (CE-1891). A list of no stated element type
-(`let pts = []`, of type `list<unknown>`) takes the integer lane. The memo of
-`value()` takes no node that holds such a `List()`: its key does not have the
-place of the node. No value has a stated length of 0: the result of a function
-whose length is the constant 0 keeps its length value, and the read of a record
-field of the stated length 0 (the type of a field states a constant length) is
-an empty build of the lane of the field. Otherwise (a list of points, a union
-type, a `List()` that the program writes), and on GLSL and in the interval mode,
-`List()` declines ("an empty list"). The invariant: a value that a type names
-(of a value or of a function's result) is live wherever that type is, so `dce`
-keeps it; when `fold` takes the arm of an `if` whose list is the program's
-result, the length constant of that arm is read by the result type only. GLSL
-and the interval mode decline lists of two lengths ("arms that are lists of two
-lengths"): GLSL has no run-time length, and in the interval mode a length is a
-plain number that an undecided condition cannot join. A list arm beside a scalar
-arm, tuples of two lengths, lists of lists and lists of two lanes that do not
-join (booleans and reals) decline with "arms of two types". `elem` reads an
-element from 0; `At` is the interpreter's rule (from 1, from the end when
-negative, NaN outside; on GLSL a conditional that reads the element only in
-range, with the length as a literal, `$#0` in the spelling), and the fold turns
-an `At` of a constant index in range into an `elem`. Another index can be out of
-range. On JavaScript, of a list of booleans it is `atu`, `undefined` out of
-range where the interpreter gives `Missing` (`At(X > 0, 5)` of a list `X` of
-three numbers), a pure read: no operation on a boolean fails on `undefined`; of
-a list of real points it is `atp`, a point of NaN coordinates out of range, the
-interpreter's value (`At(P, 0)` is `[NaN, NaN]`). Of a list of lists of numbers
-of stated lengths (`P: list<list<real^2>>`) it is `atrow`, the row, or
-`undefined` out of range where the interpreter gives `Missing`, only where the
-`At` (or a `First`, a `Last`) is the whole program (the root, or the body of a
-root function literal, in a `Block` of one expression or not; CE-1540): no
-operation reads the row, so none folds it away (`Length` of the row is a
-constant, a discharge reads a list as present). Of a list of complex numbers or
-another read of a list of lists it declines: a read of an absent row must not
-fail, and no program of Tycho's corpus reads one. GLSL, the interval and the
-bigint modes decline every such index. `build` and `filter` are region rows. A
-`Length`, a reduction, a `Map` or a `Filter` of a `Range` reads its count and
-the arithmetic of its elements, so `Length(Range(1, n))` makes no list. On GLSL,
-which has no build, a `Map` (and a one-clause `Comprehension`) over a source of
-a constant length of 1 to 64 (`SCALARIZE_LIMIT`) is the list of its elements,
-the body lowered once per element in order: a `vecN` or a `float[n]`
-(`Map(f, L)` of `L: list<real^3>`, `Map(f, List(a, b, c))`). A `Range` of
-integer constant operands is a source of a constant length, its exact count
+of its field (`Figure("circle", [])`), even when the constructor is inside a
+list literal (CE-1891). A list of no stated element type (`let pts = []`, of
+type `list<unknown>`) takes the integer lane. The memo of `value()` takes no
+node that holds such a `List()`: its key does not have the place of the node. No
+value has a stated length of 0: the result of a function whose length is the
+constant 0 keeps its length value, and the read of a record field of the stated
+length 0 (the type of a field states a constant length) is an empty build of the
+lane of the field. Otherwise (a list of points, a union type, a `List()` that
+the program writes), and on GLSL and in the interval mode, `List()` declines
+("an empty list"). The invariant: a value that a type names (of a value or of a
+function's result) is live wherever that type is, so `dce` keeps it; when `fold`
+takes the arm of an `if` whose list is the program's result, the length constant
+of that arm is read by the result type only. GLSL and the interval mode decline
+lists of two lengths ("arms that are lists of two lengths"): GLSL has no
+run-time length, and in the interval mode a length is a plain number that an
+undecided condition cannot join. A list arm beside a scalar arm, tuples of two
+lengths, lists of lists and lists of two lanes that do not join (booleans and
+reals) decline with "arms of two types". `elem` reads an element from 0; `At` is
+the interpreter's rule (from 1, from the end when negative, NaN outside; on GLSL
+a conditional that reads the element only in range, with the length as a
+literal, `$#0` in the spelling), and the fold turns an `At` of a constant index
+in range into an `elem`. Another index can be out of range. On JavaScript, of a
+list of booleans it is `atu`, `undefined` out of range where the interpreter
+gives `Missing` (`At(X > 0, 5)` of a list `X` of three numbers), a pure read: no
+operation on a boolean fails on `undefined`; of a list of real points it is
+`atp`, a point of NaN coordinates out of range, the interpreter's value
+(`At(P, 0)` is `[NaN, NaN]`). Of a list of lists of numbers of stated lengths
+(`P: list<list<real^2>>`) it is `atrow`, the row, or `undefined` out of range
+where the interpreter gives `Missing`, only where the `At` (or a `First`, a
+`Last`) is the whole program (the root, or the body of a root function literal,
+in a `Block` of one expression or not; CE-1540): no operation reads the row, so
+none folds it away (`Length` of the row is a constant, a discharge reads a list
+as present). Of a list of complex numbers or another read of a list of lists it
+declines: a read of an absent row must not fail, and no program of Tycho's
+corpus reads one. GLSL, the interval and the bigint modes decline every such
+index. `build` and `filter` are region rows. A `Length`, a reduction, a `Map` or
+a `Filter` of a `Range` reads its count and the arithmetic of its elements, so
+`Length(Range(1, n))` makes no list. On GLSL, which has no build, a `Map` (and a
+one-clause `Comprehension`) over a source of a constant length of 1 to 64
+(`SCALARIZE_LIMIT`) is the list of its elements, the body lowered once per
+element in order: a `vecN` or a `float[n]` (`Map(f, L)` of `L: list<real^3>`,
+`Map(f, List(a, b, c))`). A `Range` of integer constant operands is a source of
+a constant length, its exact count
 (`Min(Comprehension((x - k)², Element(k, Range(1, 16))))` is a `float[16]`); not
 with `constantFold: false`. The elements of such builds in one program are at
 most 4,096; past that, a `Filter`, a `Range` of a run-time length, of a real
@@ -1820,25 +1820,25 @@ Where a view is a list (CE-1806). A `Map` or a `Filter` is an array in the code
 only where the program needs the list: the result of the program, an argument of
 a function of the host (`hostCall()` of `lower.ts`), an element of a list or a
 tuple, a view read more than once (a local read twice), and a reader that the
-pass `forward` of `passes.ts` does not rewrite. On JavaScript outside bigint
-and interval modes it takes a build whose body is pure
-(operations, conditionals and calls with no effect and no failure) and that one
-instruction reads: an `elem` at the index of the one loop, build or filter
-between them (the loop of `Sum`, `Product`, `Max`, `Min`, `Mean`, `Reduce`; a
-`Map` or a `Filter` of the `Map`) when that loop runs from 0 within the length
-of the build (the loop of `Dot` over the length of its other operand does not,
-and keeps the array), or an `elem` that runs once for each run of the build
-(only conditionals between them), is the body at that index; an `At` of a real
-element that runs once (`First`, `Last`, `At` of a constant or a run-time index)
-is the body at the index where it is in range, by the rule of `At`, and NaN
-elsewhere. Its second half, `filters`, takes a filter of a pure body: when no
-instruction reads its list, a loop that counts the elements kept (`Length`,
-`All`); when one instruction reads the first element (`First`, `Find`) or none
-does (`Any`), and only `0 < count` reads the count, a loop that stops at the
-first element kept; when one loop of the same region reduces the list (`Sum`,
-`Product`, `Mean`, `Max`, `Min`, `Reduce`), that loop over the source, its body
-in the arm where an element is kept, counting them where the count is read after
-it. `first(map(x => x * 2, L))` is `2 * L[0]` where `L` has an element, and
+pass `forward` of `passes.ts` does not rewrite. On JavaScript outside bigint and
+interval modes it takes a build whose body is pure (operations, conditionals and
+calls with no effect and no failure) and that one instruction reads: an `elem`
+at the index of the one loop, build or filter between them (the loop of `Sum`,
+`Product`, `Max`, `Min`, `Mean`, `Reduce`; a `Map` or a `Filter` of the `Map`)
+when that loop runs from 0 within the length of the build (the loop of `Dot`
+over the length of its other operand does not, and keeps the array), or an
+`elem` that runs once for each run of the build (only conditionals between
+them), is the body at that index; an `At` of a real element that runs once
+(`First`, `Last`, `At` of a constant or a run-time index) is the body at the
+index where it is in range, by the rule of `At`, and NaN elsewhere. Its second
+half, `filters`, takes a filter of a pure body: when no instruction reads its
+list, a loop that counts the elements kept (`Length`, `All`); when one
+instruction reads the first element (`First`, `Find`) or none does (`Any`), and
+only `0 < count` reads the count, a loop that stops at the first element kept;
+when one loop of the same region reduces the list (`Sum`, `Product`, `Mean`,
+`Max`, `Min`, `Reduce`), that loop over the source, its body in the arm where an
+element is kept, counting them where the count is read after it.
+`first(map(x => x * 2, L))` is `2 * L[0]` where `L` has an element, and
 `sum(filter(map(x => x * 2, L), c => c > 2))` is one loop over `L`. The guard of
 a build refuses 2^32 elements, where the guard of a loop accepts 2^32 passes, so
 the program must refuse the length of the view where the build was. A length
@@ -1862,30 +1862,29 @@ is removed, so a build that stays keeps its own guard. Only the passes put
 `listlen`, and only on JavaScript, so GLSL, the interval mode and the bigint
 mode have no spelling of it. A callback with an effect (a draw, a call of a
 function of the host) or that can fail (`AssertPresent`) keeps the array, and so
-do a reader at an index the pass cannot prove is visited at most once and an `At` of
-integers or booleans (its value out of range, NaN or `undefined`, is not a value
-of the lane). A full reverse traversal of a bounded build can forward its
-element computation while preserving the reduction's reverse order.
+do a reader at an index the pass cannot prove is visited at most once and an
+`At` of integers or booleans (its value out of range, NaN or `undefined`, is not
+a value of the lane). A full reverse traversal of a bounded build can forward
+its element computation while preserving the reduction's reverse order.
 
-Before GLSL scalarization, the passes forward a single element read of a
-bounded build or a pure flat element-wise operation. A reduction over a pure
-filter of a stated source length visits the source in order and updates the
-accumulator where the predicate holds. Emitting the filtered list itself would
-require a shader value of run-time length, so that form declines.
-A scalar reduction can also stream a one-clause comprehension of a small
-integer `Range`, including a literal scale of it. The bounds of the range
-must prove at most 64 elements and endpoint magnitudes below 2^20. The
-proof uses constants and finite input declarations through rounding and
-power-of-two scaling. An `At` of a pure build of a stated length
-can read its real element directly, including from a `Map` that exceeds the
-unrolling limit or a fixed-length `ListJoin`. An invalid constant index
-keeps the target's decline.
+Before GLSL scalarization, the passes forward a single element read of a bounded
+build or a pure flat element-wise operation. A reduction over a pure filter of a
+stated source length visits the source in order and updates the accumulator
+where the predicate holds. Emitting the filtered list itself would require a
+shader value of run-time length, so that form declines. A scalar reduction can
+also stream a one-clause comprehension of a small integer `Range`, including a
+literal scale of it. The bounds of the range must prove at most 64 elements and
+endpoint magnitudes below 2^20. The proof uses constants and finite input
+declarations through rounding and power-of-two scaling. An `At` of a pure build
+of a stated length can read its real element directly, including from a `Map`
+that exceeds the unrolling limit or a fixed-length `ListJoin`. An invalid
+constant index keeps the target's decline.
 
-On JavaScript and GLSL, independent scalar reductions over the same bounds
-can share a loop and the per-index calculations that CSE finds in it. Each
-accumulator still receives its terms in order. On JavaScript a loop whose
-single result is a fixed-length list of reals can update its private
-accumulator in place when the next value is a pure element-wise operation.
+On JavaScript and GLSL, independent scalar reductions over the same bounds can
+share a loop and the per-index calculations that CSE finds in it. Each
+accumulator still receives its terms in order. On JavaScript a loop whose single
+result is a fixed-length list of reals can update its private accumulator in
+place when the next value is a pure element-wise operation.
 
 A `Sum` or a `Product` with `Limits` whose term is a flat list of numbers adds
 or multiplies the terms element by element, as the interpreter does (CE-1470):
@@ -2738,12 +2737,11 @@ the same (`resultType()` gives none: `A + B`, `Transpose(A) + B`, `A + K` of a
 place and on the scalar operands. An operand is read at that place by
 `elementAt()` of `lower.ts`, as for flat lists: an operand that is itself an
 operation on elements (a row that threads, with no effect, of operands of its
-shape) or a build of `elementwise()` is the operation on its elements there,
-and is not built, so `2·A + B` and `(A + B)·2 − C` are one build of builds.
-Each of the two lengths of the result is the
-length of two flat lists that an operation reads at each index (`agreedLength()`
-of `lower-lists.ts`, "Lists"): the length plus the value 0 of the check
-`rows.agree`, which throws a `RangeError`
+shape) or a build of `elementwise()` is the operation on its elements there, and
+is not built, so `2·A + B` and `(A + B)·2 − C` are one build of builds. Each of
+the two lengths of the result is the length of two flat lists that an operation
+reads at each index (`agreedLength()` of `lower-lists.ts`, "Lists"): the length
+plus the value 0 of the check `rows.agree`, which throws a `RangeError`
 (`incompatible-dimensions: lists of lengths …`) where the lengths of the
 operands differ, the interpreter's error. It is made once, before the builds,
 which read it as their length, so `dce` keeps it, and a later operation on the
@@ -3110,24 +3108,23 @@ dictionary. A loop or a build adds its passes to the deadline count of the
 runtime with `_SYS.tick(n)`: it runs its passes in blocks of at most 1024, an
 inner `for` in an outer one whose update adds the passes of the block, so no
 pass makes a call and a nest of short loops counts every pass. Ordinary
-JavaScript emits one counted loop when literal integer bounds fix the count
-at 1024 passes or fewer. This spelling excludes explicit `Loop` passes,
-early exits, windows, and parallel execution. It charges the block after
-completing it.
+JavaScript emits one counted loop when literal integer bounds fix the count at
+1024 passes or fewer. This spelling excludes explicit `Loop` passes, early
+exits, windows, and parallel execution. It charges the block after completing
+it.
 
 The count is on the deadline frame (on the runtime when the deadline is a
-number), so it holds across calls and re-entrant calls, and the steps charged
-to a step budget do not depend on calls made before the frame. The count is
-kept modulo 1024. Each time it crosses a multiple of 1024 (once for a call of
-more than 1024 passes), `tick` checks the deadline (`ce.withTimeLimit()`, or
-the `deadline` of a runtime without an engine) and charges one step.
-`_SYS.tick()` with no argument counts one pass, the spelling of code stored
-before. A block left by a throw is not counted. The `iterationBudget` option
-follows the rule of `compile()`
-(`CompilationOptions.iterationBudget`): a pass of a `Loop` (a `loop` instruction
-with `passes`) also calls `_SYS.countLoopPass(budget)`, which adds one to one
-count for a call, nested loops and the loops of user functions included; over
-the budget, the call throws a `CancellationError` with the cause
+number), so it holds across calls and re-entrant calls, and the steps charged to
+a step budget do not depend on calls made before the frame. The count is kept
+modulo 1024. Each time it crosses a multiple of 1024 (once for a call of more
+than 1024 passes), `tick` checks the deadline (`ce.withTimeLimit()`, or the
+`deadline` of a runtime without an engine) and charges one step. `_SYS.tick()`
+with no argument counts one pass, the spelling of code stored before. A block
+left by a throw is not counted. The `iterationBudget` option follows the rule of
+`compile()` (`CompilationOptions.iterationBudget`): a pass of a `Loop` (a `loop`
+instruction with `passes`) also calls `_SYS.countLoopPass(budget)`, which adds
+one to one count for a call, nested loops and the loops of user functions
+included; over the budget, the call throws a `CancellationError` with the cause
 `iteration-limit-exceeded` (`docs/COMPILATION-MODEL.md`, "A limit on `Loop`
 passes"). No pass is counted when the count cannot reach the budget: an infinite
 budget, or a program with no recursive function whose bound of the passes of a
@@ -3866,12 +3863,12 @@ program whose last statement is a definition is `Nothing` and declines.
 
 ## Records
 
-A built-in `Polygon` at the JavaScript entry result is lowered as a flat
-numeric row of interleaved coordinates (CE-1894). A literal list of polygons
-or a comprehension with a polygon body lowers to numeric rows, one per
-member, so each member can have a different length. The entry printer turns
-each row into `{ __tag: "Polygon", geom }`. The tag is fixed at compile
-time, including when a member has no vertices.
+A built-in `Polygon` at the JavaScript entry result is lowered as a flat numeric
+row of interleaved coordinates (CE-1894). A literal list of polygons or a
+comprehension with a polygon body lowers to numeric rows, one per member, so
+each member can have a different length. The entry printer turns each row into
+`{ __tag: "Polygon", geom }`. The tag is fixed at compile time, including when a
+member has no vertices.
 
 `lower-records.ts` (CE-1652, step 2; JavaScript only). A record is a value of
 the lane `record` and the shape `[]` whose fields each have a settled shape
@@ -4204,8 +4201,8 @@ How an array reaches the code (`lower-arrays.ts`, `adapter.ts`):
 - in a program that calls the host, itself or through a user function, a name
   whose value is an array and that the program reads: a name of
   `Program.assigns` with `Assigned.read`, reported in `arrays`, which the code
-  reads again after each call of the host (`state.get.arr`, no `state.stage`) and
-  `run()` does not write back;
+  reads again after each call of the host (`state.get.arr`, no `state.stage`)
+  and `run()` does not write back;
 - an array inside a value that a name holds (a named tuple):
   `_SYS.arrays.refs[k]`, bound in `runtimeOf()` as `_SYS.hosts` is, with the
   name in `captures`;
@@ -4406,16 +4403,17 @@ in `adapter.ts` (JavaScript), `adapter-glsl.ts` and `adapter-interval.ts`, and
   whose reference the entry returns and `run()` writes back. A call of a
   function of the host or an array allocation in such a literal publishes
   earlier assignments. Each executed assignment stages its value with
-  `state.stage`. The runner publishes the staged values before the host
-  call and publishes any remaining values at successful return. After the
-  call, `state.get` reloads each value that the host could have changed
-  (`readAssigned()`). The staging and reload operations are effectful so
-  they execute in program order. The `facts()` of the call count every name, so a `Loop`
-  carries them and the arms of an `If` give them; a user function that calls the
-  host, itself or through its calls (`assignedNames()` records it as `host` of
-  `stateOf()`), reads and writes every name that is not a list. A list name, and
-  a call in a loop frame (a `Sum`, a callback of `Map`), decline. A warning of a
-  random frame is in `warnings` (`kind: 'correctness'`). `profile` is `'ir'`.
+  `state.stage`. The runner publishes the staged values before the host call and
+  publishes any remaining values at successful return. After the call,
+  `state.get` reloads each value that the host could have changed
+  (`readAssigned()`). The staging and reload operations are effectful so they
+  execute in program order. The `facts()` of the call count every name, so a
+  `Loop` carries them and the arms of an `If` give them; a user function that
+  calls the host, itself or through its calls (`assignedNames()` records it as
+  `host` of `stateOf()`), reads and writes every name that is not a list. A list
+  name, and a call in a loop frame (a `Sum`, a callback of `Map`), decline. A
+  warning of a random frame is in `warnings` (`kind: 'correctness'`). `profile`
+  is `'ir'`.
 - **Stored code.** The result has the fields of stored code
   (`StoredJavaScript`): `preambleOnce` (and `preamble`, the same text) holds the
   helpers and the user functions, `code` is the body (an expression of the

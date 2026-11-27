@@ -1161,7 +1161,10 @@ export const SETS_LIBRARY: SymbolDefinitions = {
     missingBehavior: 'propagate',
     signature: '(any, any*) -> boolean',
     parameters: [
-      { description: 'The collection tested as a subset.', sample: 'Set(1, 2)' },
+      {
+        description: 'The collection tested as a subset.',
+        sample: 'Set(1, 2)',
+      },
       {
         description:
           'A collection that contains the collection before it; with more than two arguments, each argument is tested against the next.',

@@ -400,7 +400,13 @@ export function epsilCompletions(
     return { range, replaceEnd, items: [] };
   const before = tokens.filter((t) => t.type !== 'EOF' && t.end <= start);
 
-  let { text, placeholder, ast } = parseWithHole(ce, source, start, end, options);
+  let { text, placeholder, ast } = parseWithHole(
+    ce,
+    source,
+    start,
+    end,
+    options
+  );
   // `if ▮`, `while ▮` and `for x in ▮` do not parse before their block is
   // typed: parse again with an empty block after the hole.
   if (
@@ -1944,7 +1950,10 @@ function recordKeyBrace(before: readonly Token[]): number | undefined {
 
 /** Whether the brace that opens at the offset `brace` holds a `for` at its
  * own depth: it is a comprehension (`{k -> v for k in ks}`). */
-function isComprehensionBrace(tokens: readonly Token[], brace: number): boolean {
+function isComprehensionBrace(
+  tokens: readonly Token[],
+  brace: number
+): boolean {
   const open = tokens.findIndex((t) => t.start === brace);
   if (open < 0) return false;
   let depth = 0;

@@ -103,12 +103,19 @@ export function prepareWithTypePolicy(
         ...contract,
         ...(contract.formalTypes === undefined
           ? {}
-          : { formalTypes: mergeFormals(row.formalTypes, contract.formalTypes) }),
+          : {
+              formalTypes: mergeFormals(row.formalTypes, contract.formalTypes),
+            }),
       };
     });
     return {
       revision: prepareDocument(
-        ce, parent, typedRows, syntax, writableNames, validFormulaRows
+        ce,
+        parent,
+        typedRows,
+        syntax,
+        writableNames,
+        validFormulaRows
       ),
       validFormulaRows,
     };
@@ -143,7 +150,12 @@ export function prepareWithTypePolicy(
       checkDeadline(ce._deadlineFrame);
       const { definitions, rawRows, rowErrors, rowReferences } =
         current.revision;
-      const choices = policy({ definitions, rawRows, rowErrors, rowReferences });
+      const choices = policy({
+        definitions,
+        rawRows,
+        rowErrors,
+        rowReferences,
+      });
       if (isThenable(choices)) {
         void Promise.resolve(choices).catch(() => {});
         throw new TypeError('Document type policy must be synchronous');

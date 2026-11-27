@@ -4414,9 +4414,7 @@ function invalidDeclareAttribute(
   if (isFunction(attributes, 'Dictionary')) {
     for (const pair of attributes.ops) {
       if (!isFunction(pair) || pair.ops.length !== 2) continue;
-      const key = isString(pair.ops[0])
-        ? pair.ops[0].string
-        : sym(pair.ops[0]);
+      const key = isString(pair.ops[0]) ? pair.ops[0].string : sym(pair.ops[0]);
       if (key !== undefined && !DECLARE_ATTRIBUTES.has(key)) return key;
     }
     return undefined;

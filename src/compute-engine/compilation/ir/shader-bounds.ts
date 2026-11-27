@@ -8,10 +8,7 @@ export function shaderBounds(
   definition: (v: V) => { op: string; args: readonly V[] } | undefined,
   inputs?: ReadonlyMap<V, readonly [number, number]>
 ): (v: V) => readonly [number, number] | undefined {
-  const boundsOf = (
-    v: V,
-    depth = 0
-  ): readonly [number, number] | undefined => {
+  const boundsOf = (v: V, depth = 0): readonly [number, number] | undefined => {
     const c = constant(v);
     if (c !== undefined) return [Math.fround(c), Math.fround(c)];
     const input = inputs?.get(v);
@@ -30,7 +27,11 @@ export function shaderBounds(
     const scale = left ?? constant(y);
     if (scale === undefined) return undefined;
     const power = Math.log2(Math.abs(scale));
-    if (!Number.isInteger(power) || scale !== Math.fround(scale) || power < -126)
+    if (
+      !Number.isInteger(power) ||
+      scale !== Math.fround(scale) ||
+      power < -126
+    )
       return undefined;
     const bounds = boundsOf(left !== undefined ? y : x, depth + 1);
     if (bounds === undefined) return undefined;
@@ -39,7 +40,10 @@ export function shaderBounds(
     const lo = Math.min(a, z);
     const hi = Math.max(a, z);
     // A shader can flush a subnormal product to zero.
-    return [lo > 0 && lo < 2 ** -126 ? 0 : lo, hi < 0 && hi > -(2 ** -126) ? 0 : hi];
+    return [
+      lo > 0 && lo < 2 ** -126 ? 0 : lo,
+      hi < 0 && hi > -(2 ** -126) ? 0 : hi,
+    ];
   };
   return boundsOf;
 }

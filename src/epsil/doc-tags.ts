@@ -114,8 +114,7 @@ function applyTag(
   if (target === null) return;
   const [, name, key] = target;
   let rest = body.slice(target[0].length).trim();
-  if (typeDoc !== undefined && (key !== undefined || tag === 'param'))
-    return;
+  if (typeDoc !== undefined && (key !== undefined || tag === 'param')) return;
   const param = typeDoc ?? parameterOf(parameters, name);
   if (key === undefined && typeDoc === undefined) {
     if (tag === 'param') setText(param, 'documentation', rest);

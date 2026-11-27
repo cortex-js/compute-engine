@@ -178,7 +178,9 @@ export function runPasses(
     has(
       (i) =>
         (i.k === 'region' && (i.op === 'build' || i.op === 'filter')) ||
-        (i.k === 'op' && p.types[i.out].shape.length === 1 && threads(rows, i.op))
+        (i.k === 'op' &&
+          p.types[i.out].shape.length === 1 &&
+          threads(rows, i.op))
     )
   ) {
     const hasFilter = has((i) => i.k === 'region' && i.op === 'filter');
@@ -1286,10 +1288,12 @@ const shaderRecurrences: Pass = (p, rows) => {
     if (
       (result.lane !== 'integer' && result.lane !== 'real') ||
       (result.shape.length > 0 &&
-        !(result.shape.length === 1 &&
+        !(
+          result.shape.length === 1 &&
           typeof result.shape[0] === 'number' &&
           result.shape[0] >= 2 &&
-          result.shape[0] <= 4))
+          result.shape[0] <= 4
+        ))
     )
       continue;
     const { params, body, yields } = f.body;
@@ -1339,8 +1343,10 @@ const shaderRecurrences: Pass = (p, rows) => {
       return (
         dec?.k === 'op' &&
         dec.args[0] === count &&
-        (((dec.op === 'sub.int' || dec.op === 'sub') && constant(dec.args[1]) === 1) ||
-          ((dec.op === 'add.int' || dec.op === 'add') && constant(dec.args[1]) === -1))
+        (((dec.op === 'sub.int' || dec.op === 'sub') &&
+          constant(dec.args[1]) === 1) ||
+          ((dec.op === 'add.int' || dec.op === 'add') &&
+            constant(dec.args[1]) === -1))
       );
     };
     const isPredecessor = (i: Instr): boolean => predecessorCalls.has(i);
@@ -1376,8 +1382,7 @@ const shaderRecurrences: Pass = (p, rows) => {
       yields: branch.else.yields,
     };
     const reads = new Set(predecessors.map((call) => call.outs[0]));
-    const replace = (v: V) =>
-      v === count ? index : reads.has(v) ? prev : v;
+    const replace = (v: V) => (v === count ? index : reads.has(v) ? prev : v);
     const rename = (r: Region) => {
       for (const i of r.body) {
         mapDirectArgs(i, replace);
@@ -1399,7 +1404,14 @@ const shaderRecurrences: Pass = (p, rows) => {
     f.body.body = [
       ...prefix,
       ...branch.then.body,
-      { k: 'loop', lo: one, hi, init: branch.then.yields, outs: [out], body: steps },
+      {
+        k: 'loop',
+        lo: one,
+        hi,
+        init: branch.then.yields,
+        outs: [out],
+        body: steps,
+      },
     ];
     changed = true;
   }
@@ -1708,7 +1720,8 @@ const forward = (
         continue;
     }
     const n = bounded.has(i.args[0]) ? i.args[0] : guard(i, site, read);
-    if (n !== false) plan.set(read.i, { source: i.regions[0], n: n ?? i.args[0] });
+    if (n !== false)
+      plan.set(read.i, { source: i.regions[0], n: n ?? i.args[0] });
   }
   for (const [x, hi] of lasts) x.hi = hi;
   if (plan.size === 0 && scalar.size === 0)
@@ -1907,8 +1920,7 @@ const filters = (
     const [count, list] = x.outs;
     const [n] = x.args;
     const length = constants.get(n);
-    if (staticOnly && (typeof length !== 'number' || !bounded.has(n)))
-      continue;
+    if (staticOnly && (typeof length !== 'number' || !bounded.has(n))) continue;
     const [keep, value] = body.yields;
     // A yield of the count reads it as a value (`Length` as the result).
     const counts = readers.get(count) ?? [];

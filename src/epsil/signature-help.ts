@@ -234,7 +234,13 @@ export function epsilSignatureHelp(
   if (call === undefined) return null;
   const { head, headStart, std, member, index, label } = call;
 
-  const { text, placeholder, ast } = parseWithHole(ce, source, start, end, options);
+  const { text, placeholder, ast } = parseWithHole(
+    ce,
+    source,
+    start,
+    end,
+    options
+  );
   // The names visible at the callee: a name bound between the callee and
   // the offset (a lambda parameter) does not shadow it.
   const context = contextAt(ce, ast, text, placeholder, headStart, options);
@@ -288,8 +294,7 @@ export function epsilSignatureHelp(
     parameterKeys === undefined || typeKeys === undefined
       ? (parameterKeys ?? typeKeys)
       : mergeParameterDocs({ keys: parameterKeys }, { keys: typeKeys })?.keys;
-  if (parameter !== undefined && typeKeys !== undefined)
-    parameter.keys = keys;
+  if (parameter !== undefined && typeKeys !== undefined) parameter.keys = keys;
   const keyName =
     dictionary === undefined
       ? undefined

@@ -171,8 +171,8 @@ export function epsilDiagnosticMessage(diagnostic: ParsingDiagnostic): string {
         : args[0] === 'do {'
           ? 'Braces make a dictionary; write a block as "do { … }"'
           : args[0] === 'Set('
-          ? 'Braces make a dictionary pattern; write a set pattern as "Set(…)"'
-          : 'Braces make a dictionary; write a set as "set(…)"';
+            ? 'Braces make a dictionary pattern; write a set pattern as "Set(…)"'
+            : 'Braces make a dictionary; write a set as "set(…)"';
     case 'mapsto-arrow-legacy':
       return `"|->" is the old spelling of the mapsto arrow; write "=>"`;
     case 'parameter-name-mismatch':

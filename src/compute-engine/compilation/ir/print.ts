@@ -642,8 +642,10 @@ export function printProgram(
             once?.has(i.init[0]) ||
             initial === undefined ||
             !r.body.includes(initial) ||
-            !(initial.k === 'list' ||
-              (initial.k === 'region' && initial.op === 'build')));
+            !(
+              initial.k === 'list' ||
+              (initial.k === 'region' && initial.op === 'build')
+            ));
         // A carried value has one variable: the result of the loop, which
         // the body reads as its parameter.
         i.outs.forEach((v, j) => {
@@ -702,9 +704,9 @@ export function printProgram(
             .forEach((s) => line(s));
         if (privateList) {
           lines.push(...body(i.body, depth + 1, waiting));
-          syntax
-            .updateList!(name(i.outs[0]), width, (k) => element(update, [k]))
-            .forEach((s) => line(s, depth + 1));
+          syntax.updateList!(name(i.outs[0]), width, (k) =>
+            element(update, [k])
+          ).forEach((s) => line(s, depth + 1));
         } else nested(i.body, i.outs.map(name), true, waiting && !i.parallel);
         line('}');
         if (short?.close !== undefined) line(short.close);

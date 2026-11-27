@@ -768,17 +768,23 @@ export function runtimeOf(
   }
   const sys = makeSysHelpers(engineRuntimeSource(ce));
   const note = arrays?.stores === true ? arrayNote(ce) : undefined;
-  const before = pending === undefined
-    ? note
-    : () => {
-        pending.flush();
-        note?.();
-      };
+  const before =
+    pending === undefined
+      ? note
+      : () => {
+          pending.flush();
+          note?.();
+        };
   if (hosts !== undefined)
     Object.defineProperty(sys, 'hosts', {
       value: Object.freeze(hosts.map((h) => hostCaller(ce, h, before))),
     });
-  if (assigns !== undefined && (pending !== undefined || hosts !== undefined || (arrays?.makers.length ?? 0) > 0))
+  if (
+    assigns !== undefined &&
+    (pending !== undefined ||
+      hosts !== undefined ||
+      (arrays?.makers.length ?? 0) > 0)
+  )
     Object.defineProperty(sys, 'state', {
       value: Object.freeze({
         stage: (j: number, y: unknown) => {
@@ -792,13 +798,15 @@ export function runtimeOf(
     Object.defineProperty(sys, 'arrays', {
       value: Object.freeze({
         refs: Object.freeze([...arrays.refs]),
-        make: Object.freeze(arrays.makers.map((m) => {
-          const make = arrayMaker(ce, m);
-          return (...args: unknown[]) => {
-            before?.();
-            return make(...args);
-          };
-        })),
+        make: Object.freeze(
+          arrays.makers.map((m) => {
+            const make = arrayMaker(ce, m);
+            return (...args: unknown[]) => {
+              before?.();
+              return make(...args);
+            };
+          })
+        ),
       }),
     });
   return sys;
@@ -810,7 +818,8 @@ function assignmentState(ce: ComputeEngine, assigns: readonly Assigned[]) {
   let writes: Map<number, unknown> | undefined;
   const flush = (): void => {
     if (writes === undefined) return;
-    for (const [index, value] of writes) writeAssigned(ce, assigns[index], value);
+    for (const [index, value] of writes)
+      writeAssigned(ce, assigns[index], value);
     writes.clear();
   };
   return {
