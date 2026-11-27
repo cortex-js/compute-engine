@@ -237,11 +237,12 @@ not numbers, the result is a sum or a product:
 // ➔ [23, x + y + 12, 385]
 ```
 
-With a body and a bound `(k, lower, upper)`, they add or multiply the body
-for each integer `k` from `lower` to `upper`:
+With a body and an index `k in 1..n` (an index over a collection), they add or
+multiply the body for each value of `k`. The tuple `(k, lower, upper)` is also
+accepted:
 
 ```epsil
-[sum(k + 1, (k, 1, 10)), product(k + 1, (k, 1, 10))]
+[sum(k + 1, k in 1..10), product(k + 1, (k, 1, 10))]
 // ➔ [65, 39916800]
 ```
 
@@ -249,7 +250,7 @@ With a body and an indexing set `k in S`, the index takes each value of the
 set:
 
 ```epsil
-sum(n^2, n in {1, 2, 3})
+sum(n^2, n in set(1, 2, 3))
 // ➔ 14
 ```
 

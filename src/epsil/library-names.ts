@@ -93,13 +93,13 @@ export const GRAMMAR_CONSTRUCTS: ReadonlySet<string> = new Set([
 
 /**
  * The literal constructors whose values Epsil writes with brackets and
- * quotes: `[…]` for `List`, `(a, b)` for `Tuple`, `{…}` for `Set`,
- * `{k: v}` for `Dictionary`, `"…"` for `String`.
+ * quotes: `[…]` for `List`, `(a, b)` for `Tuple`, `{k -> v}` for
+ * `Dictionary`, `"…"` for `String`. A `Set` has no literal: it is written
+ * with its constructor, `set(…)`.
  */
 export const LITERAL_CONSTRUCTORS: ReadonlySet<string> = new Set([
   'Dictionary',
   'List',
-  'Set',
   'String',
   'Tuple',
 ]);

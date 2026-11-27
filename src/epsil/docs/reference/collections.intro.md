@@ -9,18 +9,18 @@ element types.
 | Kind         | Epsil literal          | Description                                                 |
 | :----------- | :--------------------- | :---------------------------------------------------------- |
 | list         | `[1, 2, 3]`            | Elements in order, read by index. Duplicates are allowed.  |
-| set          | `{1, 2, 3}`            | Unique elements, not in order.                              |
+| set          | `set(1, 2, 3)`         | Unique elements, not in order.                              |
 | tuple        | `(1, "a")`             | A fixed number of elements, each with its own type.         |
 | dictionary   | `{"a" -> 1, "b" -> 2}` | Key-value pairs. The keys are strings.                      |
 | range        | `1..10`                | Numbers from a start to an end, with an optional step.      |
 | string       | `"hello"`              | The characters of the text, in order.                       |
 
-A set literal removes duplicates and stores its elements in the canonical
+A set removes duplicates and stores its elements in the canonical
 order, so two sets with the same elements are written, printed and walked
-alike. The empty set is `{}`, and the empty dictionary is `{->}`:
+alike. The empty set is `set()`, and the empty dictionary is `{}`:
 
 ```epsil
-{3, 1, 3, 2}
+set(3, 1, 3, 2)
 // ➔ Set(1, 2, 3)
 ```
 
@@ -84,7 +84,7 @@ marker: `NaN` when the elements are numbers, `Missing` otherwise. See
 Membership works on every collection:
 
 ```epsil
-3 in {1, 2, 3}
+3 in set(1, 2, 3)
 // ➔ true
 ```
 
@@ -214,7 +214,7 @@ with a fixed set of known keys has a record type, such as
 such as `vector<integer^3>`.
 
 ```epsil
-(type([1, 2, 3]), type({1, 2}), type((1, "a")), type({x -> 1}))
+(type([1, 2, 3]), type(set(1, 2)), type((1, "a")), type({x -> 1}))
 // ➔ (TypeFrom("vector<integer^3>"), TypeFrom("set<integer>"), TypeFrom("tuple<integer, string>"), TypeFrom("record{x: integer}"))
 ```
 

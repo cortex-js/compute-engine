@@ -103,17 +103,24 @@ describe('LIMITS WITH A STEP', () => {
     expect(s.subs({ m: 7 }).evaluate().toString()).toBe('16');
   });
 
-  test('a stepped Tuple or Set accepts a step that is not an integer', () => {
+  test('a stepped Tuple accepts a step that is not an integer; a Set is no iterator', () => {
     // These threw a type error: the index was declared `integer`.
     expect(
       ce.box(['Sum', 'i', ['Tuple', 'i', 1, 4, 0.5]]).evaluate().toString()
     ).toBe('17.5');
     expect(
       ce
-        .box(['Sum', 'i', ['Set', 'i', 1, 4, ['Rational', 1, 2]]])
+        .box(['Sum', 'i', ['Tuple', 'i', 1, 4, ['Rational', 1, 2]]])
         .evaluate()
         .toString()
     ).toBe('35/2');
+    expect(
+      JSON.stringify(
+        ce
+          .box(['Sum', 'i', ['Set', 'i', 1, 4, ['Rational', 1, 2]]])
+          .evaluate().json
+      )
+    ).toContain('"Error"');
   });
 
   test('compilation declines a stepped clause; the fallback works', () => {

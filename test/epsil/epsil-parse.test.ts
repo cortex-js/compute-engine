@@ -1,7 +1,28 @@
-import { operand, stringValue } from '../../src/math-json/utils';
+import { operand, operator, stringValue } from '../../src/math-json/utils';
 import { parseEpsil } from '../../src/epsil/parse-epsil';
 import { serializeEpsil } from '../../src/epsil/serialize-epsil';
 import { validEpsil, invalidEpsil } from '../utils';
+
+/** The first statement of `source`, as plain MathJSON without the source
+ * offsets, whatever its diagnostics. */
+function firstStatement(source: string): unknown {
+  const [value] = parseEpsil(source);
+  return JSON.parse(
+    JSON.stringify(operand(value, 1), (key, v) =>
+      key === 'sourceOffsets' ? undefined : v
+    ),
+    (_key, v) =>
+      v !== null && typeof v === 'object' && !Array.isArray(v)
+        ? 'fn' in v
+          ? v.fn
+          : 'sym' in v
+            ? v.sym
+            : 'num' in v
+              ? Number(v.num)
+              : v
+        : v
+  );
+}
 
 describe('EPSIL PARSING RESOURCE LIMITS', () => {
   test('deeply nested expressions report a diagnostic instead of overflowing', () => {
@@ -1399,62 +1420,62 @@ describe('EPSIL PARSING DICTIONARY', () => {
 
 describe('EPSIL PARSING COLLECTIONS', () => {
   test('Sets', () => {
-    expect(validEpsil('{}')).toMatchInlineSnapshot(`
-      [
-        Set,
-      ]
-    `);
-    expect(validEpsil('{1}')).toMatchInlineSnapshot(`
-      [
-        Set,
-        1,
-      ]
-    `);
-    expect(validEpsil('{1, 2}')).toMatchInlineSnapshot(`
-      [
-        Set,
-        1,
-        2,
-      ]
-    `);
-    expect(validEpsil('{1, {2, 3}, 4}')).toMatchInlineSnapshot(`
-      [
-        Set,
-        1,
-        [
-          Set,
-          2,
-          3,
-        ],
-        4,
-      ]
-    `);
-    expect(validEpsil('Set()')).toMatchInlineSnapshot(`
-      [
-        Set,
-      ]
-    `);
-    expect(validEpsil('Set(1, 2, 3)')).toMatchInlineSnapshot(`
-      [
-        Set,
-        1,
-        2,
-        3,
-      ]
-    `);
-    expect(validEpsil('Set(1, {2, 3}, 3)')).toMatchInlineSnapshot(`
-      [
-        Set,
-        1,
-        [
-          Set,
-          2,
-          3,
-        ],
-        3,
-      ]
-    `);
+    // A set is written with its constructor: braces make a dictionary.
+    expect(validEpsil('{}')).toStrictEqual(['Dictionary']);
+    expect(validEpsil('set()')).toStrictEqual(['set']);
+    expect(validEpsil('set(1, set(2, 3), 4)')).toStrictEqual([
+      'set',
+      1,
+      ['set', 2, 3],
+      4,
+    ]);
+    expect(validEpsil('set(...a, ...b)')).toStrictEqual([
+      'set',
+      ['Spread', 'a'],
+      ['Spread', 'b'],
+    ]);
+    expect(validEpsil('Set(1, 2, 3)')).toStrictEqual(['Set', 1, 2, 3]);
   });
+
+  test('a set written with braces is a `brace-set-literal` error, read as the set', () => {
+    const [value, diags] = parseEpsil('{1, {2, 3}}');
+    expect(diags.map((d) => d.message)).toStrictEqual([
+      ['brace-set-literal', 'set('],
+      ['brace-set-literal', 'set('],
+    ]);
+    // The fixit of each literal replaces its two braces.
+    expect(diags.map((d) => d.fixits)).toStrictEqual([
+      [
+        [4, 5, 'set('],
+        [9, 10, ')'],
+      ],
+      [
+        [0, 1, 'set('],
+        [10, 11, ')'],
+      ],
+    ]);
+    expect(value).toBeDefined();
+    expect(firstStatement('{1, {2, 3}}')).toStrictEqual([
+      'Set',
+      1,
+      ['Set', 2, 3],
+    ]);
+  });
+
+  test('a set comprehension written with braces is a `brace-set-literal` error', () => {
+    const [value, diags] = parseEpsil('{x^2 for x in xs}');
+    expect(diags.map((d) => [d.message, d.fixits])).toStrictEqual([
+      [
+        ['brace-set-literal', 'setFrom(['],
+        [
+          [0, 1, 'setFrom(['],
+          [16, 17, '])'],
+        ],
+      ],
+    ]);
+    expect(operator(operand(value, 1))).toBe('SetFrom');
+  });
+
   test('Lists', () => {
     expect(validEpsil('[]')).toMatchInlineSnapshot(`
       [
@@ -2252,10 +2273,10 @@ describe('EPSIL PARSING `do { … }` BLOCK EXPRESSIONS', () => {
     ]);
   });
 
-  test('a bare `{…}` lambda body stays a Set (no regression)', () => {
-    expect(validEpsil('x => {1, 2}')).toStrictEqual([
+  test('a bare `{…}` lambda body is a dictionary, not a block', () => {
+    expect(validEpsil('x => {a -> 1}')).toStrictEqual([
       'Function',
-      ['Set', 1, 2],
+      ['Dictionary', ['KeyValuePair', { str: 'a' }, 1]],
       'x',
     ]);
   });
@@ -2479,12 +2500,16 @@ describe('EPSIL PARSING LIST SPREAD', () => {
     expect(validEpsil('f(...t)')).toStrictEqual(['f', ['Spread', 't']]);
   });
 
-  test('brace spread: a `->`-free brace is a set-spread', () => {
-    expect(validEpsil('{1, ...s}')).toStrictEqual(['Set', 1, ['Spread', 's']]);
+  test('brace spread: a brace of spreads alone is a dictionary merge', () => {
     expect(validEpsil('{...a, ...b}')).toStrictEqual([
-      'Set',
+      'Dictionary',
       ['Spread', 'a'],
       ['Spread', 'b'],
+    ]);
+    // A value with no `->` is a set written with braces.
+    const [, diags] = parseEpsil('{1, ...s}');
+    expect(diags.map((d) => d.message)).toStrictEqual([
+      ['brace-set-literal', 'set('],
     ]);
   });
 
@@ -2494,8 +2519,8 @@ describe('EPSIL PARSING LIST SPREAD', () => {
       ['Spread', 'd'],
       ['KeyValuePair', { str: 'k' }, 1],
     ]);
-    // The bare `->` marker (cf. the empty dictionary `{->}`) forces the
-    // dictionary reading of a pure merge.
+    // The bare `->` marker (as in the empty dictionary `{->}`) is accepted
+    // before a merge.
     expect(validEpsil('{->, ...d1, ...d2}')).toStrictEqual([
       'Dictionary',
       ['Spread', 'd1'],

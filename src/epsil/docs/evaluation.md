@@ -229,7 +229,7 @@ form), and a parameter read twice is evaluated twice — read it once into a
 
 ## Collections: literals are values, pipelines are generators
 
-A collection **literal** — a list `[…]`, set `{…}`, tuple `(…)`, or
+A collection **literal** — a list `[…]`, set `set(…)`, tuple `(…)`, or
 dictionary — evaluates its elements when the statement executes. Assigning
 one to a variable stores a snapshot of the element *values*:
 

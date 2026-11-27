@@ -4021,7 +4021,7 @@ export class Parser {
    * collection]`, or `["Element", binding, collection, guard]` when the clause
    * has a guard, the same three-operand form `Sum` and `Product` take. The
    * result is `["Comprehension", body, clause, …]`; the caller wraps it for
-   * a set or a dictionary. Later clauses see the names bound by earlier
+   * a dictionary. Later clauses see the names bound by earlier
    * ones, so a clause's collection may depend on an earlier binding
    * (`[(x, y) for x in 1..3, y in 1..x]`).
    *
@@ -4837,14 +4837,17 @@ export class Parser {
     );
   }
 
-  /** A brace pattern: `{k -> p, …}` → `Dictionary` (keys literal, values
-   * patternized); `{p, …}` → `Set` of patterns; `{}` → empty `Set`. */
+  /** A brace pattern is a dictionary pattern: `{k -> p, …}` → `Dictionary`
+   * (keys literal, values patternized); `{}` and `{->}` → the empty
+   * `Dictionary`. A set pattern is the operator pattern `Set(p, …)`: `{p, …}`
+   * is a `brace-set-literal` error with that fixit, recovered as the `Set`
+   * of patterns. */
   private parseBracePattern(): MathJsonExpression {
-    // `{}` → empty Set.
+    // `{}` → empty Dictionary.
     if (this.peek().type === 'CLOSE_BRACE') {
       const open = this.advance();
       const close = this.advance();
-      return this.wrap(['Set'], open.start, close.end);
+      return this.wrap(['Dictionary'], open.start, close.end);
     }
     // `{->}` → empty Dictionary.
     if (
@@ -4861,6 +4864,7 @@ export class Parser {
     const { values, open, end } = this.parsePatternElements('CLOSE_BRACE', '}');
     if (values.length > 0 && operator(values[0]) === 'KeyValuePair')
       return this.buildDictionary(values, open.start, end);
+    this.reportBraceSet(open.start, end, 'Set(', ')');
     return this.wrap(
       ['Set', ...values] as MathJsonExpression[],
       open.start,
@@ -9744,16 +9748,19 @@ export class Parser {
   }
 
   /**
-   * A brace construct: `{}` → `["Set"]`; `{->}` → empty `Dictionary`; a first
-   * element with a top-level `->` → `Dictionary` (all elements must then be
-   * `key -> value`); otherwise a `Set`.
+   * A brace construct is a dictionary: `{}` and `{->}` are the empty
+   * `Dictionary`, and every element is a `key -> value` pair or a `...d`
+   * merge. Braces do not make a set: a literal whose elements are values
+   * (`{1, 2}`) or a comprehension whose body is a value (`{x for x in xs}`)
+   * is a `brace-set-literal` error, with a fixit to `set(…)` or
+   * `setFrom([…])`, and is recovered as that set.
    */
   private parseBrace(): MathJsonExpression {
-    // `{}` → empty Set.
+    // `{}` → empty Dictionary.
     if (this.peek().type === 'CLOSE_BRACE') {
       const open = this.advance(); // `{`
       const close = this.advance(); // `}`
-      return this.wrap(['Set'], open.start, close.end);
+      return this.wrap(['Dictionary'], open.start, close.end);
     }
     // `{->}` → empty Dictionary.
     if (
@@ -9778,14 +9785,12 @@ export class Parser {
         /* allowComprehension */ true
       );
 
-    // A brace comprehension. The body decides the kind exactly as the first
-    // element of a literal does: `{k -> v for …}` builds a DICTIONARY from
-    // the `(key, value)` pairs the comprehension produces (the key is an
+    // A brace comprehension: `{k -> v for …}` builds a DICTIONARY from the
+    // `(key, value)` pairs the comprehension produces (the key is an
     // expression here — it is evaluated, unlike the unquoted literal key of
-    // `{one -> 1}`, which becomes a string); any other body builds a SET from
-    // the values. Both lower to the constructor the spread forms use
-    // (`{...xs}` is `SetFrom`, `{->, ...d}` is `DictionaryFrom`), so the set
-    // deduplicates and the dictionary keeps the last value of a repeated key.
+    // `{one -> 1}`, which becomes a string), as `DictionaryFrom`, so the
+    // dictionary keeps the last value of a repeated key. A body that is not
+    // a pair is the set `setFrom([body for …])` written with braces.
     if (comprehension !== undefined) {
       const body = operand(comprehension, 1);
       if (body !== null && operator(body) === 'KeyValuePair') {
@@ -9817,6 +9822,7 @@ export class Parser {
           end
         );
       }
+      this.reportBraceSet(open.start, end, 'setFrom([', '])');
       return this.wrap(
         ['SetFrom', comprehension] as MathJsonExpression[],
         open.start,
@@ -9824,19 +9830,69 @@ export class Parser {
       );
     }
 
-    // Disambiguate Set vs Dictionary: ANY element with a top-level `->` (a
-    // `KeyValuePair`), or the bare `->` marker, makes it a dictionary
-    // (ruled 2026-08-14 — a `...spread` element carries no `->`, so a pure
-    // merge is spelled `{->, ...d1, ...d2}` while `{...a, ...b}` is a
-    // set-spread).
-    if (dictMarker || values.some((v) => operator(v) === 'KeyValuePair'))
+    // A dictionary: an element with a top-level `->` (a `KeyValuePair`), the
+    // bare `->` marker, or only `...d` merges (`{...d1, ...d2}`). Elements
+    // that are values, with no pair, are a set written with braces.
+    if (
+      dictMarker ||
+      values.some((v) => operator(v) === 'KeyValuePair') ||
+      values.every((v) => operator(v) === 'Spread')
+    )
       return this.buildDictionary(values, open.start, end);
 
+    // A brace that holds one `name = value` is the block of another
+    // language (`x => { a = 2 }`): the fixit makes it a `do` block.
+    if (values.length === 1 && this.isSingleEqualsEquation(values[0]))
+      this.reportBraceSet(open.start, end, 'do {', '}');
+    else this.reportBraceSet(open.start, end, 'set(', ')');
     return this.wrap(
       ['Set', ...values] as MathJsonExpression[],
       open.start,
       end
     );
+  }
+
+  /** Whether `node` is an `Equal` written with `=` (not `==`): the parser
+   * gives both the same node, so only the source between its operands tells
+   * them apart. */
+  private isSingleEqualsEquation(node: MathJsonExpression): boolean {
+    if (operator(node) !== 'Equal' || operands(node).length !== 2) return false;
+    const gapStart = this.localEnd(operand(node, 1)!);
+    const gapEnd = this.localStart(operand(node, 2)!);
+    if (gapStart === undefined || gapEnd === undefined) return false;
+    return /^\s*=(?!=)/.test(this.source.slice(gapStart, gapEnd));
+  }
+
+  /** Report a set written with braces, `{…}` from the local `start` to
+   * `end`, with a fixit that replaces the opening brace by `opening` and the
+   * closing brace by `closing` (`set(…)`, `setFrom([…])`, `do {…}`, whose
+   * closing brace stays). The fixit is left out when the literal has no
+   * closing brace. */
+  private reportBraceSet(
+    start: number,
+    end: number,
+    opening: string,
+    closing: string
+  ): void {
+    const diagnostic: ParsingDiagnostic = {
+      severity: 'error',
+      message: ['brace-set-literal', opening],
+      range: [this.baseOffset + start, this.baseOffset + end],
+    };
+    if (this.source[end - 1] === '}')
+      diagnostic.fixits = [
+        [this.baseOffset + start, this.baseOffset + start + 1, opening],
+        ...(closing === '}'
+          ? []
+          : [
+              [this.baseOffset + end - 1, this.baseOffset + end, closing] as [
+                number,
+                number,
+                string,
+              ],
+            ]),
+      ];
+    this.diagnostics.push(diagnostic);
   }
 
   /** Assemble a `Dictionary` from parsed brace elements. Every element must be
@@ -10502,10 +10558,8 @@ function lowerParameterDefault(
   if (isStringObject(node)) return { value: node };
   if (ops !== null && ops.length === 1) {
     if (ops[0] === 'List') return { value: node };
-    // `{}` is the empty SET in an expression, and `{->}` the empty
-    // dictionary. A default has no set value, so both spell the empty
-    // dictionary here, as `{}` does in a type signature.
-    if (ops[0] === 'Set' || ops[0] === 'Dictionary')
+    // `{}` and `{->}` are the empty dictionary.
+    if (ops[0] === 'Dictionary')
       return {
         value: {
           fn: ['Dictionary'],

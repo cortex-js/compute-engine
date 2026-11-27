@@ -319,7 +319,7 @@ describe('EPSIL — a record/object field list vs. a block body', () => {
       'Declare',
       'x',
       { str: 'object{}' },
-      ['Dictionary', ['KeyValuePair', 'value', ['Set']]],
+      ['Dictionary', ['KeyValuePair', 'value', ['Dictionary']]],
     ]);
   });
 
@@ -359,7 +359,7 @@ describe('EPSIL — a record/object field list vs. a block body', () => {
       'Declare',
       'q',
       { str: 'record{}' },
-      ['Dictionary', ['KeyValuePair', 'value', ['Set']]],
+      ['Dictionary', ['KeyValuePair', 'value', ['Dictionary']]],
     ]);
   });
 

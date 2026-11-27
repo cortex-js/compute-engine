@@ -147,6 +147,7 @@ describe('what the named-argument production does NOT claim', () => {
   test('a brace literal rejects `a: 1` as before', () => {
     expect(codes('{a: 1}')).toEqual([
       'closing-bracket-expected',
+      'brace-set-literal',
       'unexpected-symbol',
     ]);
   });

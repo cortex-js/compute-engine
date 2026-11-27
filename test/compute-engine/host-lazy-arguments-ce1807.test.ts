@@ -202,13 +202,13 @@ describe('the arguments that are not changed', () => {
   });
 
   test('a set, and a view over a set', () => {
-    expect(interpreted('hostSet({1, 2})')).toEqual([
+    expect(interpreted('hostSet(set(1, 2))')).toEqual([
       'hostSet Set ["Set",1,2]',
     ]);
-    expect(interpreted('hostSet(map(x => x * 2, {1, 2}))')).toEqual([
+    expect(interpreted('hostSet(map(x => x * 2, set(1, 2)))')).toEqual([
       'hostSet Map ["Map",["Function",["Block",["Multiply",2,"x"]],"x"],["Set",1,2]]',
     ]);
-    expect(compiled('hostSet({1, 2})')).toEqual({
+    expect(compiled('hostSet(set(1, 2))')).toEqual({
       declined: expect.any(String),
     });
   });

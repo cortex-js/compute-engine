@@ -2,8 +2,8 @@
 // loop, and merely READ by the lambda given to `filter`. The write cannot
 // reach anything outside the call, so the function needs no `scope` effect.
 f(n) = do {
-  let acc = {}
-  for p in 2..n { acc = union(acc, {p}) }
+  let acc = set()
+  for p in 2..n { acc = union(acc, set(p)) }
   filter(1..n, k => k !in acc)
 }
 f(5)

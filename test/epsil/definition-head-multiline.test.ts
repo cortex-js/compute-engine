@@ -242,12 +242,12 @@ gg(2)`
 
   test('a `{` on the next line after a complete head is its own statement', () => {
     // The head is finished on its line, so the braced group below it is an
-    // ordinary set literal, not a body block.
+    // ordinary collection literal (a dictionary), not a body block.
     expect(
       run(
         `f(x: integer) -> integer = x + 1
-{ 1 + 1 }`
+{ "a" -> 1 + 1 }`
       )
-    ).toEqual({ value: 'Set(2)', diagnostics: [] });
+    ).toEqual({ value: '{"a" -> 2}', diagnostics: [] });
   });
 });

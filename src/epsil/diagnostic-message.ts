@@ -161,6 +161,14 @@ export function epsilDiagnosticMessage(diagnostic: ParsingDiagnostic): string {
       if (args.length >= 2)
         return `"->" builds a key-value pair, but argument ${args[1]} of "${args[0]}" must be a function; to write a function, use the mapsto arrow "=>"`;
       return `"->" pairs a key with a value (and the key must be a string); to write a function, use the mapsto arrow "=>"`;
+    case 'brace-set-literal':
+      return args[0] === 'setFrom(['
+        ? 'Braces make a dictionary; write a set comprehension as "setFrom([… for …])"'
+        : args[0] === 'do {'
+          ? 'Braces make a dictionary; write a block as "do { … }"'
+          : args[0] === 'Set('
+          ? 'Braces make a dictionary pattern; write a set pattern as "Set(…)"'
+          : 'Braces make a dictionary; write a set as "set(…)"';
     case 'mapsto-arrow-legacy':
       return `"|->" is the old spelling of the mapsto arrow; write "=>"`;
     case 'parameter-name-mismatch':

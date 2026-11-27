@@ -78,9 +78,9 @@ g(x) + f(2)
 - **Types** (optional) use the Compute Engine type language:
   `let n: integer = 4`, `f(x: real) -> real = x^2`. Parameter types are
   enforced at call time.
-- **Collections**: list `[1, 2, 3]`, set `{1, 2, 3}`, tuple `(1, 2)`,
-  dictionary `{one -> 1, two -> 2}`, empty dictionary `{->}` (`{}` is the
-  empty set). Access dictionaries with `d["key"]`; identifier-shaped keys also
+- **Collections**: list `[1, 2, 3]`, set `set(1, 2, 3)`, tuple `(1, 2)`,
+  dictionary `{one -> 1, two -> 2}`, empty dictionary `{}` (`{1, 2, 3}` is
+  an error: write `set(1, 2, 3)`). Access dictionaries with `d["key"]`; identifier-shaped keys also
   have the shorthand `d.key`. Tuples index like lists (`p[1]` is the first
   component); a matrix (list of lists)
   indexes as `m[2, 1]` or `m[2][1]`.

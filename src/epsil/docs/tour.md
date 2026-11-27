@@ -154,8 +154,8 @@ argument position filled by the piped value, which matters when `map` or
 `filter` has another argument as well.
 
 When the result is a collection, a comprehension says the same thing in one
-bracket. The bracket picks the kind: `[…]` builds a list, `{…}` a set, and
-`{k -> v …}` a dictionary.
+bracket. The bracket picks the kind: `[…]` builds a list, `{k -> v …}` a dictionary,
+and `setFrom([…])` a set.
 
 ```epsil
 [n^2 for n in 1..10 if n % 2 == 0]

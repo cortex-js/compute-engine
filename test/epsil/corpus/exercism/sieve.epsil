@@ -1,10 +1,10 @@
 // Sieve of Eratosthenes: strike the multiples of each prime into a set, then
 // keep the numbers that were not struck.
 sieve(limit) = do {
-  let composite = {}
+  let composite = set()
   for p in 2..limit {
     if p !in composite {
-      for m in Range(p * p, limit, p) { composite = union(composite, {m}) }
+      for m in Range(p * p, limit, p) { composite = union(composite, set(m)) }
     }
   }
   filter(2..limit, k => k !in composite)

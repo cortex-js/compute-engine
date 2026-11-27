@@ -873,7 +873,7 @@ export const SETS_LIBRARY: SymbolDefinitions = {
   // validation seam that checks a `canonical`-handler head against its
   // declaration.
   Element: {
-    examples: ['3 in {1, 2, 3}'],
+    examples: ['3 in Set(1, 2, 3)'],
     // A restricted collection, `[1]{c}`, is threaded whole, as `Contains`
     // threads its collection: the answer is computed on the present
     // collection and is absent once `c` fails. The value (position 0) is not
@@ -1070,7 +1070,7 @@ export const SETS_LIBRARY: SymbolDefinitions = {
   },
 
   NotElement: {
-    examples: ['4 !in {1, 2, 3}'],
+    examples: ['4 !in Set(1, 2, 3)'],
     // A restricted collection, `[1]{c}`, is threaded whole, as `Contains`
     // threads its collection: the answer is computed on the present
     // collection and is absent once `c` fails. The value (position 0) is not
@@ -1121,7 +1121,7 @@ export const SETS_LIBRARY: SymbolDefinitions = {
   // for "on a subset of D") with `missing`. The negated relations have no
   // canonical handler and no chain form; they keep `(any, any)`.
   Subset: {
-    examples: ['Subset({1, 2}, {1, 2, 3})'],
+    examples: ['Subset(Set(1, 2), Set(1, 2, 3))'],
     complexity: 11200,
     // A set relation over an absent set is absent: it computes on the whole
     // collection, so it answers the marker of a boolean codomain, `Missing`.
@@ -1130,12 +1130,12 @@ export const SETS_LIBRARY: SymbolDefinitions = {
     parameters: [
       {
         description: 'The collection tested as a strict subset.',
-        sample: '{1, 2}',
+        sample: 'Set(1, 2)',
       },
       {
         description:
           'A collection that strictly contains the collection before it; with more than two arguments, each argument is tested against the next.',
-        sample: '{1, 2, 3}',
+        sample: 'Set(1, 2, 3)',
       },
     ],
     description:
@@ -1154,18 +1154,18 @@ export const SETS_LIBRARY: SymbolDefinitions = {
   },
 
   SubsetEqual: {
-    examples: ['SubsetEqual({1, 2, 3}, {1, 2, 3})'],
+    examples: ['SubsetEqual(Set(1, 2, 3), Set(1, 2, 3))'],
     complexity: 11200,
     // A set relation over an absent set is absent: it computes on the whole
     // collection, so it answers the marker of a boolean codomain, `Missing`.
     missingBehavior: 'propagate',
     signature: '(any, any*) -> boolean',
     parameters: [
-      { description: 'The collection tested as a subset.', sample: '{1, 2}' },
+      { description: 'The collection tested as a subset.', sample: 'Set(1, 2)' },
       {
         description:
           'A collection that contains the collection before it; with more than two arguments, each argument is tested against the next.',
-        sample: '{1, 2, 3}',
+        sample: 'Set(1, 2, 3)',
       },
     ],
     description:
@@ -1184,7 +1184,7 @@ export const SETS_LIBRARY: SymbolDefinitions = {
   },
 
   NotSubset: {
-    examples: ['NotSubset({1, 4}, {1, 2, 3})'],
+    examples: ['NotSubset(Set(1, 4), Set(1, 2, 3))'],
     complexity: 11200,
     // A set relation over an absent set is absent: it computes on the whole
     // collection, so it answers the marker of a boolean codomain, `Missing`.
@@ -1201,7 +1201,7 @@ export const SETS_LIBRARY: SymbolDefinitions = {
   },
 
   Superset: {
-    examples: ['Superset({1, 2, 3}, {1, 2})'],
+    examples: ['Superset(Set(1, 2, 3), Set(1, 2))'],
     complexity: 11200,
     // A set relation over an absent set is absent: it computes on the whole
     // collection, so it answers the marker of a boolean codomain, `Missing`.
@@ -1210,12 +1210,12 @@ export const SETS_LIBRARY: SymbolDefinitions = {
     parameters: [
       {
         description: 'The collection tested as a strict superset.',
-        sample: '{1, 2, 3}',
+        sample: 'Set(1, 2, 3)',
       },
       {
         description:
           'A collection that the collection before it strictly contains; with more than two arguments, each argument is tested against the next.',
-        sample: '{1, 2}',
+        sample: 'Set(1, 2)',
       },
     ],
     description:
@@ -1234,7 +1234,7 @@ export const SETS_LIBRARY: SymbolDefinitions = {
   },
 
   SupersetEqual: {
-    examples: ['SupersetEqual({1, 2}, {1, 2})'],
+    examples: ['SupersetEqual(Set(1, 2), Set(1, 2))'],
     complexity: 11200,
     // A set relation over an absent set is absent: it computes on the whole
     // collection, so it answers the marker of a boolean codomain, `Missing`.
@@ -1243,12 +1243,12 @@ export const SETS_LIBRARY: SymbolDefinitions = {
     parameters: [
       {
         description: 'The collection tested as a superset.',
-        sample: '{1, 2, 3}',
+        sample: 'Set(1, 2, 3)',
       },
       {
         description:
           'A collection that the collection before it contains; with more than two arguments, each argument is tested against the next.',
-        sample: '{1, 2}',
+        sample: 'Set(1, 2)',
       },
     ],
     description:
@@ -1268,7 +1268,7 @@ export const SETS_LIBRARY: SymbolDefinitions = {
   },
 
   NotSuperset: {
-    examples: ['NotSuperset({1, 2}, {1, 2, 3})'],
+    examples: ['NotSuperset(Set(1, 2), Set(1, 2, 3))'],
     complexity: 11200,
     // A set relation over an absent set is absent: it computes on the whole
     // collection, so it answers the marker of a boolean codomain, `Missing`.
@@ -1285,7 +1285,7 @@ export const SETS_LIBRARY: SymbolDefinitions = {
   },
 
   NotSupersetEqual: {
-    examples: ['NotSupersetEqual({1, 2}, {1, 2, 3})'],
+    examples: ['NotSupersetEqual(Set(1, 2), Set(1, 2, 3))'],
     complexity: 11200,
     // A set relation over an absent set is absent: it computes on the whole
     // collection, so it answers the marker of a boolean codomain, `Missing`.
@@ -1527,7 +1527,7 @@ export const SETS_LIBRARY: SymbolDefinitions = {
   },
 
   Complement: {
-    examples: ['ListFrom(Complement({1, 2, 3, 4}, {2, 4}))'],
+    examples: ['ListFrom(Complement(Set(1, 2, 3, 4), Set(2, 4)))'],
     // Return the elements of the first argument that are not in any of
     // the subsequent sets
     wikidata: 'Q242767',
@@ -1536,7 +1536,7 @@ export const SETS_LIBRARY: SymbolDefinitions = {
       {
         description:
           'The sets: the first one, then the sets whose elements are removed from it.',
-        sample: '{1, 2, 3, 4}',
+        sample: 'Set(1, 2, 3, 4)',
       },
     ],
     type: (ops, context) => setOperationResultType(ops, 'first', context),
@@ -1569,7 +1569,7 @@ export const SETS_LIBRARY: SymbolDefinitions = {
   },
 
   Intersection: {
-    examples: ['Intersection({1, 2, 3}, {2, 3, 4})'],
+    examples: ['Intersection(Set(1, 2, 3), Set(2, 3, 4))'],
     // notation: \cap
     // Accepts any finite collection operand (e.g. a `List`), not just sets:
     // list operands are coerced to a set (deduped) by `intersection`, so
@@ -1590,7 +1590,7 @@ export const SETS_LIBRARY: SymbolDefinitions = {
       {
         description:
           'A set or another finite collection, whose duplicate elements count once.',
-        sample: '{1, 2, 3}',
+        sample: 'Set(1, 2, 3)',
       },
     ],
     type: (ops, context) => setOperationResultType(ops, 'first', context),
@@ -1632,7 +1632,7 @@ export const SETS_LIBRARY: SymbolDefinitions = {
   },
 
   Union: {
-    examples: ['Union({1, 2}, {2, 3})'],
+    examples: ['Union(Set(1, 2), Set(2, 3))'],
     // Works on set, but can also work on lists
     wikidata: 'Q185359',
     // An absent collection operand (`Missing`, or a restricted set whose
@@ -1650,7 +1650,7 @@ export const SETS_LIBRARY: SymbolDefinitions = {
       {
         description:
           'A collection whose elements go into the union; an element in several collections appears once.',
-        sample: '{1, 2}',
+        sample: 'Set(1, 2)',
       },
     ],
     type: (ops, context) => setOperationResultType(ops, 'all', context),
@@ -1713,7 +1713,7 @@ export const SETS_LIBRARY: SymbolDefinitions = {
   },
 
   SetMinus: {
-    examples: ['SetMinus({1, 2, 3, 4}, 2, 4)'],
+    examples: ['SetMinus(Set(1, 2, 3, 4), 2, 4)'],
     wikidata: 'Q18192442',
     // An absent first operand (`Missing`, or a restricted set whose
     // condition is false) makes the result `Missing`, as a collection
@@ -1729,7 +1729,7 @@ export const SETS_LIBRARY: SymbolDefinitions = {
     parameters: [
       {
         description: 'The set to remove elements from.',
-        sample: '{1, 2, 3, 4}',
+        sample: 'Set(1, 2, 3, 4)',
       },
       {
         description:
@@ -1788,18 +1788,18 @@ export const SETS_LIBRARY: SymbolDefinitions = {
     },
   },
   SymmetricDifference: {
-    examples: ['SymmetricDifference({1, 2, 3}, {2, 3, 4})'],
+    examples: ['SymmetricDifference(Set(1, 2, 3), Set(2, 3, 4))'],
     // symmetric difference = disjunctive union  (circled minus)
     /* = Union(Complement(a, b), Complement(b, a) */
     /* Corresponds to XOR in boolean logic */
     wikidata: 'Q1147242',
     signature: '(set<any>, set<any>) -> set',
     parameters: [
-      { description: 'The first set.', sample: '{1, 2, 3}' },
+      { description: 'The first set.', sample: 'Set(1, 2, 3)' },
       {
         description:
           'The second set; the order of the two sets does not change the result.',
-        sample: '{2, 3, 4}',
+        sample: 'Set(2, 3, 4)',
       },
     ],
     type: (ops, context) => setOperationResultType(ops, 'all', context),

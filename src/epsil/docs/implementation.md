@@ -1068,7 +1068,7 @@ they show individual statements or nested expressions inside the outer
 | A whole program, including empty or single-statement source | `Program` |
 | `{ … }` after a keyword, `do { … }` | `Block` |
 | `[a, b]` | `List` |
-| `{a, b}` | `Set` |
+| `set(a, b)` | `["set", …]`, a call; library name resolution gives `Set` |
 | `(a, b)` | `Tuple` |
 | `{k -> v}` | `Dictionary` + `KeyValuePair` |
 | `a -> b` | `KeyValuePair` |
@@ -1766,14 +1766,14 @@ a; 2
 ```
 
 A `{ … }` that follows a keyword is a `Block`, while a bare `{ … }` is the
-collection grammar:
+dictionary grammar:
 
 ```epsil
-{ 1, 2 }
+{ }
 ```
 
 ```json
-["Program", ["Set", 1, 2]]
+["Program", ["Dictionary"]]
 ```
 
 ```epsil
@@ -1809,13 +1809,13 @@ let y = do { let t = 3; t + 1 }
 
 ```epsil
 [a, b]          // ["List", "a", "b"]      — [] → ["List"]
-{a, b}          // ["Set", "a", "b"]       — {} → ["Set"]
+set(a, b)       // ["set", "a", "b"]       — set() → ["set"], a call
 (a, b)          // ["Tuple", "a", "b"]
 a..b            // ["Range", "a", "b", 1]
 ```
 
 A dictionary is a `Dictionary` of `KeyValuePair`s, and an unquoted key becomes
-a string key. The empty dictionary, `{->}`, lowers to `["Dictionary"]`:
+a string key. The empty dictionary, `{}`, lowers to `["Dictionary"]`:
 
 ```epsil
 { one -> 1, two -> 2 }

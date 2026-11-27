@@ -136,9 +136,7 @@ _parenthesized_ → **`(`** _expression_ **`)`**
 
 _list_ → **`[`** \[(_expression_)#**`,`**\] **`]`** | **`[`** _expression_ _comprehension-clauses_ **`]`**
 
-_set_ → **`{`** \[(_expression_)#**`,`**\] **`}`** | **`{`** _expression_ _comprehension-clauses_ **`}`**
-
-_dictionary_ → **`{`** \[(_key-value-pair_)#**`,`**\] **`}`** | **`{->}`** | **`{`** _key-value-pair_ _comprehension-clauses_ **`}`**
+_dictionary_ → **`{`** \[(_key-value-pair_)#**`,`**\] **`}`** | **`{`** _key-value-pair_ _comprehension-clauses_ **`}`**
 
 _key-value-pair_ → _expression_ **`->`** _expression_
 
@@ -164,7 +162,7 @@ _expression_) _block_ \[**`else`** (_block_ | _if-expression_)\]
 _match-expression_ → **`match`** _expression_ **`{`** _match-case_+ **`}`**
 
 _primary_ → _signed-number_ | _symbol_ | _string_ | _pragma_ |
-_latex-island_ | _parenthesized_ | _list_ | _set_ | _dictionary_ |
+_latex-island_ | _parenthesized_ | _list_ | _dictionary_ |
 _do-block_ | _if-expression_ | _match-expression_
 
 _call-clause_ → **`(`** \[(_argument_)#**`,`**\] **`)`**
@@ -317,7 +315,7 @@ call/index applies to. The primary forms are:
 - a pragma: `#env("HOME")`
 - a parenthesized expression: `(2 + 3)`
 - a list: `[1, 2, 3]`
-- a set: `{1, 2, 3}`
+- a set: `set(1, 2, 3)`
 - a dictionary: `{one -> 1, two -> 2}`
 - a `do { … }` block expression: `do { let t = 3; t + 1 }`
 - a `$…$` LaTeX island: `$\frac{1}{2}$` — see
@@ -500,23 +498,22 @@ on the same line (`p .x`) is still a diagnosed stray token.
 ## Collections, tuples, and dictionaries
 
 - **List**: `[a, b]`; `[]` is the empty list.
-- **Set**: `{a, b}`; `{}` is the empty set.
+- **Set**: `set(a, b)`; `set()` is the empty set. Braces never make a set:
+  `{a, b}` is a `brace-set-literal` error with a fixit to `set(a, b)`.
 - **Tuple**: `(a, b)`. A single parenthesized element, `(a)`, is just the
   parenthesized expression `a`, not a one-element tuple; `()` is a diagnostic
   (`expression-expected`) — there is no empty tuple — **except** immediately
   before a mapsto arrow, where `() => expr` is a zero-parameter lambda.
 - **Dictionary**: `{k -> v}`; an unquoted key becomes a string key. The empty
-  dictionary is spelled `{->}`, not `{}` (which is the empty set).
+  dictionary is spelled `{}`. (`{->}` is still accepted.)
 
-`{ … }` is disambiguated by looking at the first element once it has been
-parsed: if it is followed by a top-level `->`, the whole `{ … }` is a
-dictionary and every subsequent element must also be a `key -> value` pair;
-otherwise `{ … }` is a set.
+A `{ … }` that is not a block holds `key -> value` pairs, and every element
+must be such a pair (or a `...` spread of a dictionary): `{...d1, ...d2}` is a
+dictionary merge.
 
-A `{` in expression position is therefore **always** a collection literal (set
-or dictionary); to open a statement block in expression position, prefix it
+A `{` in expression position is therefore **always** a dictionary literal; to open a statement block in expression position, prefix it
 with `do`. `do { … }` is a block expression — a statement sequence whose value
-is its last statement — while a bare `{ … }` stays a set/dictionary. See
+is its last statement — while a bare `{ … }` stays a dictionary. See
 [Blocks](/epsil/control-flow/#blocks).
 
 ```epsil
@@ -527,11 +524,12 @@ is its last statement — while a bare `{ … }` stays a set/dictionary. See
 
 A `for` clause after the first (and only) element of a list or brace literal
 makes it a **comprehension**. The bracket picks the collection kind, exactly
-as it does for a literal:
+as it does for a literal; a set comprehension is `setFrom` of a list
+comprehension:
 
 ```epsil
 [x^2 for x in 1..10 if x % 2 == 1]        // list: [1, 9, 25, 49, 81]
-{x % 3 for x in 1..10}                     // set: {1, 2, 0}
+setFrom([x % 3 for x in 1..10])            // set: Set(0, 1, 2)
 {s -> length(s) for s in ["ab", "cde"]}    // dictionary: {"ab" -> 2, "cde" -> 3}
 ```
 
@@ -574,7 +572,7 @@ The lowering is the engine's `Comprehension` with one `Element` clause per
 ```epsil
 [x^2 for x in xs if x > 0]
 // ➔ ["Comprehension", ["Power", "x", 2], ["Element", "x", "xs", ["Greater", "x", 0]]]
-{x for x in xs}          // ➔ ["SetFrom", ["Comprehension", "x", ["Element", "x", "xs"]]]
+setFrom([x for x in xs])  // ➔ ["setFrom", ["Comprehension", "x", ["Element", "x", "xs"]]]
 {k -> v for (k, v) in ps} // ➔ ["DictionaryFrom", ["Comprehension", ["Tuple", "k", "v"], ["Element", ["Tuple", "k", "v"], "ps"]]]
 ```
 

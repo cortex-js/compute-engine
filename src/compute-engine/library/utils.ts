@@ -4222,26 +4222,17 @@ export function canonicalLimitsSequence(
       const fnOp = op as Expression &
         import('../global-types.js').FunctionInterface;
       // A 4-operand spec `(x, lo, hi, step)` is a *stepped* iterator, and
-      // integration bounds have no step slot. Leave it unrecognized — exactly
-      // as the `Set` spelling below does, which requires a proper triple — so
-      // the integral stays indefinite. Without this guard the operand fell
+      // integration bounds have no step slot. Leave it unrecognized, so the
+      // integral stays indefinite. Without this guard the operand fell
       // through `canonicalLimits`'s arity chain, which left `index`/`lower` at
       // `Nothing` and `upper` at its `ops[1]` initializer, yielding the
       // nonsense `Limits(Nothing, Nothing, lo)` (and a sign-flipped result).
       if (fnOp.ops.length <= 3)
         result.push(canonicalLimits(fnOp.ops, options) ?? ce.error('missing'));
     } else if (op.operator === 'Set') {
-      // Mathematica-style definite-integral bounds: `{x, lo, hi}`. POSITIONAL —
-      // only recognized here, in the bounds slot. The `Set` is held (raw), so
-      // its index symbol is not yet canonicalized. Only a proper triple
-      // `{sym, lo, hi}` is recognized; any other shape is left untouched
-      // (unchanged behavior → indefinite integral).
-      const setOps = (
-        op as Expression & import('../global-types.js').FunctionInterface
-      ).ops;
-      if (setOps && setOps.length === 3 && isSymbol(setOps[0])) {
-        result.push(canonicalLimits(setOps, options) ?? ce.error('missing'));
-      }
+      // A set is not an iterator: its elements have no order. Leaving it
+      // out would make the integral indefinite.
+      result.push(ce.typeError('tuple', undefined, op));
     } else if (isSymbol(op)) {
       // The flat spelling: a variable, optionally followed by its bounds.
       // `"x", "y", "z"` is the triple indefinite integral in `x`, `y` and
@@ -4555,7 +4546,7 @@ export function canonicalIndexingSet(expr: Expression): Expression | undefined {
   // preserve the bounds.
   if (isFunction(expr, 'Limits')) {
     // A stepped clause, `Limits(i, lo, hi, step)`, is the `Range` form, as
-    // the stepped `Tuple` and `Set` spellings below are.
+    // the stepped `Tuple` spelling below is.
     if (expr.nops === 4) return steppedIndexingSet(expr.ops);
     // Explicitly declare the index BEFORE canonicalizing the bounds.
     // This ensures the index lands in the current (BigOp) scope even when
@@ -4582,39 +4573,9 @@ export function canonicalIndexingSet(expr: Expression): Expression | undefined {
     ]);
   }
 
-  // Mathematica-style iterator set: `{i, n}`, `{i, lo, hi}` or
-  // `{i, lo, hi, step}`. `{i, n}` is `{i, 1, n}`, as in Mathematica and in
-  // `Table`. This reinterpretation is POSITIONAL — it only applies here, in a
-  // big operator's iterator slot. The `Set` is held (raw), so its index
-  // symbol has not been canonicalized (e.g. `i` → imaginary unit) and its
-  // operands have not been sorted/de-duplicated. Any other `Set` shape
-  // returns `undefined`.
-  if (isFunction(expr, 'Set')) {
-    const setOps = expr.ops ?? [];
-    const idx = setOps[0];
-    if (!idx || !isSymbol(idx) || setOps.length < 2 || setOps.length > 4)
-      return undefined;
-    // With a step, use the Range/Element form, as for a stepped `Limits`.
-    if (setOps.length === 4) return steppedIndexingSet(setOps);
-    if (
-      idx.symbol !== 'Nothing' &&
-      !ce.context.lexicalScope.bindings.has(idx.symbol)
-    )
-      ce.declare(idx.symbol, 'integer');
-    // `{i, lo, hi}` → `Limits(i, lo, hi)` — same result as the `Tuple`/
-    // `Element` forms, and (unlike Range) preserves symbolic bounds.
-    if (setOps.length === 2)
-      return ce.function('Limits', [
-        idx.canonical,
-        ce.One,
-        checkBound(setOps[1].canonical) ?? ce.Nothing,
-      ]);
-    return ce.function('Limits', [
-      idx.canonical,
-      checkBound(setOps[1].canonical) ?? ce.Nothing,
-      checkBound(setOps[2].canonical) ?? ce.Nothing,
-    ]);
-  }
+  // A set is not an iterator: its elements have no order. The error says
+  // what the clause must be, as for a bound of `Integrate`.
+  if (isFunction(expr, 'Set')) return ce.typeError('tuple', undefined, expr);
 
   if (
     expr.operator === 'Tuple' ||
@@ -4623,13 +4584,11 @@ export function canonicalIndexingSet(expr: Expression): Expression | undefined {
     expr.operator === 'Single'
   ) {
     if (!isFunction(expr)) return undefined;
-    // The paren spelling of the Mathematica-style iterator set handled by the
-    // `Set` branch above: `(i, lo, hi)` and, with a step, `(i, lo, hi, step)`.
-    // The step operand MUST be read here — the branch used to look at the
-    // first three operands only, silently dropping it, so
-    // `Sum(k, (k, 1, 10, 2))` answered 55 while the equivalent
-    // `Sum(k, {k, 1, 10, 2})` answered 25. Mirror the `Set` branch exactly,
-    // including its arity guard, so the two spellings are interchangeable.
+    // The iterator tuple: `(i, n)` (`i` from 1 to `n`), `(i, lo, hi)` and,
+    // with a step, `(i, lo, hi, step)`. The step is read here: a clause read
+    // from its first three operands only would sum `(k, 1, 10, 2)` over
+    // every integer from 1 to 10. A set is not an iterator: its elements
+    // have no order.
     const tupleOps = expr.ops;
     if (tupleOps.length > 4) return undefined;
     // With a step, use the Range/Element form, as for a stepped `Limits`.
@@ -4640,8 +4599,8 @@ export function canonicalIndexingSet(expr: Expression): Expression | undefined {
       !isSymbol(tupleOps[0], 'Nothing') &&
       !isSymbol(tupleOps[1], 'Nothing')
     ) {
-      // `(i, n)` is the iterator `{i, n}` of the `Set` branch above: `i`
-      // from 1 to `n`. The upper bound alone gives `Limits(i, 1, n)` below.
+      // `(i, n)` is `i` from 1 to `n`: the upper bound alone gives
+      // `Limits(i, 1, n)` below.
       // A `Nothing` (no index, or no bound) keeps the reading of the
       // operands as they are.
       upper = checkBound(expr.ops[1].canonical);
@@ -4675,8 +4634,8 @@ export function canonicalIndexingSet(expr: Expression): Expression | undefined {
 
 /**
  * The canonical form of the stepped clause whose operands are
- * `[index, lower, upper, step]` (`Limits(i, 1, 10, 2)`, `Tuple(i, 1, 10, 2)`
- * or the held `Set` `{i, 1, 10, 2}`): the `Element` clause
+ * `[index, lower, upper, step]` (`Limits(i, 1, 10, 2)` or
+ * `Tuple(i, 1, 10, 2)`): the `Element` clause
  * `Element(i, Range(1, 10, 2))`, canonicalized as `canonicalIndexingSet()`
  * canonicalizes an `Element` clause. Its index takes the element type of the
  * range, so a step that is not an integer (`Range(1, 4, 0.5)`) gives a real

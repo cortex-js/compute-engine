@@ -66,7 +66,7 @@ describe('the value of a program that ends with a lazy collection', () => {
     ['`reverse`', 'reverse([1, 2, 3])', ['List', 3, 2, 1]],
     ['`zip`', 'zip([1, 2], [3, 4])', ['List', ['Tuple', 1, 3], ['Tuple', 2, 4]]],
     ['`drop`', 'drop([1, 2, 3], 1)', ['List', 2, 3]],
-    ['a `map` of a set is a set', 'map(u => u + 1, {1, 2, 3})', ['Set', 2, 3, 4]],
+    ['a `map` of a set is a set', 'map(u => u + 1, set(1, 2, 3))', ['Set', 2, 3, 4]],
     [
       'a `filter` of a dictionary is a dictionary',
       'let d = {"a" -> 1, "b" -> 2, "c" -> 3}\nfilter(d, e => e[2] > 1)',

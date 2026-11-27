@@ -131,11 +131,14 @@ describe('the exclusions', () => {
       expect([name, epsilNameOf(name)]).toEqual([name, undefined]);
   });
 
+  test('`Set` spells `set`', () => {
+    expect(epsilNameOf('Set')).toBe('set');
+  });
+
   test('literals, grammar constructs, relation glyphs, internal heads', () => {
     for (const name of [
       'List',
       'Tuple',
-      'Set',
       'Dictionary',
       'String',
       'True',

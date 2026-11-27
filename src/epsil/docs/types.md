@@ -53,7 +53,7 @@ the `radius` example below infers `real`.
 Collections carry the type of what is in them, and how many:
 
 ```epsil-live
-(type([1, 2, 3]), type({1, 2}), type((1, "a")), type({x -> 1}))
+(type([1, 2, 3]), type(set(1, 2)), type((1, "a")), type({x -> 1}))
 // ➔ (TypeFrom("vector<integer^3>"), TypeFrom("set<integer>"), TypeFrom("tuple<integer, string>"), TypeFrom("record{x: integer}"))
 ```
 
@@ -884,7 +884,7 @@ type(f(true))
 ```
 
 A record is a value: it does not change. A new field, or a new value for a
-field, is a copy made with the spread (`{->, ...p, z -> 3}`), and
+field, is a copy made with the spread (`{...p, z -> 3}`), and
 `deleteAt(p, key)` is a copy without the key. The type of the copy follows:
 
 ```epsil-live

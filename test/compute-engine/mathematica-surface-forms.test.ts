@@ -3,8 +3,9 @@ import { executeEpsil } from '../../src/epsil/execute-epsil';
 
 /**
  * Mathematica-style surface forms (Tier 1):
- *  - iterator-triple `Set`s `{i, lo, hi}` / `{i, lo, hi, step}` in the
- *    iterator slot of `Sum`, `Product`, `Integrate`, and higher-order `D`;
+ *  - iterator tuples `(i, lo, hi)` / `(i, lo, hi, step)` in the iterator
+ *    slot of `Sum`, `Product`, `Integrate` and `Table` (a set `{i, lo, hi}`
+ *    is not an iterator), and the order pair `{x, n}` of a higher-order `D`;
  *  - the `\mathrm{D}(f, x, …)` function-call derivative;
  *  - the rule-arrow `Limit(f, x -> x0)` form.
  *
@@ -16,12 +17,12 @@ function evalStr(latex: string): string {
   return ce.parse(latex).evaluate().toString();
 }
 
-describe('Iterator-triple Sets in the iterator slot', () => {
-  test('Sum with a `{i, lo, hi}` triple matches the Element form', () => {
-    expect(evalStr('\\mathrm{Sum}(i^2, \\{i, 1, 10\\})')).toBe('385');
+describe('Iterator tuples in the iterator slot', () => {
+  test('Sum with an `(i, lo, hi)` tuple matches the Element form', () => {
+    expect(evalStr('\\mathrm{Sum}(i^2, (i, 1, 10))')).toBe('385');
     // Same canonical form and result as the Element/Range spec.
     expect(
-      ce.box(['Sum', ['Square', 'i'], ['Set', 'i', 1, 10]]).evaluate().json
+      ce.box(['Sum', ['Square', 'i'], ['Tuple', 'i', 1, 10]]).evaluate().json
     ).toEqual(
       ce
         .box(['Sum', ['Square', 'i'], ['Element', 'i', ['Range', 1, 10]]])
@@ -29,88 +30,75 @@ describe('Iterator-triple Sets in the iterator slot', () => {
     );
   });
 
-  test('Product with a `{i, lo, hi}` triple', () => {
-    expect(evalStr('\\mathrm{Product}(i, \\{i, 1, 5\\})')).toBe('120');
+  test('Product with an `(i, lo, hi)` tuple', () => {
+    expect(evalStr('\\mathrm{Product}(i, (i, 1, 5))')).toBe('120');
   });
 
-  test('Sum with a step: `{i, 0, 10, 2}`', () => {
-    expect(evalStr('\\mathrm{Sum}(i, \\{i, 0, 10, 2\\})')).toBe('30');
+  test('Sum with a step: `(i, 0, 10, 2)`', () => {
+    expect(evalStr('\\mathrm{Sum}(i, (i, 0, 10, 2))')).toBe('30');
     expect(
-      ce.box(['Sum', 'i', ['Set', 'i', 0, 10, 2]]).evaluate().toString()
+      ce.box(['Sum', 'i', ['Tuple', 'i', 0, 10, 2]]).evaluate().toString()
     ).toBe('30');
   });
 
-  test('Sum with symbolic bounds `{k, 1, n}` keeps the bounds', () => {
+  test('Sum with symbolic bounds `(k, 1, n)` keeps the bounds', () => {
     // Matches the native `\sum_{k=1}^n k` form (symbolic, closed-form-capable).
-    expect(evalStr('\\mathrm{Sum}(k, \\{k, 1, n\\})')).toBe(
+    expect(evalStr('\\mathrm{Sum}(k, (k, 1, n))')).toBe(
       evalStr('\\sum_{k=1}^{n} k')
     );
   });
 
-  test('Integrate with a `{x, lo, hi}` triple is a definite integral', () => {
-    expect(evalStr('\\mathrm{Integrate}(x^2, \\{x, 0, 1\\})')).toBe('1/3');
+  test('Integrate with an `(x, lo, hi)` tuple is a definite integral', () => {
+    expect(evalStr('\\mathrm{Integrate}(x^2, (x, 0, 1))')).toBe('1/3');
     expect(evalStr('\\int_0^1 x^2 dx')).toBe('1/3');
   });
 
-  test('the tuple spelling carries the step, exactly like the Set spelling', () => {
-    // `canonicalIndexingSet`'s Tuple branch used to read only the first three
-    // operands, silently DROPPING a step: `Sum(k, (k,1,10,2))` answered 55
-    // (the unstepped sum) where `{k,1,10,2}` answered 25.
-    const both = (spec: (string | number)[], expected: string) => {
-      const [, ...rest] = spec;
-      for (const head of ['Set', 'Tuple', 'Triple']) {
-        if (head === 'Triple' && rest.length !== 3) continue;
-        expect(
-          ce.box(['Sum', 'k', [head, ...rest] as any] as any).evaluate().toString()
-        ).toBe(expected);
-      }
-    };
-    both(['_', 'k', 1, 10, 2], '25');
-    both(['_', 'k', 10, 1, -2], '30');
+  test('the tuple spelling carries the step', () => {
+    // A clause read from its first three operands only would sum
+    // `(k, 1, 10, 2)` over every integer from 1 to 10 (55).
+    const sum = (head: string, ...rest: (string | number)[]) =>
+      ce.box(['Sum', 'k', [head, ...rest] as any] as any).evaluate().toString();
+    expect(sum('Tuple', 'k', 1, 10, 2)).toBe('25');
+    expect(sum('Tuple', 'k', 10, 1, -2)).toBe('30');
     // The unstepped triple is unchanged.
-    both(['_', 'k', 1, 10], '55');
-
-    expect(
-      ce.box(['Product', 'k', ['Tuple', 'k', 1, 4, 2]]).evaluate().toString()
-    ).toBe(
-      ce.box(['Product', 'k', ['Set', 'k', 1, 4, 2]]).evaluate().toString()
-    );
+    expect(sum('Tuple', 'k', 1, 10)).toBe('55');
+    expect(sum('Triple', 'k', 1, 10)).toBe('55');
     expect(
       ce.box(['Product', 'k', ['Tuple', 'k', 1, 4, 2]]).evaluate().re
     ).toBe(3);
   });
 
-  test('a 4-element integration spec goes inert in BOTH spellings', () => {
-    // Integration bounds have no step slot. The `Set` spelling was already
-    // unrecognized (→ indefinite integral); the `Tuple` spelling fell through
-    // `canonicalLimits`'s arity chain to `Limits(Nothing, Nothing, lo)` and
-    // produced a SIGN-FLIPPED `-1/3`.
-    const indefinite = ce
-      .box(['Integrate', ['Square', 'x'], ['Set', 'x', 0, 1, 5]])
-      .evaluate()
-      .toString();
+  test('a 4-element integration spec goes inert', () => {
+    // Integration bounds have no step slot: the integral stays indefinite
+    // (it once fell through `canonicalLimits`'s arity chain to
+    // `Limits(Nothing, Nothing, lo)` and gave a SIGN-FLIPPED `-1/3`).
     expect(
       ce
         .box(['Integrate', ['Square', 'x'], ['Tuple', 'x', 0, 1, 5]])
         .evaluate()
         .toString()
-    ).toBe(indefinite);
-    expect(indefinite).toBe('int(x^2 dx)');
-    // The 3-element definite form is unchanged in both spellings.
-    for (const head of ['Set', 'Tuple'])
-      expect(
-        ce
-          .box(['Integrate', ['Square', 'x'], [head, 'x', 0, 1] as any])
-          .evaluate()
-          .toString()
-      ).toBe('1/3');
+    ).toBe('int(x^2 dx)');
+    expect(
+      ce
+        .box(['Integrate', ['Square', 'x'], ['Tuple', 'x', 0, 1]])
+        .evaluate()
+        .toString()
+    ).toBe('1/3');
   });
 
-  test('malformed Set in the iterator slot keeps today’s behavior', () => {
-    // First element not a symbol → not a triple → stays an error, not a guess.
-    const j = ce.parse('\\mathrm{Sum}(i^2, \\{1, 2, 3\\})').json as unknown[];
-    expect(j[0]).toBe('Sum');
-    expect(JSON.stringify(j)).toContain('Error');
+  test('a set is not an iterator: its elements have no order', () => {
+    // `{i, 1, 10}` (Mathematica's list) is a set here: Sum, Product and
+    // Integrate give an error instead of reading it as bounds.
+    expect(evalStr('\\mathrm{Sum}(i^2, \\{i, 1, 10\\})')).toContain('Error');
+    expect(
+      ce.box(['Product', 'i', ['Set', 'i', 1, 5]]).evaluate().toString()
+    ).toContain('Error');
+    expect(
+      ce
+        .box(['Integrate', ['Square', 'x'], ['Set', 'x', 0, 1]])
+        .evaluate()
+        .toString()
+    ).toContain('Error');
   });
 
   test('a `Set` outside an iterator slot is still a plain Set', () => {
@@ -143,26 +131,31 @@ describe('\\mathrm{D} function-call derivative', () => {
 });
 
 describe('Table (alias for Tabulate) with iterator specs', () => {
-  test('Table(i^2, {i, 1, 5}) tabulates the squares', () => {
-    expect(evalStr('\\mathrm{Table}(i^2, \\{i, 1, 5\\})')).toBe(
-      '[1,4,9,16,25]'
-    );
+  test('Table(i^2, (i, 1, 5)) tabulates the squares', () => {
+    expect(evalStr('\\mathrm{Table}(i^2, (i, 1, 5))')).toBe('[1,4,9,16,25]');
   });
 
-  test('Table with a step: {i, 0, 10, 2}', () => {
-    expect(evalStr('\\mathrm{Table}(i, \\{i, 0, 10, 2\\})')).toBe(
+  test('Table with a step: (i, 0, 10, 2)', () => {
+    expect(evalStr('\\mathrm{Table}(i, (i, 0, 10, 2))')).toBe(
       '[0,2,4,6,8,10]'
     );
   });
 
-  test('Table with a non-unit lower bound: {i, 3, 5}', () => {
-    expect(evalStr('\\mathrm{Table}(i^2, \\{i, 3, 5\\})')).toBe('[9,16,25]');
+  test('Table with a non-unit lower bound: (i, 3, 5)', () => {
+    expect(evalStr('\\mathrm{Table}(i^2, (i, 3, 5))')).toBe('[9,16,25]');
   });
 
   test('Table with two specs is a nested table (row order)', () => {
-    expect(evalStr('\\mathrm{Table}(i j, \\{i, 1, 2\\}, \\{j, 1, 3\\})')).toBe(
+    expect(evalStr('\\mathrm{Table}(i j, (i, 1, 2), (j, 1, 3))')).toBe(
       '[[1,2,3],[2,4,6]]'
     );
+  });
+
+  test('a set is not a Table iterator', () => {
+    // The `Set` is an ordinary operand: `Tabulate` rejects it as a dimension.
+    const t = ce.box(['Table', 'i', ['Set', 'i', 1, 5]]);
+    expect(t.operator).toBe('Tabulate');
+    expect(t.isValid).toBe(false);
   });
 
   test('alias form: Table(fn, n) matches Tabulate(fn, n)', () => {
@@ -194,12 +187,10 @@ describe('Table (alias for Tabulate) with iterator specs', () => {
     expect(ev.at(-1)?.toString()).toBe('1000000000000');
   });
 
-  test('the `{i, n}` two-element spec is `{i, 1, n}`', () => {
-    // Mathematica's `Table[expr, {i, n}]` runs `i` from 1 to `n` (user
-    // decision 2026-10-17; the shorthand used to stay an inert `Table`).
+  test('the `(i, n)` two-element spec is `(i, 1, n)`', () => {
     expect(
       ce
-        .box(['Table', 'i', ['Set', 'i', 5]])
+        .box(['Table', 'i', ['Tuple', 'i', 5]])
         .evaluate()
         .toString()
     ).toBe('[1,2,3,4,5]');
@@ -207,16 +198,14 @@ describe('Table (alias for Tabulate) with iterator specs', () => {
 
   test('malformed iterator spec stays inert', () => {
     // A spec whose first element is not a symbol is not guessed.
-    const expr = ce.box(['Table', 'i', ['Set', 5, 1, 3]]);
+    const expr = ce.box(['Table', 'i', ['Tuple', 5, 1, 3]]);
     expect(expr.operator).toBe('Table');
     expect(expr.evaluate().operator).toBe('Table');
   });
 });
 
-describe('Table also accepts the TUPLE spelling of an iterator spec', () => {
-  // `Sum`/`Product`/`Integrate`/`D` accept both `{i, lo, hi}` and
-  // `(i, lo, hi)`; `Table` used to accept only the brace form and sent the
-  // tuple to `Tabulate`, which rejected it with `incompatible-type … tuple<…>`.
+describe('Table accepts the TUPLE spelling of an iterator spec', () => {
+  // `Sum`/`Product`/`Integrate` read `(i, lo, hi)`; so does `Table`.
   //
   // `Table` is `lazy`, so its operands arrive HELD (raw, unbound) on the
   // `ce.box` and Epsil routes and pre-boxed on the `ce.function` route — all
@@ -226,12 +215,9 @@ describe('Table also accepts the TUPLE spelling of an iterator spec', () => {
   const table = (...ops: any[]) =>
     ce.box(['Table', ...ops] as any).evaluate().toString();
 
-  test('box route: `(k, 1, 5)` matches `{k, 1, 5}`', () => {
+  test('box route: `(k, 1, 5)`', () => {
     expect(table(['Power', 'k', 2], ['Tuple', 'k', 1, 5])).toBe(
       '[1,4,9,16,25]'
-    );
-    expect(table(['Power', 'k', 2], ['Tuple', 'k', 1, 5])).toBe(
-      table(['Power', 'k', 2], ['Set', 'k', 1, 5])
     );
   });
 
@@ -247,13 +233,9 @@ describe('Table also accepts the TUPLE spelling of an iterator spec', () => {
     expect(table('k', ['Tuple', 'k', 1, 10, 2])).toBe('[1,3,5,7,9]');
   });
 
-  test('descending, mirroring the Set form', () => {
+  test('descending, with a negative step', () => {
     expect(table(['Power', 'k', 2], ['Tuple', 'k', 5, 1, -1])).toBe(
       '[25,16,9,4,1]'
-    );
-    // A `hi < lo` triple counts down in the Set form too.
-    expect(table(['Power', 'k', 2], ['Tuple', 'k', 5, 1])).toBe(
-      table(['Power', 'k', 2], ['Set', 'k', 5, 1])
     );
   });
 
@@ -261,32 +243,36 @@ describe('Table also accepts the TUPLE spelling of an iterator spec', () => {
     expect(table(['Power', 'i', 2], ['Triple', 'i', 1, 4])).toBe('[1,4,9,16]');
   });
 
-  test('a multi-iterator call may MIX the Set and Tuple spellings', () => {
+  test('a multi-iterator call may MIX tuple and `in` iterators', () => {
     expect(
-      table(['Multiply', 'i', 'j'], ['Set', 'i', 1, 2], ['Tuple', 'j', 1, 3])
+      table(
+        ['Multiply', 'i', 'j'],
+        ['Element', 'i', ['Range', 1, 2]],
+        ['Tuple', 'j', 1, 3]
+      )
     ).toBe('[[1,2,3],[2,4,6]]');
     expect(
-      table(['Multiply', 'i', 'j'], ['Tuple', 'i', 1, 2], ['Set', 'j', 1, 3])
+      table(
+        ['Multiply', 'i', 'j'],
+        ['Tuple', 'i', 1, 2],
+        ['Element', 'j', ['List', 1, 2, 3]]
+      )
     ).toBe('[[1,2,3],[2,4,6]]');
   });
 
-  test('a malformed tuple spec stays inert, exactly like a malformed Set', () => {
+  test('a malformed tuple spec stays inert', () => {
     // Non-symbol first element.
-    for (const head of ['Set', 'Tuple']) {
-      const bad = ce.box(['Table', ['Power', 'k', 2], [head, 5, 1, 2]] as any);
+    const bad = ce.box(['Table', ['Power', 'k', 2], ['Tuple', 5, 1, 2]] as any);
+    expect(bad.operator).toBe('Table');
+    expect(bad.evaluate().operator).toBe('Table');
+    // Wrong arity: one operand, or more than four.
+    for (const spec of [
+      ['Tuple', 'k'],
+      ['Tuple', 'k', 1, 10, 2, 7],
+    ]) {
+      const bad = ce.box(['Table', ['Power', 'k', 2], spec] as any);
       expect(bad.operator).toBe('Table');
       expect(bad.evaluate().operator).toBe('Table');
-    }
-    // Wrong arity: one operand, or more than four.
-    for (const head of ['Set', 'Tuple']) {
-      for (const spec of [
-        [head, 'k'],
-        [head, 'k', 1, 10, 2, 7],
-      ]) {
-        const bad = ce.box(['Table', ['Power', 'k', 2], spec] as any);
-        expect(bad.operator).toBe('Table');
-        expect(bad.evaluate().operator).toBe('Table');
-      }
     }
   });
 
@@ -324,8 +310,8 @@ describe('Table also accepts the TUPLE spelling of an iterator spec', () => {
     };
     expect(cx('Table(k^2, (k,1,5))')).toBe('[1,4,9,16,25]');
     expect(cx('Table(k^2, (k,1,10,2))')).toBe('[1,9,25,49,81]');
-    // Parity with the brace spelling and with the plain alias form.
-    expect(cx('Table(k^2, {k,1,5})')).toBe('[1,4,9,16,25]');
+    // Parity with the `in` iterator and with the plain alias form.
+    expect(cx('Table(k^2, k in 1..5)')).toBe('[1,4,9,16,25]');
     expect(cx('Table(k^2, 5)')).toBe('[1,4,9,16,25]');
   });
 });

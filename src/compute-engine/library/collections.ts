@@ -12627,7 +12627,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
   // Comprehensions are not literal 2-element sets: their elements are the
   // substituted bodies over the (filtered) domain.
   Set: {
-    examples: ['{3, 1, 2, 1}'],
+    examples: ['Set(3, 1, 2, 1)'],
     description: 'An unordered collection of distinct elements (a set).',
     // A pure container: it STORES its operands, and no position ever invokes
     // a function-valued one (`List(randomF)` is pure to build). See the
@@ -22064,12 +22064,13 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
   },
 
   Table: {
-    examples: ['Table(i^2, (i, 1, 5))'],
+    examples: ['Table(i^2, i in 1..5)', 'Table(i * j, i in 1..2, j in 1..3)'],
     description: [
       'Return the list of the values of a function at each index of the given dimensions, as `Tabulate` (the preferred name) does.',
-      'It also accepts Mathematica-style iterator specs, e.g. `Table(i^2, {i, n})` (`i` from',
-      '1 to `n`), `Table(i^2, {i, 1, n})` or `Table(i, {i, lo, hi, step})`,',
-      'and the equivalent tuple spelling `Table(i^2, (i, 1, n))`.',
+      'It also takes iterators: an index over a collection, `Table(i^2, i in 1..n)`,',
+      'or an iterator tuple, `Table(i^2, (i, n))` (`i` from 1 to `n`),',
+      '`Table(i^2, (i, 1, n))` or `Table(i, (i, lo, hi, step))`. Several iterators',
+      'give a nested list, the first iterator outermost.',
     ],
     complexity: 8200,
 
@@ -22086,27 +22087,73 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       },
       {
         description:
-          'The size of one dimension, or an iterator spec `(i, n)`, `(i, lo, hi)` or `(i, lo, hi, step)`.',
+          'The size of one dimension, or an iterator: `i in xs`, `(i, n)`, `(i, lo, hi)` or `(i, lo, hi, step)`.',
         sample: '5',
       },
     ],
     canonical: (ops, { engine: ce }) => {
       const specs = ops.slice(1);
 
-      // Alias form: no iterator spec present (e.g. `Table(fn, 5)`). Delegate
-      // to `Tabulate`, which — also being lazy — canonicalizes the raw held
-      // ops through its own canonical handler. A bare integer (or pair of
-      // integers) is NOT an iterator spec.
-      if (!specs.some((op) => iteratorSpecOperands(op) !== undefined))
+      // Alias form: no iterator present (e.g. `Table(fn, 5)`). Delegate to
+      // `Tabulate`, which — also being lazy — canonicalizes the raw held ops
+      // through its own canonical handler. A bare integer (or pair of
+      // integers) is NOT an iterator.
+      if (
+        !specs.some(
+          (op) =>
+            iteratorSpecOperands(op) !== undefined || isElementIterator(op)
+        )
+      )
         return ce.function('Tabulate', ops);
 
-      // Iterator form: EVERY operand after the body must be a valid iterator
-      // spec: `{sym, n}` / `(sym, n)` (Mathematica's `{i, n}`, `sym` from 1 to
-      // `n`), `{sym, lo, hi}` / `(sym, lo, hi)` or `{sym, lo, hi, step}` /
-      // `(sym, lo, hi, step)`. A malformed spec (non-symbol first element,
-      // wrong arity, or a mix of spec and non-spec operands) keeps the strict
-      // posture: return `null` so the expression stays inert rather than
-      // guessing a bound.
+      // An index over a collection, `Element(i, xs)` or, with a condition,
+      // `Element(i, xs, cond)` (`i in xs`): the table is the nested list
+      // comprehension, the first iterator outermost. A comprehension gives a
+      // list over any collection, a set too (a `Map` over a set is a set,
+      // which would merge equal values), and takes the condition. An
+      // iterator tuple in the same table is the `Element` clause over its
+      // `Range`.
+      if (specs.some(isElementIterator)) {
+        const clauses: Expression[] = [];
+        for (const op of specs) {
+          if (isElementIterator(op)) {
+            clauses.push(op);
+            continue;
+          }
+          const tuple = iteratorSpecOperands(op);
+          if (
+            tuple === undefined ||
+            !isSymbol(tuple[0]) ||
+            tuple.length < 2 ||
+            tuple.length > 4
+          )
+            return null;
+          const [lo, hi] = tuple.length === 2 ? [ce.One, tuple[1]] : tuple.slice(1);
+          clauses.push(
+            ce._fn(
+              'Element',
+              [
+                tuple[0],
+                ce._fn('Range', [lo, hi, tuple[3] ?? ce.One], {
+                  canonical: false,
+                }),
+              ],
+              { canonical: false }
+            )
+          );
+        }
+        let acc: Expression = ops[0];
+        for (let k = clauses.length - 1; k >= 0; k--)
+          acc = ce._fn('Comprehension', [acc, clauses[k]], { canonical: false });
+        return acc.canonical;
+      }
+
+      // Iterator tuples: EVERY operand after the body must be a valid
+      // iterator: `(sym, n)` (`sym` from 1 to `n`), `(sym, lo, hi)` or
+      // `(sym, lo, hi, step)`. A malformed iterator (non-symbol first
+      // element, wrong arity, or a mix of iterator and non-iterator operands)
+      // keeps the strict posture: return `null` so the expression stays inert
+      // rather than guessing a bound.
       type Spec = {
         index: Expression;
         lo: Expression;
@@ -22120,7 +22167,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         const idx = setOps[0];
         if (!idx || !isSymbol(idx) || setOps.length < 2 || setOps.length > 4)
           return null;
-        // `{i, n}` is `{i, 1, n}`.
+        // `(i, n)` is `(i, 1, n)`.
         if (setOps.length === 2) {
           parsed.push({ index: idx, lo: ce.One, hi: setOps[1] });
           continue;
@@ -22133,7 +22180,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         });
       }
 
-      // All-ones fast path: every spec is exactly `{v, 1, n}` (lower bound the
+      // All-ones fast path: every spec is exactly `(v, 1, n)` (lower bound the
       // literal integer 1, no step). Canonicalize to
       // `Tabulate(Function(expr, v₁, …), n₁, …)`; `Tabulate` applies the
       // function to 1-based indices, matching the iterator semantics.
@@ -23562,7 +23609,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
   // Create eager collections from other collections.
   //
   ListFrom: {
-    examples: ['ListFrom({1, 2}, 3..4)'],
+    examples: ['ListFrom(Set(1, 2), 3..4)'],
     description: 'Create a list from the elements of a collection.',
     complexity: 8200,
     // A restricted collection, `[1,2]{c}`, is ONE held restriction over the list
@@ -29641,27 +29688,34 @@ function takeCount(expr: Expression): number | undefined {
 }
 
 /**
- * The heads a `Table` iterator spec can wear. The brace spelling
- * `{i, lo, hi}` parses as a `Set`, the paren spelling `(i, lo, hi)` as a
- * `Tuple` (or one of its arity-named aliases).
+ * The heads a `Table` iterator tuple can wear: the paren spelling
+ * `(i, lo, hi)` is a `Tuple` (or one of its arity-named aliases). A set is
+ * not an iterator: its elements have no order.
  *
- * An iterator spec has 2, 3 or 4 operands: `{i, n}` (`i` from 1 to `n`),
- * `{i, lo, hi}` and `{i, lo, hi, step}`. So the 2-tuple alias `Pair` is a
- * head of a spec, but `Single` is not: a 1-tuple can never be a spec, and
- * listing it here would only turn a `Single` operand from a clear `Tabulate`
- * type error into a silently inert `Table`.
+ * An iterator tuple has 2, 3 or 4 operands: `(i, n)` (`i` from 1 to `n`),
+ * `(i, lo, hi)` and `(i, lo, hi, step)`. So the 2-tuple alias `Pair` is a
+ * head of an iterator, but `Single` is not: a 1-tuple can never be an
+ * iterator, and listing it here would only turn a `Single` operand from a
+ * clear `Tabulate` type error into a silently inert `Table`.
  *
  * This is a *positional* reinterpretation: it applies only in `Table`'s
  * iterator slot. The operand is held (raw), so its index symbol has not been
- * canonicalized (`i` has not folded to the imaginary unit) and a `Set`'s
- * operands have not been sorted or de-duplicated.
+ * canonicalized (`i` has not folded to the imaginary unit).
  */
-const TABLE_ITERATOR_SPEC_OPERATORS = new Set([
-  'Set',
-  'Tuple',
-  'Pair',
-  'Triple',
-]);
+const TABLE_ITERATOR_SPEC_OPERATORS = new Set(['Tuple', 'Pair', 'Triple']);
+
+/**
+ * Whether `expr` is the `Table` iterator over a collection: `Element(i, xs)`
+ * or `Element(i, xs, cond)`, with a symbol index (`i in xs`).
+ */
+function isElementIterator(expr: Expression | undefined): boolean {
+  return (
+    isFunction(expr, 'Element') &&
+    (expr.nops === 2 || expr.nops === 3) &&
+    isSymbol(expr.op1) &&
+    expr.op1.symbol !== 'Nothing'
+  );
+}
 
 /**
  * The operands of a `Table` iterator spec, or `undefined` when `expr` does

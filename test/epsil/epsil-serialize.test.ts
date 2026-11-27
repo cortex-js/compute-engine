@@ -224,7 +224,7 @@ describe('EPSIL SERIALIZING FUNCTIONS', () => {
 describe('EPSIL SERIALIZING DICTIONARIES', () => {
   test('Dictionaries', () => {
     // Empty dictionary
-    expect(serializeEpsil({ dict: {} })).toMatchInlineSnapshot(`"{ -> }"`);
+    expect(serializeEpsil({ dict: {} })).toMatchInlineSnapshot(`"{}"`);
 
     // Regular dictionary. A `{dict}` value is read as the engine reads it: a
     // bare string is a string and an array is a list of values, so
@@ -290,15 +290,15 @@ describe('EPSIL SERIALIZING DICTIONARIES', () => {
 describe('EPSIL SERIALIZING COLLECTIONS', () => {
   test('Sets', () => {
     // Empty set
-    expect(serializeEpsil(['Set'])).toMatchInlineSnapshot(`"{}"`);
+    expect(serializeEpsil(['Set'])).toMatchInlineSnapshot(`"set()"`);
     //Regular set
     expect(
       serializeEpsil(['Set', 5, 7, 'x', ['Add', 5, 'x', 2]])
-    ).toMatchInlineSnapshot(`"{5, 7, x, 5 + x + 2}"`);
+    ).toMatchInlineSnapshot(`"set(5, 7, x, 5 + x + 2)"`);
     // Nested sets
     expect(
       serializeEpsil(['Set', 5, 7, ['Set', 7, 8, 9], ['Add', 5, 'x', 2]])
-    ).toMatchInlineSnapshot(`"{5, 7, {7, 8, 9}, 5 + x + 2}"`);
+    ).toMatchInlineSnapshot(`"set(5, 7, set(7, 8, 9), 5 + x + 2)"`);
 
     // @todo:set membership
   });
@@ -313,7 +313,7 @@ describe('EPSIL SERIALIZING COLLECTIONS', () => {
     // Nested lists
     expect(
       serializeEpsil(['Set', 5, 7, ['List', 7, 8, 9], ['Add', 5, 'x', 2]])
-    ).toMatchInlineSnapshot(`"{5, 7, [7, 8, 9], 5 + x + 2}"`);
+    ).toMatchInlineSnapshot(`"set(5, 7, [7, 8, 9], 5 + x + 2)"`);
   });
 
   test('Sequence', () => {

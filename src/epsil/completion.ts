@@ -517,10 +517,26 @@ export function epsilCompletions(
     text,
     typeNames,
   };
+  // In a dictionary literal written as an argument of a call whose parameter
+  // documents the keys of its options (`plot(s, {▮`): the keys, or the type
+  // of the key whose value is at the offset (`plot(s, {grid -> ▮`).
+  const option = optionKeysAt(context, tokens, start, end, source);
   let expectedType =
     path === undefined
       ? undefined
       : expectedTypeAt(context, path.nodes.length - 1);
+  // The documented type of the key whose value is the word itself, not an
+  // operand in the value (`{color -> x + ▮`): the expected type when the
+  // position gives none, and the source of the string literals below.
+  const keyType =
+    option?.position === 'value' &&
+    path !== undefined &&
+    path.nodes.length >= 2 &&
+    operator(path.nodes[path.nodes.length - 2]) === 'KeyValuePair' &&
+    path.indices[path.indices.length - 1] === 1
+      ? option.type
+      : undefined;
+  if (expectedType === undefined) expectedType = keyType;
   if (expectedType !== undefined && UNINFORMATIVE_TYPES.has(expectedType))
     expectedType = undefined;
   // The type that the position admits, for the fit of each name: `undefined`
@@ -723,11 +739,9 @@ export function epsilCompletions(
     }
   }
 
-  // In a dictionary literal written as an argument of a call whose parameter
-  // documents the keys of its options (`plot(s, {▮`): at a key, the keys not
-  // written yet, and no other name; in the value of a key whose type is a
-  // union of string literals, those strings first.
-  const option = optionKeysAt(context, tokens, start, end, source);
+  // At a key of a dictionary literal written as an argument of a call whose
+  // parameter documents the keys of its options (`plot(s, {▮`): the keys not
+  // written yet, and no other name.
   if (option?.position === 'key') {
     const arrow = /^\s*->/.test(source.slice(end));
     option.keys.forEach((key, i) => {
@@ -763,41 +777,59 @@ export function epsilCompletions(
     });
     return { range, replaceEnd, items: finish(items, prefix) };
   }
-  if (option?.position === 'value')
-    option.values.forEach((value, i) =>
-      items.push({
-        label: value,
-        kind: 'value',
-        rank: 1,
-        tier: i,
-        ...(option.type === undefined ? {} : { detail: option.type }),
-      })
-    );
+  // Where the expected type, or the documented type of the key, is a union
+  // of string literals (`"red" | "blue"`), those strings first. The
+  // documented type can be narrower than the declared one
+  // (`record{color: string}` with `@key options.color: "red" | "blue"`).
+  const literalsType = [expectedType, keyType].find(
+    (t) => t !== undefined && stringLiteralUnion(t) !== undefined
+  );
+  const literals =
+    literalsType === undefined ? undefined : stringLiteralUnion(literalsType);
+  literals?.forEach((value, i) =>
+    items.push({
+      label: value,
+      kind: 'value',
+      rank: 1,
+      tier: i,
+      detail: literalsType,
+    })
+  );
 
-  // At a key of a record literal whose expected type is a record
-  // (`const r: record{x: real} = {▮`), the fields not written yet, and no
-  // other name. A literal with no such expected type gets the names.
+  // At a key of a dictionary literal (`{▮`, `{x -> 1, ▮`). A brace in
+  // expression position is always a dictionary, and a key is a literal name
+  // (`{sin -> 1}` has the key "sin"), so no name of the source or of the
+  // library fits. When the expected type is a record
+  // (`const r: record{x: real} = {▮`), the items are the fields not written
+  // yet; otherwise there are none. A computed key is an expression, and
+  // gets every name: the key of a comprehension (`{f(p) -> p for p in ps}`),
+  // and a word that more of the key follows (`{key▮() -> 1}`,
+  // `{keys▮[1] -> 1}`), not `->`, `,`, `}` or the end of the text.
+  const computedKey = !/^\s*(->|,|\}|$)/.test(source.slice(end));
   const brace = recordKeyBrace(before);
-  if (brace !== undefined) {
+  if (
+    brace !== undefined &&
+    !computedKey &&
+    !isComprehensionBrace(tokens, brace)
+  ) {
     const fields = recordLiteralFields(context, brace, placeholder);
-    if (fields !== undefined) {
-      // Before an `->` (`{▮ -> 1}`), the name only.
-      const arrow = /^\s*->/.test(source.slice(end));
-      fields.forEach((field, i) => {
-        const spelling = escapeSymbol(field.name);
-        const text = arrow ? spelling : `${spelling} -> `;
-        items.push({
-          label: field.name,
-          kind: 'variable',
-          rank: 2,
-          // In the order of the type, the optional fields last.
-          tier: field.optional ? fields.length + i : i,
-          ...(text === field.name ? {} : { insertText: text }),
-          detail: `${typeToString(field.type)}${field.optional ? '?' : ''}`,
-        });
+    if (fields === undefined) return { range, replaceEnd, items: [] };
+    // Before an `->` (`{▮ -> 1}`), the name only.
+    const arrow = /^\s*->/.test(source.slice(end));
+    fields.forEach((field, i) => {
+      const spelling = escapeSymbol(field.name);
+      const text = arrow ? spelling : `${spelling} -> `;
+      items.push({
+        label: field.name,
+        kind: 'variable',
+        rank: 2,
+        // In the order of the type, the optional fields last.
+        tier: field.optional ? fields.length + i : i,
+        ...(text === field.name ? {} : { insertText: text }),
+        detail: `${typeToString(field.type)}${field.optional ? '?' : ''}`,
       });
-      return { range, replaceEnd, items: finish(items, prefix) };
-    }
+    });
+    return { range, replaceEnd, items: finish(items, prefix) };
   }
 
   // At the start of an argument of a call whose callee declares parameter
@@ -1893,7 +1925,7 @@ function slotAt(source: string, before: readonly Token[], start: number): Slot {
   return { kind: 'default' };
 }
 
-/** The offset of the `{` of the set or dictionary literal whose key is
+/** The offset of the `{` of the dictionary literal whose key is
  * at the end of `before`: after the `{` or after a `,` at its depth. */
 function recordKeyBrace(before: readonly Token[]): number | undefined {
   const n = before.length;
@@ -1908,6 +1940,24 @@ function recordKeyBrace(before: readonly Token[]): number | undefined {
   return last === before[open] || last.type === 'COMMA'
     ? before[open].start
     : undefined;
+}
+
+/** Whether the brace that opens at the offset `brace` holds a `for` at its
+ * own depth: it is a comprehension (`{k -> v for k in ks}`). */
+function isComprehensionBrace(tokens: readonly Token[], brace: number): boolean {
+  const open = tokens.findIndex((t) => t.start === brace);
+  if (open < 0) return false;
+  let depth = 0;
+  for (let i = open; i < tokens.length; i += 1) {
+    const t = tokens[i];
+    if (/^OPEN_/.test(t.type)) depth += 1;
+    else if (/^CLOSE_/.test(t.type)) {
+      depth -= 1;
+      if (depth === 0) return false;
+    } else if (depth === 1 && t.type === 'SYMBOL' && t.text === 'for')
+      return true;
+  }
+  return false;
 }
 
 /** The fields of the record literal at `brace` that it does not write yet,
@@ -2322,7 +2372,7 @@ function endsOperand(before: readonly Token[], i: number): boolean {
   ].includes(t.type);
 }
 
-/** Whether the `{` at `p` opens a set or a dictionary, not a block: it
+/** Whether the `{` at `p` opens a dictionary, not a block: it
  * follows a comma, an opening bracket, an operator other than `=>`, `in`, or
  * the `else` of a postfix conditional. */
 function isCollectionBrace(before: readonly Token[], p: number): boolean {
@@ -3137,9 +3187,8 @@ function slotOfArgument(
  * argument of a call (`callAt()`), when the parameter of that argument
  * documents keys (`calleeParameterDocs()`): at a key, the documented keys
  * that the literal does not write yet (the word itself does not count); in
- * the value of a documented key whose type is a union of string literals
- * (`"red" | "blue"`), those strings. The parameter is the one of a named
- * argument (`f(options: {▮`), or else the parameter at the position of the
+ * the value of a documented key that has a type, that type. The parameter is
+ * the one of a named argument (`f(options: {▮`), or else the parameter at the position of the
  * argument in the first signature of the callee that has it. A member call
  * and a call after `|>` give `undefined`.
  */
@@ -3159,7 +3208,7 @@ function optionKeysAt(
         sample?: string;
       }[];
     }
-  | { position: 'value'; type?: string; values: string[] }
+  | { position: 'value'; type: string }
   | undefined {
   const call = callAt(tokens, start);
   if (call?.dictionary === undefined || call.member) return undefined;
@@ -3188,10 +3237,7 @@ function optionKeysAt(
   }
   const key = keys.find((k) => k.name === dictionary.key);
   if (key?.type === undefined) return undefined;
-  const values = stringLiteralUnion(key.type);
-  return values === undefined
-    ? undefined
-    : { position: 'value', type: key.type, values };
+  return { position: 'value', type: key.type };
 }
 
 /** The members of a type string that is a union of string literals

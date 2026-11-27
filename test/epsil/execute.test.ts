@@ -1375,11 +1375,11 @@ describe('EPSIL EXECUTE — collection-literal spread', () => {
   });
 
   test('set spread splices and deduplicates', () => {
-    expect(run('let s = {2, 3}\n{1, ...s}').value.toString()).toBe(
+    expect(run('let s = set(2, 3)\nset(1, ...s)').value.toString()).toBe(
       'Set(1, 2, 3)'
     );
-    expect(run('{1, ...[2, 2, 3]}').value.toString()).toBe('Set(1, 2, 3)');
-    expect(run('{...{1, 2}, ...{2, 3}}').value.toString()).toBe('Set(1, 2, 3)');
+    expect(run('set(1, ...[2, 2, 3])').value.toString()).toBe('Set(1, 2, 3)');
+    expect(run('set(...set(1, 2), ...set(2, 3))').value.toString()).toBe('Set(1, 2, 3)');
   });
 
   test('dictionary merge is last-wins; the bare `->` marker forces dictionary', () => {
@@ -1389,16 +1389,21 @@ describe('EPSIL EXECUTE — collection-literal spread', () => {
     expect(
       run('let d = {"b" -> 9}\n{"a" -> 1, "b" -> 2, ...d}').value.toString()
     ).toBe('{"a" -> 1, "b" -> 9}');
-    // A brace of only spreads is a SET-spread; the `->` marker makes the
-    // pure merge a dictionary.
+    // A brace of only spreads is a dictionary merge, with or without the
+    // `->` marker; a set union is spelled `set(...a, ...b)`.
     expect(
       run(
         'let d1 = {"a" -> 1}\nlet d2 = {"b" -> 2}\n{->, ...d1, ...d2}'
       ).value.toString()
     ).toBe('{"a" -> 1, "b" -> 2}');
-    expect(run('let a = {1}\nlet b = {2}\n{...a, ...b}').value.toString()).toBe(
-      'Set(1, 2)'
-    );
+    expect(
+      run(
+        'let d1 = {"a" -> 1}\nlet d2 = {"b" -> 2}\n{...d1, ...d2}'
+      ).value.toString()
+    ).toBe('{"a" -> 1, "b" -> 2}');
+    expect(
+      run('let a = set(1)\nlet b = set(2)\nset(...a, ...b)').value.toString()
+    ).toBe('Set(1, 2)');
     // A literal key reappearing AFTER a spread is the override idiom:
     // last wins, and no duplicate-key diagnostic fires.
     const override = run('let d = {"a" -> 5}\n{"a" -> 1, ...d, "a" -> 2}');
@@ -1408,7 +1413,7 @@ describe('EPSIL EXECUTE — collection-literal spread', () => {
 
   test('an empty dictionary prints as `{->}` and round-trips', () => {
     // `{->}` is the spelling that parses back as an empty dictionary (a bare
-    // `{}` is the empty set), so the printed form must be exactly that.
+    // `{}` also parses as the empty dictionary), so the printed form is checked as written.
     expect(run('{->}').value.toString()).toBe('{->}');
     // Escaping round-trip: a key/value with a quote, backslash, and newline
     // reparses to the same dictionary.

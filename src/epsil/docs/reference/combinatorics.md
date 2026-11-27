@@ -63,12 +63,12 @@ binomial(n, 2)
 
 MathJSON `CartesianProduct` · `(set<any>+) -> set`
 
-- arguments 1, … — A factor of the product; each element of the result is a tuple with one component from each factor. Sample: `{1, 2}`.
+- arguments 1, … — A factor of the product; each element of the result is a tuple with one component from each factor. Sample: `Set(1, 2)`.
 
 Return the Cartesian product of input sets.
 
 ```epsil
-count(cartesianProduct({1, 2}, {"a", "b", "c"}))
+count(cartesianProduct(set(1, 2), set("a", "b", "c")))
 // ➔ 6
 ```
 
@@ -211,12 +211,12 @@ pochhammer(x, 3)
 
 MathJSON `PowerSet` · `(set<any>) -> set`
 
-- argument 1 — The set whose subsets are listed; the power set of the empty set holds the empty set alone. Sample: `{1, 2, 3}`.
+- argument 1 — The set whose subsets are listed; the power set of the empty set holds the empty set alone. Sample: `Set(1, 2, 3)`.
 
 Return the power set of a set (set of all subsets).
 
 ```epsil
-count(powerSet({1, 2, 3}))
+count(powerSet(set(1, 2, 3)))
 // ➔ 8
 ```
 

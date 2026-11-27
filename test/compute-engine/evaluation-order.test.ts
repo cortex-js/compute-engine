@@ -159,7 +159,7 @@ describe('LITERALS evaluate their elements left to right', () => {
   });
 
   test('set', () => {
-    expect(order('{t2(), t1()}')).toBe('21');
+    expect(order('set(t2(), t1())')).toBe('21');
   });
 
   test('dictionary', () => {
