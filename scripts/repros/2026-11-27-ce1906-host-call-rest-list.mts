@@ -44,6 +44,13 @@ const cases: Case[] = [
     expect: 'compile',
   },
   {
+    // Tycho's `Figure` has `badOptions: list<string>`, empty in most
+    // figures: Relay Vault's `draw(stage)` (reading of 0.204.1).
+    label: 'draw(s), s a figure with an empty list of strings in a field',
+    program: `type Fig = tuple<kind: string, geom: list, bad: list<string>, handlers: string | nothing>\nfunction figureOf(kind: string, geom: list) { Fig(kind, geom, [], nothing) }\nfunction draw(...args) -> nothing { show(listFrom(args)) }\nlet a = figureOf("r", [2, 4])\nlet s = figureOf("canvas", [[a, [a]], 2])\nlet frame = (t: real) => do { draw(s); 0 }`,
+    expect: 'compile',
+  },
+  {
     label: 'show([w]), w = 1..3 (a Range: the interpreter keeps it lazy)',
     program: `let w = 1..3\nlet frame = (t: real) => do { show([w]); 0 }`,
     expect: 'decline',

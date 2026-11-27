@@ -3223,8 +3223,6 @@ GLSL" below). These decline too:
 - a record or a list of several lanes given to a parameter declared `list`:
   Tycho's `label` (the geometry `[x, y, text]`) and `group` (a list of
   figures) decline at `figureOf(kind: string, geom: list)`;
-- a list of strings in a field, also as a literal: Tycho's invalid figure,
-  `figureOf("invalid", ["message"])`;
 - a recursive function whose parameter or result is a record.
 
 A named tuple of two to four fields declared as real or integer numbers

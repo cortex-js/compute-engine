@@ -1,3 +1,18 @@
+## [Unreleased]
+
+### Resolved Issues
+
+- **Compiled JavaScript passes a value of a named tuple type with a list of
+  strings in a field to a function of the host.** A Tycho figure has the
+  field `badOptions: list<string>`, empty in most figures. A compiled timer
+  callback that calls `draw(stage)` with a variable that holds such a
+  figure declined ("a list or a tuple that the interpreter can hold as a
+  lazy collection", then "a list of strings other than a literal") and ran
+  in the interpreter. It now compiles, and the host receives the
+  interpreter's value, with `["List"]` or `["List", "'a'"]` in that field.
+  A result of such a type with a nonempty list of strings in a field
+  compiles too (CE-1906).
+
 ## 0.204.1 _2026-11-27_
 
 ### Breaking Changes

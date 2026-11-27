@@ -69,6 +69,32 @@ describe('a list variable inside a list argument of a function of the host', () 
     expect(run(src)).toEqual({ compiled: [call], interpreted: [call] });
   });
 
+  // A named tuple with a field of strings, as Tycho's `Figure` has
+  // `badOptions: list<string>`, empty in most figures (Relay Vault).
+  const FIG = `type Fig = tuple<kind: string, geom: list, bad: list<string>, handlers: string | nothing>
+function figureOf(kind: string, geom: list) { Fig(kind, geom, [], nothing) }
+function draw(...args) -> nothing { show(listFrom(args)) }
+`;
+  test.each([
+    [
+      'a figure whose field of strings is empty',
+      `let s = figureOf("c", [1])\nlet frame = (t: real) => do { show(s); 0 }`,
+      `["Fig","'c'",["List",1],["List"],"Nothing"]`,
+    ],
+    [
+      'a figure of figures through draw',
+      `let a = figureOf("r", [2, 4])\nlet s = figureOf("canvas", [[a, [a]], 2])\nlet frame = (t: real) => do { draw(s); 0 }`,
+      `["List",["Fig","'canvas'",["List",["List",["Fig","'r'",["List",2,4],["List"],"Nothing"],["List",["Fig","'r'",["List",2,4],["List"],"Nothing"]]],2],["List"],"Nothing"]]`,
+    ],
+    [
+      'a figure whose field of strings holds strings',
+      `let s = Fig("c", [1], ["bad", "opt"], "h1")\nlet frame = (t: real) => do { draw(s); 0 }`,
+      `["List",["Fig","'c'",["List",1],["List","'bad'","'opt'"],"'h1'"]]`,
+    ],
+  ])('%s: compiled as interpreted', (_, src, call) => {
+    expect(run(FIG + src)).toEqual({ compiled: [call], interpreted: [call] });
+  });
+
   test('a variable that holds a range declines: the interpreter keeps the range', () => {
     expect(
       run('let w = 1..3\nlet frame = (t: real) => do { show([w]); 0 }')

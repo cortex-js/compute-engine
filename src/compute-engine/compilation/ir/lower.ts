@@ -521,6 +521,9 @@ export const isHostVarOp = (op: string) => /^host\d+\./.test(op);
  *  `_SYS.hosts[k]`. */
 export const hostCallOp = (k: number) => `call.host${k}`;
 
+/** Whether the IR operation `op` is a `hostCallOp()`. */
+export const isHostCallOp = (op: string): boolean => /^call\.host\d+$/.test(op);
+
 /** At most this many arguments in a call of a function of the host: the
  *  largest arity of an IR operation. */
 const MAX_HOST_ARGUMENTS = 4;
@@ -2637,8 +2640,11 @@ function lowerOnce(
       case 'List': {
         // A list, or a record of elements of several lanes; a list of
         // lists of run-time length is of the lane `rows` (CE-1736).
+        // The interpreter holds it as `List()`, so it is listed when the
+        // literal is held as written (`literalListed()`; CE-1906).
         const empty = e.nops === 0 ? emptyLanes.get(e) : undefined;
-        if (empty != null) return emptyList(e, empty);
+        if (empty != null)
+          return literalListed(e, [], emptyList(e, empty));
         const elements = e.ops.map((op) => value(op)!);
         // (JavaScript only, outside the interval and the bigint modes:
         // `rowLane()` declines elsewhere).

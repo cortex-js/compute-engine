@@ -17,7 +17,13 @@
 
 import type { Expression } from '../../global-types.js';
 import { arrayStorageKind } from '../../../common/type/array-storage.js';
-import { Decline, hostCallOp, hostVarOp, lower } from './lower.js';
+import {
+  Decline,
+  hostCallOp,
+  hostVarOp,
+  isHostCallOp,
+  lower,
+} from './lower.js';
 import { UNSUPPORTED_MODE } from './lower-context.js';
 import { TEXT_LIST_MAKERS, TEXT_LIST_READS } from './lower-strings.js';
 import { readsVarsObject } from '../vars-inputs.js';
@@ -362,9 +368,12 @@ function nothingRefusal(p: Program): Refusal | undefined {
  * a filter of a list operator), or it is a parameter of the entry; and it is
  * read only as the list operand of `TEXT_LIST_READS` (`StringJoin`, an
  * element, `At`, the order of `Sort`), each of which conditions what it
- * reads, or, when it is not a parameter, it is a result of the entry. An
- * element-wise operation, another order (`Max`, `Ordering`, a `Sort` by a
- * key or a comparator), an arm, a carried value or a call refuses. The
+ * reads, or, when it is not a parameter, it is a result of the entry. A
+ * field of a record (a `list` of the lane `record`) and an argument of a
+ * function of the host (`call.host<k>`) hold it as it is (`boxValue()` of
+ * `print-js.ts`; CE-1906). An element-wise operation, another order (`Max`,
+ * `Ordering`, a `Sort` by a key or a comparator), an arm, a carried value or
+ * a call of a user function refuses. The
  * passes run before, so a list of constant length whose reads they fold is
  * a `list` of its elements.
  *
@@ -414,8 +423,14 @@ function stringListRefusal(p: Program): Refusal | undefined {
         return { head, cause: `${head} of a list that is not of strings` };
       }
       const resultField = i.k === 'list' && p.types[i.out].resultRecord;
+      // A field of a record, and an argument of a function of the host,
+      // hold the list as it is: the host receives its `List` (`boxValue()`
+      // of `print-js.ts`; CE-1906).
+      const held =
+        (i.k === 'list' && p.types[i.out].lane === 'record') ||
+        (i.k === 'op' && isHostCallOp(i.op));
       if (
-        !resultField &&
+        !held &&
         argsOf(i).some((v, k) => listOf(v) && !(read && k === 0))
       )
         return refusal;

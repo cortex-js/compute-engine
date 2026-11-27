@@ -847,7 +847,10 @@ the `filter` that `Unique` of numbers is ("Lists"), with `text.eq` as its test
 remedy is the interpreter): `Max`, `Contains`, `IndexOf`, `Find`, `Reduce` and
 `Fold` of a list of strings; an element-wise operation on one; a list of strings
 in an `If`, a `Loop` or a user function that is not inlined; a list of lists of
-strings; an input list returned as the result.
+strings; an input list returned as the result. A field of a record (a `list`
+instruction of the lane `record`) and an argument of a function of the host
+(`call.host<k>`) hold a list of strings as it is: the host receives its `List`
+(`boxValue()` of `print-js.ts`; CE-1906).
 
 Code that reads or gives a string, or a list of strings, has `strings: true` and
 `shippable: false`: `broadcast()`, `broadcastAsync()` and the batch loaders of
