@@ -2144,6 +2144,16 @@ function lowerOnce(
     return apply(e, 'At', [l, i]);
   };
 
+  /** The `List` and `Tuple` nodes of the value of a free name that the
+   *  engine holds as those literals (`captured()`; CE-1906): the
+   *  interpreter reads that literal where the program reads the name, so
+   *  they are listed as the literals of the program are. */
+  const capturedLiterals = new Set<Expression>();
+  /** Whether `e` is a literal that the interpreter holds as written: a node
+   *  of the program, or of the literal value of a free name. */
+  const heldLiteral = (e: Expression): boolean =>
+    readers.has(e) || capturedLiterals.has(e);
+
   /** `v`, the value of `e`. A `List` or a `Tuple` that is not a node of
    *  the program (the elements of a `Range` of constants, as a literal) can
    *  share its value with a literal of the program of the same structure
@@ -2153,7 +2163,7 @@ function lowerOnce(
       v !== undefined &&
       isFunction(e) &&
       (e.operator === 'List' || e.operator === 'Tuple') &&
-      !readers.has(e)
+      !heldLiteral(e)
     )
       cx.listed.set(v, false);
     return v;
@@ -4830,6 +4840,15 @@ function lowerOnce(
       if (typeof nv === 'number' ? !Number.isInteger(nv) : !nv.isExact)
         return number(v, 1)!;
     }
+    // A `List` or a `Tuple` of numbers (not a `PointList`) is the value
+    // that the interpreter reads for the name: listed (`heldLiteral()`).
+    const keep = (x: Expression): void => {
+      if (!isFunction(x) || (x.operator !== 'List' && x.operator !== 'Tuple'))
+        return;
+      capturedLiterals.add(x);
+      x.ops.forEach(keep);
+    };
+    keep(v);
     return value(v)!;
   };
 
@@ -6391,13 +6410,13 @@ function lowerOnce(
 
   /** The list or the tuple `v` that the `List` or the `Tuple` literal `e`
    *  of the values `elements` made: the interpreter holds it as that
-   *  literal when `e` is a node of the program (not a literal that the
-   *  lowering made of a value of the engine, such as the elements of a
-   *  `Range` of constants) and each element is listed (`Listed`; CE-1652,
-   *  step 5). */
+   *  literal when `e` is a node of the program or of the literal value of a
+   *  free name (`heldLiteral()`; not a literal that the lowering made of a
+   *  value of the engine, such as the elements of a `Range` of constants)
+   *  and each element is listed (`Listed`; CE-1652, step 5). */
   const literalListed = (e: Fn, elements: V[], v: V): V => {
     if (
-      readers.has(e) &&
+      heldLiteral(e) &&
       cx.listed.get(v) !== false &&
       elements.every((x) => listedOf(cx, x) === true)
     )

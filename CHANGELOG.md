@@ -96,6 +96,16 @@
 
 ### Resolved Issues
 
+- **Compiled JavaScript passes a list variable inside a list argument to a
+  function of the host.** With `let v = [1, 2]`, a compiled callback that
+  calls `show([v])`, or a rest-parameter function such as
+  `function draw(...args) -> nothing { show(listFrom(args)) }` called as
+  `draw(v)`, declined ("a list or a tuple that the interpreter can hold as
+  a lazy collection") and ran in the interpreter. It now compiles, and the
+  host receives `["List", ["List", 1, 2]]`, as from the interpreter. A
+  variable that holds a range (`let w = 1..3`; `show([w])`) still declines:
+  the interpreter passes the range itself (CE-1906).
+
 - **`compile()` applies `inputs` to free names read through an assigned
   expression.** A polynomial whose coefficients come from a stored list
   `C = [c_1, c_2, c_3]` can use input types for those coefficients without
