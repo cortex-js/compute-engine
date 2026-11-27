@@ -3898,6 +3898,12 @@ lowering of records of JavaScript: the nominal name in `sameFields()`, the
 equality of the fields of one nominal type, the declines of a record against a
 tuple, the discharges of `absent()`.
 
+- **Host inputs.** `numericRecordInput()` gives a named tuple of two to four
+  numeric fields its settled record type. JavaScript projects the object's
+  names into the internal array at entry. GLSL reads one vector in declared
+  field order. Both keep the nominal type when the value is passed to a
+  function or compared with another record.
+
 - **Making a record.** The constructor of a nominal tuple type that
   `type P = tuple<…>` declares (`recordConstructor()`; not a parameterized or an
   alias type, not a variant of a sum declared with `|`, whose tag is a value at

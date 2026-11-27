@@ -3159,6 +3159,12 @@ GLSL" below). These decline too:
   `figureOf("invalid", ["message"])`;
 - a recursive function whose parameter or result is a record.
 
+A named tuple of two to four fields declared as real or integer numbers
+can also be a host input. On JavaScript, the input is an object keyed by
+the field names. With `p: P`, `run({ p: { x: 3, y: 4 } })` supplies the same
+object shape as a compiled `P` result. The input report spells the lowered
+type `record`. Code with a record input uses `run()` for each value.
+
 **On GLSL.** A value of a nominal tuple type of two to four fields, each
 declared a real or an integer number (`type P2 = tuple<x: real, y: real>`,
 `type C3 = tuple<r: real, g: real, b: real>`, a field type through a
@@ -3179,8 +3185,10 @@ V2(x: real, y: real)"), or of such a value and an unnamed tuple ("Equal of a
 tuple: its value on a tuple is not its value on a list", "arms of two
 types") decline, as on JavaScript, and so do arithmetic on a whole value
 (`p + 1`, an `incompatible-type` error in the interpreter), a list of such
-values ("a list of records"), an input declared with the type (CE-1871) and a
-dictionary. Every other constructor declines with its cause: with
+values ("a list of records") and a dictionary. A host input of such a type
+with named fields is one uniform of the corresponding `vecN` type. Its
+components follow the order of the fields in the declaration, and the input
+report retains the nominal type. Every other constructor declines with its cause: with
 `type B2 = tuple<x: boolean, y: boolean>`, `B2(c, c)` gives "a value of the
 type B2, a record whose field x is of type boolean, not a real or an integer
 number: on glsl a record is a value of a nominal tuple type of two to four
@@ -3860,7 +3868,7 @@ declared `Pixel`, a tuple returned or held in a local where `Pixel` is
 declared (each an error in the interpreter); `IsMissing`, `Coalesce` and
 `AssertPresent` of a `Pixel` value; arithmetic on a whole `Pixel`
 (`p + 1`) and `p[2]` (the interpreter gives `incompatible-type`); a list of
-`Pixel` values ("a list of records"); an input declared `Pixel` (CE-1871);
+`Pixel` values ("a list of records");
 and every record that is not a vector ("Records", "On GLSL"). Unlike the
 other vectors, a `Pixel` can be an out-of-range read, so its discharges
 decline.

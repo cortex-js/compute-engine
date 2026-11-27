@@ -57,6 +57,11 @@
 
 ### Improvements
 
+- **Compiled expressions accept named numeric tuples as inputs.** With
+  `type Point = tuple<x: real, y: real>` and `p: Point`, JavaScript reads
+  `p.x` from `run({ p: { x: 3, y: 4 } })`. GLSL reads the same point from
+  a `vec2` uniform in declared field order.
+
 - **GLSL compiles reductions over bounded comprehensions and reads from
   computed lists.** `Min([Sin(i) for i in 2 * Range(0, Ceil(t/4))])` compiles
   with `t: real<0..5>`. `At(Map(Sin, L), i)` of a fixed-length real list

@@ -501,6 +501,16 @@ function opaque() -> Pixel { (1, 2, 3, 4) }
     );
   });
 
+  test('a host Pixel is a vec4 uniform in channel order', () => {
+    const r = shader(['Field', 'q', "'g'"]);
+    expect(r.code).toBe('q[int(1.0)]');
+    expect(r.freeSymbolTypes?.q).toEqual({
+      type: 'Pixel',
+      lowered: 'vec4',
+      provenance: 'declared',
+    });
+  });
+
   test.each([
     [
       'an operand that does not prove a Byte',
@@ -572,7 +582,6 @@ function opaque() -> Pixel { (1, 2, 3, 4) }
       ['At', ['At', 'src', 'i'], 2],
       'a sub-expression of the static type error',
     ],
-    ['an input declared Pixel (CE-1871)', ['Field', 'q', "'g'"], 'the input q of type Pixel'],
     [
       'a list of Pixel values',
       ['List', ['Pixel', 1, 2, 3, 4], ['Pixel', 5, 6, 7, 8]],

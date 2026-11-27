@@ -607,6 +607,8 @@ export const JS: Syntax = deepFreeze({
   input: (name) =>
     IDENTIFIER.test(name) ? `_.${name}` : `_[${JSON.stringify(name)}]`,
   positional: (_name, k) => `a${k}`,
+  recordInput: (input, fields) =>
+    `[${fields.map((name) => `${input}[${JSON.stringify(name)}]`).join(', ')}]`,
   length: (list) => `${list}.length`,
   width: (list) => `(${list}.length === 0 ? 0 : ${list}[0].length)`,
   part: (tuple, index) => `${tuple}[${index}]`,

@@ -519,10 +519,12 @@ export type FreeSymbolType = {
    *   rows (`vec2[3]` for 3 rows of 2 numbers, `M[0]` its first row); no
    *   `matN` is emitted. A mutable array (`array<T>`) is a sampler:
    *   `highp usampler2D`, `highp isampler2D` or `highp sampler2D` (see
-   *   `count`).
+   *   `count`). A named tuple of two to four real or integer fields is
+   *   `vec2` to `vec4` in declared field order.
    * - `javascript`: the runner value convention: `number`, `complex` (a
    *   `{ re, im }` object), `boolean`, `string`, `point` (an array of
-   *   numbers of a fixed width), `color`, `array` (a list), `mutable-array`
+   *   numbers of a fixed width), `record` (an object keyed by the fields
+   *   of a named numeric tuple), `color`, `array` (a list), `mutable-array`
    *   (the engine's array of an `array<T>` input, a `BoxedArray`), or
    *   `function`.
    * - `interval-js`: `interval` for a real number (a number or a
@@ -691,8 +693,8 @@ export type DefaultRunnerResult<T extends string> = T extends 'interval-js'
  * plain number is auto-converted to a point interval), while every other
  * executable target accepts a real, a complex domain-coloring input, a
  * boolean (for a symbol declared `boolean`), a string (for a symbol declared
- * `string`), or a list of these ({@link RunnerListInput}) for a symbol that
- * the compiled code reads as a list.
+ * `string`), a list of these ({@link RunnerListInput}), or an object of
+ * numeric fields for a named tuple input.
  *
  * The type does not relate a value to the declared type of its symbol: it
  * admits `true` for a symbol declared `real`. The host supplies every input
@@ -721,7 +723,14 @@ export type DefaultRunnerResult<T extends string> = T extends 'interval-js'
  */
 export type DefaultRunnerVars<T extends string> = T extends 'interval-js'
   ? IntervalInput
-  : number | bigint | boolean | string | ComplexResult | RunnerListInput;
+  :
+      | number
+      | bigint
+      | boolean
+      | string
+      | ComplexResult
+      | RunnerListInput
+      | Readonly<Record<string, number>>;
 
 /**
  * A list argument of a compiled runner: an array of numbers, of booleans,
@@ -776,9 +785,8 @@ export type LambdaRunner<R = CompiledValue, V = number> = (...args: V[]) => R;
  * bind it to their own value type — e.g. `interval-js` uses
  * `number | Interval` (a plain number is auto-converted to a point interval),
  * and the `javascript` runner uses
- * `number | boolean | string | ComplexResult | RunnerListInput` (a boolean or
- * a string for a symbol declared with that type, a complex domain-coloring
- * input, or a list for a symbol that the code reads as a list).
+ * the corresponding {@link DefaultRunnerVars}, including a numeric field
+ * object for a named tuple input.
  */
 export interface CompiledRunner<R = CompiledValue, V = number> {
   /** Call with a variables object (for compiled expressions) */
@@ -1111,7 +1119,7 @@ export type StoredBatchBody = {
  *   — and see the arithmetic example below.
  * - `V` — the type of the variable/argument values `run` accepts. Defaults to
  *   `number`; `interval-js` binds it to `number | Interval`, the `javascript`
- *   runner to `number | boolean | string | ComplexResult | RunnerListInput`.
+ *   runner to {@link DefaultRunnerVars}.
  *   (Positioned after `R` so existing `CompilationResult<T, R>` uses keep
  *   the `number` default.)
  *

@@ -11,6 +11,7 @@ import type { Type, TypeReference } from '../../../common/type/types.js';
 import { sumVariantInfo } from '../../sum-representation.js';
 import { isSubtype } from '../../../common/type/subtype.js';
 import { typeToString as engineTypeToString } from '../../../common/type/serialize.js';
+import { unfoldAliasOnDescent } from '../../../common/type/utils.js';
 import { isSymbol } from '../../boxed-expression/type-guards.js';
 import type { DictionaryInterface, Expression } from '../../global-types.js';
 import {
@@ -56,6 +57,35 @@ export function recordConstructor(
     nominal: (t as TypeReference).name,
     types: body.map((x) => x.type),
     ...(names === undefined ? {} : { names }),
+  };
+}
+
+/** The fixed numeric fields of a named tuple that a host can supply. */
+export function numericRecordInput(
+  engine: Expression['engine'],
+  t: Type
+): IRType | undefined {
+  const nominal = unfoldAliasOnDescent(t, undefined)?.type;
+  if (typeof nominal !== 'object' || nominal.kind !== 'reference')
+    return undefined;
+  const body = tupleBody(nominal);
+  if (
+    body === undefined ||
+    body.length < 2 ||
+    body.length > 4 ||
+    body.some((x) => x.name === undefined || !isSubtype(x.type, 'real')) ||
+    sumVariantInfo(engine, nominal.name) !== undefined
+  )
+    return undefined;
+  return {
+    lane: 'record',
+    shape: [],
+    nominal: nominal.name,
+    names: body.map((x) => x.name!),
+    fields: body.map((x) => ({
+      lane: isSubtype(x.type, 'integer') ? 'integer' : 'real',
+      shape: [],
+    })),
   };
 }
 

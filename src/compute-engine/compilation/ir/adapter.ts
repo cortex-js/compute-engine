@@ -281,11 +281,10 @@ function arrayBroadcastError(): Error {
   );
 }
 
-/** The error of a batch of code whose result is a record (README,
- *  "Records"): a batch writes numbers only. */
+/** A batch reads and writes numeric values only (README, "Records"). */
 function recordBroadcastError(): Error {
   return new TypeError(
-    'Code whose result is a record cannot be broadcast: the batch runner writes numbers only. Call `run()` for each value.'
+    'Code whose input or result is a record cannot be broadcast. Call `run()` for each value.'
   );
 }
 
@@ -293,7 +292,8 @@ function recordBroadcastError(): Error {
  *  convention of the runner (`FreeSymbolType.lowered`) for the IR type of
  *  the entry parameter of the name, or the lane of its `vars` read
  *  (`reads`): `number` (`interval` on interval-js), `boolean`, `complex`,
- *  `color`, `string`, `point` for a tuple, `array` for another list. */
+ *  `color`, `string`, `point` for a plain tuple, `record` for a named
+ *  tuple, and `array` for a list. */
 export function runnerLowered(
   p: Program,
   reads: ReadonlyMap<string, Lane>,
@@ -543,11 +543,11 @@ function compileIr(
   // A string input, or a string result: no batch (a batch is of numbers).
   let strings = entry.results.some((t) => t.lane === 'string');
   // A list of rows of different lengths as the result: no batch either;
-  // nor a record (README, "Records"), which a batch cannot write.
+  // nor a record input or result (README, "Records").
   const rows =
     p.polygonResult === undefined &&
     entry.results.some((t) => t.lane === 'rows');
-  const records =
+  let records =
     p.polygonResult !== undefined ||
     entry.results.some((t) => t.lane === 'record');
   entry.paramNames.forEach((name, k) => {
@@ -555,6 +555,10 @@ function compileIr(
     const i = argumentIndex(entry, k);
     const key = literal ? i : name;
     if (entry.lengthOf[k]) return;
+    if (t.lane === 'record') {
+      records = true;
+      return;
+    }
     if (t.lane === 'array') {
       // An assigned variable is checked by its read (`readAssigned()`).
       if (

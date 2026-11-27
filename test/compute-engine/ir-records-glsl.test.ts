@@ -22,6 +22,7 @@ const ce = new ComputeEngine();
 const program = executeEpsil(
   ce,
   `type P2 = tuple<x: real, y: real>
+type alias PointAlias = P2
 type V2 = tuple<x: real, y: real>
 type C3 = tuple<r: real, g: real, b: real>
 type Q4 = tuple<a: real, b: real, c: real, d: real>
@@ -51,12 +52,84 @@ ce.declare('i', 'integer');
 ce.declare('n', 'integer');
 ce.declare('c', 'boolean');
 ce.declare('q', 'P2');
+ce.declare('mixed', 'M2');
+ce.declare('labels', 'S2');
+ce.declare('aliasPoint', 'PointAlias');
 
 const glsl = (json: unknown) =>
   compile(ce.box(json as never), { to: 'glsl', fallback: false } as never);
 
 const P = ['P2', 'x', 'y'];
 const Q = ['P2', 'y', 'x'];
+
+describe('A HOST INPUT OF A NAMED NUMERIC TUPLE TYPE', () => {
+  const field = ['Field', 'q', "'x'"];
+  const norm = ['norm2', 'q'];
+
+  test('JavaScript accepts the object it returns for the same type', () => {
+    const point = compile<'javascript', { x: number; y: number }>(ce.box(P), {
+      fallback: false,
+    });
+    const read = compile(ce.box(field), { fallback: false });
+    const call = compile(ce.box(norm), { fallback: false });
+    const identity = compile(ce.box('q'), { fallback: false });
+    const q = point.run!({ x: 3, y: 4 });
+    expect(read.run!({ q })).toBe(3);
+    expect(call.run!({ q })).toBe(25);
+    expect(identity.run!({ q })).toEqual({ x: 3, y: 4 });
+    expect(call.freeSymbolTypes).toEqual({
+      q: { type: 'P2', lowered: 'record', provenance: 'declared' },
+    });
+  });
+
+  test('GLSL uses a single uniform and passes it to a vec2 parameter', () => {
+    expect(glsl(field).code).toBe('q[int(0.0)]');
+    const call = glsl(norm);
+    expect(call.freeSymbolTypes).toEqual({
+      q: { type: 'P2', lowered: 'vec2', provenance: 'declared' },
+    });
+    expect(call.code).toContain('_fn_ir_u0_norm2(q)');
+    expect(call.preamble).toContain('float _fn_ir_u0_norm2(vec2 ');
+    expect(glsl('q').code).toBe('q');
+  });
+
+  test('the field order and integer lane come from the declaration', () => {
+    const json = ['Field', 'mixed', "'k'"];
+    const r = compile(ce.box(json), { fallback: false });
+    expect(r.run!({ mixed: { x: 0.5, k: 7 } })).toBe(7);
+    expect(glsl(json).code).toBe('mixed[int(0.0)]');
+  });
+
+  test('a compiled lambda accepts a named tuple as a positional object', () => {
+    const lambda = ce.box(['Function', field, ['Typed', 'q', "'P2'"]]);
+    const r = compile(lambda, { fallback: false });
+    expect(r.calling).toBe('lambda');
+    expect(r.run!({ x: 3, y: 4 })).toBe(3);
+  });
+
+  test('a transparent alias keeps the underlying nominal type at a call', () => {
+    const call = ['norm2', 'aliasPoint'];
+    const r = compile(ce.box(call), { fallback: false });
+    expect(r.run!({ aliasPoint: { x: 3, y: 4 } })).toBe(25);
+    expect(glsl(call).freeSymbolTypes?.aliasPoint).toMatchObject({
+      type: 'PointAlias',
+      lowered: 'vec2',
+    });
+  });
+
+  test('other records and unsupported modes decline', () => {
+    for (const to of ['javascript', 'glsl'] as const)
+      expect(() => compile(ce.box('labels'), { to, fallback: false })).toThrow(
+        'the input labels of type S2'
+      );
+    expect(() =>
+      compile(ce.box(field), { to: 'interval-js', fallback: false })
+    ).toThrow('the input q of type P2');
+    expect(() =>
+      compile(ce.box(field), { mode: 'bigint', fallback: false })
+    ).toThrow('the input q of type P2');
+  });
+});
 
 describe('A VALUE OF A NOMINAL TUPLE TYPE OF NUMBERS IS A VECTOR', () => {
   test('P2: the constructor, a field read and the result type', () => {
@@ -208,7 +281,6 @@ describe('THE DECLINES', () => {
       ['Five', 'x', 'x', 'x', 'x', 'x'],
       `a value of the type Five, a record of 5 fields, not two to four: ${vector}`,
     ],
-    ['an input declared P2 (CE-1871)', ['Field', 'q', "'x'"], 'the input q of type P2'],
     ['a list of P2 values', ['List', P, Q], 'a list of records'],
     [
       'a dictionary',

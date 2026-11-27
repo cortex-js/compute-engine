@@ -87,6 +87,8 @@ export type Syntax = {
   /** The value of an input or a positional parameter of the entry of type
    *  `type`, from its read `text`. Absent: the read. */
   read?(text: string, type: IRType): string;
+  /** Read a host record once into the representation used inside functions. */
+  recordInput?(text: string, fields: readonly string[]): string;
   /** The statements of the entry, from the printed ones. Absent: those. */
   entry?(body: string[]): string[];
   list(elements: string[], type: IRType): string;
@@ -322,11 +324,9 @@ export function printProgram(
   let decided = false;
   const entry = entryOf(p);
   const positional = entry.positional ?? 0;
-  // The length of the first row of a matrix input (`IRFunction.widthOf`),
-  // with its text: a statement at the start of the entry when the body
-  // reads it (`widthsRead`), so that it is read once.
-  const widths = new Map<V, string>();
-  const widthsRead = new Set<V>();
+  // Input conversions read once at the start of the entry when used.
+  const inputBindings = new Map<V, string>();
+  const inputsRead = new Set<V>();
   entry.body.params.forEach((v, k) => {
     const name = entry.paramNames[k];
     const part = entry.partOf?.[k];
@@ -336,19 +336,24 @@ export function printProgram(
         : syntax.input(name, k);
     const input = part === undefined ? whole : syntax.part!(whole, part);
     if (entry.lengthOf[k] && entry.widthOf?.[k] === true) {
-      widths.set(v, syntax.width!(input));
+      inputBindings.set(v, syntax.width!(input));
+      return;
+    }
+    const t = p.types[v];
+    if (t.lane === 'record' && t.names !== undefined && syntax.recordInput) {
+      inputBindings.set(v, syntax.recordInput(input, t.names));
       return;
     }
     names.set(
       v,
       entry.lengthOf[k]
         ? syntax.length(input)
-        : (syntax.read?.(input, p.types[v]) ?? input)
+        : (syntax.read?.(input, t) ?? input)
     );
   });
   const type = (v: V): IRType => p.types[v];
   const name = (v: V): string => {
-    if (widths.has(v)) widthsRead.add(v);
+    if (inputBindings.has(v)) inputsRead.add(v);
     return names.get(v) ?? `v${v}`;
   };
   /** The text of the value of `v` at a use. */
@@ -793,8 +798,8 @@ export function printProgram(
   // The entry first: `order` follows `p.functions`, whose first is the entry.
   const statements = returned(entry);
   const main = [
-    ...[...widths]
-      .filter(([v]) => widthsRead.has(v))
+    ...[...inputBindings]
+      .filter(([v]) => inputsRead.has(v))
       .map(([v, text]) => '  ' + syntax.declare(type(v), `v${v}`, text)),
     ...statements,
   ];

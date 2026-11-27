@@ -202,7 +202,11 @@ import {
 import { MATRIX_HEADS, matrixLowering } from './lower-matrices.js';
 import { matchLowering } from './lower-match.js';
 import { protocolLowering } from './lower-protocols.js';
-import { recordConstructor, recordLowering } from './lower-records.js';
+import {
+  numericRecordInput,
+  recordConstructor,
+  recordLowering,
+} from './lower-records.js';
 import {
   arrayCells,
   arrayIRType,
@@ -5138,6 +5142,10 @@ function lowerOnce(
   const sameInput = (ir: IRType, t: Type): boolean => {
     if (ir.lane === 'array')
       return arrayIRType(t)?.array?.cell === ir.array?.cell;
+    if (ir.lane === 'record') {
+      const record = numericRecordInput(ce, t);
+      return record !== undefined && sameFields(ir, record);
+    }
     const x = inputIR(t) ?? rowsInput(t);
     return (
       x !== undefined &&
@@ -5182,6 +5190,15 @@ function lowerOnce(
       if (positional) b.positional += 1;
       frames[0].names.set(name, { v, role: positional ? 'index' : 'input' });
       return v;
+    }
+    if (javascript || (options.glsl && cx.wide !== 'complex')) {
+      const record = numericRecordInput(ce, t);
+      if (record !== undefined) {
+        const v = b.param(name, record);
+        if (positional) b.positional += 1;
+        frames[0].names.set(name, { v, role: positional ? 'index' : 'input' });
+        return v;
+      }
     }
     const ir = positional
       ? (textInput(t) ?? tupleOrInputType(t, cx.wide) ?? rowsInput(t))
