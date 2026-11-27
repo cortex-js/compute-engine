@@ -1663,9 +1663,12 @@ function lowerOnce(
         // after the check of their lengths.
         const out =
           tuple === undefined && r.threads && !lanes.includes('list')
-            ? matrices.elementwise(node, operands, operation)
+            ? matrices.elementwise(node, operands, operation, elementAt)
             : undefined;
-        if (out !== undefined) return out;
+        if (out !== undefined) {
+          elementsOf.set(out.value, out.at);
+          return out.value;
+        }
         decline(node, 'lists of different lengths or ranks');
       }
       // Flat lists whose lengths are not one value or equal constants: on
@@ -1715,17 +1718,20 @@ function lowerOnce(
   };
 
   /** The element at each index of a build of `apply()` of lists whose
-   *  lengths are compared at run time (`agree()` of `lower-lists.ts`). */
-  const elementsOf = new Map<V, (k: V) => V>();
-  /** The element at the index `k` of the flat list `v`, an operand of such
-   *  a build: of an element-wise operation of lists of its length (a row
-   *  that threads, with no effect), or of such a build, the operation on
-   *  the elements at `k`, so that the build computes each element once, as
-   *  one element-wise operation does with the operations of its shape that
-   *  it reads (`fuses()` of `print.ts`); of another list, its element. */
-  const elementAt = (v: V, k: V): V => {
+   *  lengths are compared at run time (`agree()` of `lower-lists.ts`), and
+   *  at each row and column of a build of `elementwise()` of
+   *  `lower-matrices.ts`: one index for each axis of the build. */
+  const elementsOf = new Map<V, (...ks: V[]) => V>();
+  /** The element at the indices `ks` of the list `v` (one for each of its
+   *  first axes), an operand of such a build: of an element-wise operation
+   *  of lists of its shape (a row that threads, with no effect), or of such
+   *  a build, the operation on the elements at `ks`, so that the build
+   *  computes each element once, as one element-wise operation does with
+   *  the operations of its shape that it reads (`fuses()` of `print.ts`);
+   *  of another list, its element. */
+  const elementAt = (v: V, ...ks: V[]): V => {
     const made = elementsOf.get(v);
-    if (made !== undefined) return made(k);
+    if (made !== undefined && made.length === ks.length) return made(...ks);
     const d = b.defs.get(v);
     const row = d === undefined ? undefined : rowOfOp(rows, d.op)?.row;
     if (
@@ -1739,11 +1745,12 @@ function lowerOnce(
           (!tuples.has(a) && same(type(a).shape, type(v).shape))
       )
     )
-      return lists.listSource(v).at(k);
+      return ks.reduce((x, k) => lists.listSource(x).at(k), v);
+    const t = type(v);
     return b.op(
       d.op,
-      d.args.map((a) => (type(a).shape.length > 0 ? elementAt(a, k) : a)),
-      elementType(type(v))
+      d.args.map((a) => (type(a).shape.length > 0 ? elementAt(a, ...ks) : a)),
+      { lane: t.lane, shape: t.shape.slice(ks.length) }
     );
   };
 

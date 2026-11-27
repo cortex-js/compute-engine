@@ -1072,6 +1072,25 @@ describe('element-wise operations of matrices', () => {
     expect(code.match(/new Array\(/g)).toHaveLength(2);
   });
 
+  // An operand that is itself an operation on the elements is read at each
+  // element, not built: one nest of loops.
+  // prettier-ignore
+  test.each([
+    ['2·X + Y', ['Add', ['Multiply', 2, 'X'], 'Y']],
+    ['(X + Y)·2 − W', ['Subtract', ['Multiply', ['Add', 'X', 'Y'], 2], 'W']],
+    ['Sin(X) + Y', ['Add', ['Sin', 'X'], 'Y']],
+  ])('%s: one nest of loops', (_, json) => {
+    const r = run(json);
+    expect(r.code.match(/new Array\(/g)).toHaveLength(2);
+    for (const g of EQUAL.slice(0, 4)) {
+      const p = at(g);
+      expect(agree(r.run!(p as never), value(json, p))).toBe(true);
+    }
+    const p = at([[[1, 2]], [[1, 2, 3]], [[1, 2]]]);
+    expect(value(json, p)).toBe('error');
+    expect(() => r.run!(p as never)).toThrow(RangeError);
+  });
+
   // A comparison gives a matrix of booleans.
   // prettier-ignore
   test.each([

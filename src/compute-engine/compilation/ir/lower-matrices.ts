@@ -169,13 +169,19 @@ export function matrixLowering(
    *  before the builds where it is not proved (`agreedLength()` of
    *  `lower-lists.ts`, the check of two flat lists): the interpreter's
    *  value of matrices of two sizes is the error `incompatible-dimensions`.
-   *  `undefined` for other operands, for two constant lengths that differ,
-   *  and on a target that compares no length at run time. */
+   *  `element(v, i, j)` reads the element of an operand at a row and a
+   *  column, so that an operand that is itself an operation on elements is
+   *  computed there and not built (`2·A + B` is one build of builds); `at`
+   *  is the element of the value at `(i, j)`, read the same way by a
+   *  later operation. `undefined` for other operands, for two constant
+   *  lengths that differ, and on a target that compares no length at run
+   *  time. */
   const elementwise = (
     e: Expression,
     given: V[],
-    f: (xs: V[]) => V
-  ): V | undefined => {
+    f: (xs: V[]) => V,
+    element: (v: V, i: V, j: V) => V
+  ): { value: V; at: (i: V, j: V) => V } | undefined => {
     const matrices = given.filter((v) => type(v).shape.length > 0);
     if (
       !lists.checks ||
@@ -195,18 +201,15 @@ export function matrixLowering(
     const [n, w] = axes.map((lengths) =>
       lengths.reduce((x, y) => lists.agreedLength(e, x, y)!)
     );
+    const elementAt = (i: V, j: V): V =>
+      f(given.map((v) => (type(v).shape.length > 0 ? element(v, i, j) : v)));
     const [i, j] = [0, 1].map(() => b.newValue(scalarType('integer')));
     const row = () =>
-      cx.region(
-        'build',
-        [w],
-        [j],
-        () => [
-          f(given.map((v) => (type(v).shape.length > 0 ? at(at(v, i), j) : v))),
-        ],
-        e
-      )[0];
-    return cx.region('build', [n], [i], () => [row()], e)[0];
+      cx.region('build', [w], [j], () => [elementAt(i, j)], e)[0];
+    return {
+      value: cx.region('build', [n], [i], () => [row()], e)[0],
+      at: elementAt,
+    };
   };
 
   /** `Determinant`, `Inverse` and `MatrixPower` of `m`, a matrix of a size

@@ -81,6 +81,14 @@
   arm, where the interpreter gives a value. GLSL, the interval target and
   the `bigint` mode compare no length.
 
+### Performance
+
+- **Compiled JavaScript computes a nested operation on the elements of
+  matrices of run-time size in one pass.** With `A, B: matrix<real>`,
+  `2A + B` built the matrix `2A`, then the sum; it now computes
+  `2·A[i][j] + B[i][j]` at each element and allocates only the result. So
+  do `(A + B)·2 − C` and `Sin(A) + B`. The values are not changed.
+
 ## 0.202.0 _2026-11-26_
 
 ### Breaking Changes
