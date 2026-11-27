@@ -226,6 +226,10 @@
 
 ### Performance
 
+- **Compiled JavaScript reuses a shared matrix in a later element-wise
+  computation.** With `B = Sin(M + A)`, both `(B, B + Q)` and
+  `MatrixMultiply(B, B + Q)` compute the sine once per element of `B`.
+
 - **The IR compiler emits smaller JavaScript loops and GLSL expressions.**
   JavaScript uses a single counted loop for eligible constant ranges of up to
   1024 iterations. GLSL uses native arithmetic for eligible short numeric

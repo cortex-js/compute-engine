@@ -440,6 +440,8 @@ export type Lowering = {
    *  `rows` whose count and row length are its two lengths (`rows.of`, the
    *  same array of arrays). */
   rowsOfMatrix(v: V): V;
+  /** Let a later operand read a matrix that the current consumer uses whole. */
+  withMaterializedMatrices<T>(f: (keep: (v: V) => void) => T): T;
   /** Apply the row `r`, or the row of the library head of that name, to
    *  `args`. */
   apply(node: Expression, r: OperatorRow | string, args: V[]): V;

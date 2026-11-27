@@ -269,7 +269,11 @@ export function matrixLowering(
    *  product of two vectors, each entry the sum from 0 of the products in
    *  the order of the inner index. */
   const product = (e: Fn): V => {
-    const [a, c] = e.ops.map((x) => numbers(e, x));
+    const a = numbers(e, e.ops[0]);
+    const c = cx.withMaterializedMatrices((keep) => {
+      keep(a);
+      return numbers(e, e.ops[1]);
+    });
     const [sa, sc] = [type(a).shape, type(c).shape];
     if (sa.length === 0 || sc.length === 0)
       decline(e, 'MatrixMultiply of a scalar');

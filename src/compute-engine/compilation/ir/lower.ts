@@ -1732,6 +1732,24 @@ function lowerOnce(
    *  at each row and column of a build of `elementwise()` of
    *  `lower-matrices.ts`: one index for each axis of the build. */
   const elementsOf = new Map<V, (...ks: V[]) => V>();
+
+  // The consumer needs these values whole. Lower its later operands in
+  // order so a fused build can read the same matrix instead of recomputing it.
+  let materializedMatrices = new Set<V>();
+  const withMaterializedMatrices: Lowering['withMaterializedMatrices'] = (f) => {
+    const previous = materializedMatrices;
+    materializedMatrices = new Set(previous);
+    try {
+      return f((v) => {
+        const shape = type(v).shape;
+        if (shape.length === 2 && shape.some((n) => typeof n !== 'number'))
+          materializedMatrices.add(v);
+      });
+    } finally {
+      materializedMatrices = previous;
+    }
+  };
+
   /** The element at the indices `ks` of the list `v` (one for each of its
    *  first axes), an operand of such a build: of an element-wise operation
    *  of lists of its shape (a row that threads, with no effect), or of such
@@ -1740,11 +1758,13 @@ function lowerOnce(
    *  the operations of its shape that it reads (`fuses()` of `print.ts`);
    *  of another list, its element. */
   const elementAt = (v: V, ...ks: V[]): V => {
-    const made = elementsOf.get(v);
+    const reuse = ks.length === 2 && materializedMatrices.has(v);
+    const made = reuse ? undefined : elementsOf.get(v);
     if (made !== undefined && made.length === ks.length) return made(...ks);
     const d = b.defs.get(v);
     const row = d === undefined ? undefined : rowOfOp(rows, d.op)?.row;
     if (
+      reuse ||
       d === undefined ||
       row?.threads !== true ||
       row.effect !== 'pure' ||
@@ -2634,7 +2654,16 @@ function lowerOnce(
         // Missing))` is False).
         if (e.ops.some((op) => isSymbol(op, 'Missing')))
           decline(e, 'Missing as a coordinate of a tuple');
-        const parts = e.ops.map((op) => value(op)!);
+        const parts =
+          e === rootTuple
+            ? withMaterializedMatrices((keep) =>
+                e.ops.map((op) => {
+                  const v = value(op)!;
+                  keep(v);
+                  return v;
+                })
+              )
+            : e.ops.map((op) => value(op)!);
         const t = parts.map(type);
         // A root `Tuple` (or the last operand of a root `Block`) of tuples
         // or of elements not of one shape (`Tuple(H)` of a list of run-time
@@ -8278,6 +8307,7 @@ function lowerOnce(
     wholeRows,
     asMatrix,
     rowsOfMatrix,
+    withMaterializedMatrices,
     rowsParams,
     root,
     heldParams: new Set<V>(),

@@ -2738,7 +2738,10 @@ place and on the scalar operands. An operand is read at that place by
 `elementAt()` of `lower.ts`, as for flat lists: an operand that is itself an
 operation on elements (a row that threads, with no effect, of operands of its
 shape) or a build of `elementwise()` is the operation on its elements there, and
-is not built, so `2·A + B` and `(A + B)·2 − C` are one build of builds. Each of
+is not built, so `2·A + B` and `(A + B)·2 − C` are one build of builds. If
+an earlier operand of a returned tuple or the left operand of a matrix
+product already uses that matrix whole, a later element-wise operation
+reads the materialized cells. Each of
 the two lengths of the result is the length of two flat lists that an operation
 reads at each index (`agreedLength()` of `lower-lists.ts`, "Lists"): the length
 plus the value 0 of the check `rows.agree`, which throws a `RangeError`

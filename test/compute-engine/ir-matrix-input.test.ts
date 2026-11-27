@@ -451,6 +451,32 @@ describe('a matrix input: operations on its elements', () => {
     expect(r.code.match(/new Array\(/g)).toHaveLength(2);
   });
 
+  test('sharing a materialized matrix computes its elements once', () => {
+    const b = ['Sin', ['Add', 'M', 'A']];
+    const c = ['Add', b, 'Q'];
+    const M = [[1, 2], [3, 4]];
+    const A = [[0.5, -0.5], [0.25, -0.25]];
+    const Q = [[2, 3], [4, 5]];
+    const B = M.map((row, i) => row.map((x, j) => Math.sin(x + A[i][j])));
+    const C = B.map((row, i) => row.map((x, j) => x + Q[i][j]));
+    const product = B.map((row) =>
+      Q[0].map((_, j) => row.reduce((s, x, k) => s + x * C[k][j], 0))
+    );
+    for (const [json, expected, arrays] of [
+      [c, C, 2],
+      [['Tuple', b, c], [B, C], 6],
+      [['MatrixMultiply', b, c], product, 8],
+    ] as const) {
+      const r = compile(box(json), { fallback: false });
+      expect(r.code.match(/Math\.sin\(/g)).toHaveLength(1);
+      expect(r.code.match(/new Array\(/g)).toHaveLength(arrays);
+      expect(r.run!({ M, A, Q } as never)).toEqual(expected);
+      expect(() => r.run!({ M, A, Q: Q.slice(1) } as never)).toThrow(
+        /incompatible-dimensions/
+      );
+    }
+  });
+
   // A check runs only where the interpreter evaluates the operation: a loop
   // of no pass compares nothing.
   test('in a loop of no pass', () => {
