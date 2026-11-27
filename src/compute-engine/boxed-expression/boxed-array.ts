@@ -592,6 +592,7 @@ export class BoxedArray extends _BoxedExpression implements ArrayInterface {
     this._markListed(false);
     const caller = fetching;
     const held = this._cells;
+    // eslint-disable-next-line @typescript-eslint/no-this-alias
     fetching = this;
     try {
       fetch(this);

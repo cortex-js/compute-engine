@@ -220,7 +220,6 @@ import {
   cellProductOperandIsValue,
   holdsExactNonInteger,
   nKeepingExactCells,
-  isExactRationalLiteral,
 } from '../boxed-expression/arithmetic-mul-div.js';
 import {
   INTEGER_CLAUSE_ROLE,
