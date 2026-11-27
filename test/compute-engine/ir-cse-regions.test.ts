@@ -87,9 +87,11 @@ describe('merged: one loop, the interpreter’s value', () => {
     expect(count(r.code, /Math\.sin/g)).toBe(1);
   });
 
-  test('a filter written twice', () => {
+  test('two reductions share a filter without building the filtered list', () => {
     const r = check(['Add', ['Sum', POSITIVE], ['Max', POSITIVE]]);
-    expect(count(r.code, /\.push\(/g)).toBe(1);
+    expect(r.code).not.toContain('.push(');
+    expect(count(r.code, /0 < _\.P\[/g)).toBe(1);
+    expect(count(r.code, /\bif \(\w+\[\w+\]\)/g)).toBe(1);
   });
 
   test('a build with a loop in its body, written twice', () => {

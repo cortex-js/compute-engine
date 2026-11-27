@@ -351,12 +351,6 @@ describe('a view that stays a list', () => {
     expect(arrays(filtered)).toBe(1);
   });
 
-  test('a view that a loop reads at an index other than its own', () => {
-    // The loop of `Sum` reads the element `n - 1 - i` of the `Map`.
-    const code = agrees('sum(reverse(map(x => x * 2, L)))');
-    expect(arrays(code)).toBe(1);
-  });
-
   test('a callback with a draw', () => {
     const { code } = compiled('first(map(x => x + random(), L))');
     expect(arrays(code)).toBe(1);
@@ -451,4 +445,10 @@ describe('a view that stays a list', () => {
       ]),
     ]);
   });
+});
+
+test('a reduction reads a reversed map in one loop without a list', () => {
+  const code = agrees('sum(reverse(map(x => x * 2, L)))');
+  expect(arrays(code)).toBe(0);
+  expect(loops(code)).toBe(1);
 });

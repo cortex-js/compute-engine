@@ -258,6 +258,14 @@ describe('IR profile, batch G18: Apply of a literal over a list (CE-1344)', () =
   });
 });
 
+// prettier-ignore
+const scalarReductions: [string, Json][] = [
+  ['a filter reduction', ['Sum', ['Filter', 'L', ['Function', ['Less', 'k', 2], 'k']]]],
+  ['a range of 65 elements', ['Sum', ['Map', W, ['Range', 1, 65]]]],
+  ['an empty range', ['Sum', ['Map', W, ['Range', 3, 1, 1]]]],
+  ['a list of 65 elements', ['Sum', ['Map', W, ['List', ...Array.from({ length: 65 }, (_, i) => ['Add', 'x', i])]]]],
+];
+
 describe('IR profile, batch G18: Map of a list of a constant length on GLSL', () => {
   // prettier-ignore
   test.each([
@@ -278,6 +286,7 @@ describe('IR profile, batch G18: Map of a list of a constant length on GLSL', ()
     ['a Map over a Range of a negative step', ['At', ['Map', W, ['Range', 10, 1, -3]], 2]],
     ['a user function of a scalar parameter over a literal list', ['Sum', ['g', LIST3]]],
     ['a user function of a scalar parameter over a list<real^3>', ['At', ['g', 'L'], 2]],
+    ...scalarReductions,
   ])('%s compiles', (_, json) => {
     expect(glsl(json)).toMatchObject({ success: true, profile: 'ir' });
     check(json, POINTS);
@@ -312,14 +321,10 @@ describe('IR profile, batch G18: Map of a list of a constant length on GLSL', ()
   // prettier-ignore
   test.each([
     ['a list of run-time length', ['Sum', ['Map', W, 'D']], /it needs a stated length/],
-    ['a Filter', ['Sum', ['Filter', 'L', ['Function', ['Less', 'k', 2], 'k']]], /the region filter/],
     ['a Range of a run-time length', ['Sum', ['Map', W, ['Range', 1, 'n']]], /rangecount/],
-    ['a Range of more than 64 elements', ['Sum', ['Map', W, ['Range', 1, 65]]], /the region build/],
-    ['a Range of no element', ['Sum', ['Map', W, ['Range', 3, 1, 1]]], /the region build/],
     ['a Range of real operands', ['Sum', ['Map', W, ['Range', 0.5, 3.7]]], /the region build/],
     ['a Range of a real step', ['Sum', ['Map', W, ['Range', 1, 2, 0.25]]], /the region build/],
     ['a Comprehension of two clauses', ['Sum', ['Comprehension', ['Multiply', 'k', 'j'], ['Element', 'k', 'L'], ['Element', 'j', 'L']]], /the region build/],
-    ['a list of more than 64 elements', ['Sum', ['Map', W, ['List', ...Array.from({ length: 65 }, (_, i) => ['Add', 'x', i])]]], /the region build/],
     ['a draw', ['Map', ['Function', ['Add', 'k', ['Random']], 'k'], 'L'], /Random/],
   ])('%s declines', (_, json, cause) => {
     expect(failure(() => glsl(json))).toMatch(cause);
@@ -450,6 +455,7 @@ function chromiumAvailable(): boolean {
       ['a user function over a literal list', ['Sum', ['g', LIST3]]],
       ['a user function over a list<real^3>', ['At', ['g', 'L'], 2]],
       ['a user function over a list of 6', ['Sum', ['g', LIST6]]],
+      ...scalarReductions,
     ];
 
     test.each(programs)(

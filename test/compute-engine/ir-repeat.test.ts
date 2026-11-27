@@ -328,14 +328,14 @@ describe('the declines', () => {
     );
   });
 
-  test('on GLSL, a run-time count and a list of no element', () => {
+  test('on GLSL, an unbounded run-time count declines', () => {
     expect(failure(() => glsl(['Sum', ['Repeat', 'x', 'n']]))).toMatch(
       /rangecount \(the operation rangecount\) on glsl/
     );
-    // As for `Map` over an empty `Range`.
-    expect(failure(() => glsl(['Sum', ['Repeat', 'x', 0]]))).toMatch(
-      /the region build \(a Map, a Filter or a Range\) on glsl/
-    );
+  });
+
+  test('on GLSL, the sum of zero repeats compiles', () => {
+    expect(glsl(['Sum', ['Repeat', 'x', 0]]).success).toBe(true);
   });
 });
 
@@ -434,6 +434,7 @@ function shader(r: ReturnType<typeof glsl>): string {
 }
 
 const GLSL_PROGRAMS: Json[] = [
+  ['Sum', ['Repeat', 'x', 0]],
   ['Sum', ['Repeat', ['Add', ['Multiply', -0.06, ['Power', 'x', 2]], 4], 4]],
   ['Sum', ['Repeat', -1, 2]],
   ['At', ['Repeat', ['Sin', 'x'], 3], 2],

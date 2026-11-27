@@ -116,7 +116,7 @@ describe('Tycho item 216: point calls use shared helpers where supported', () =>
     expect(out.value.hi).toBeCloseTo(14, 9);
   });
 
-  test('unsupported interval bodies, list arguments and recursive shaders still decline', () => {
+  test('unsupported interval bodies and shader list arguments still decline', () => {
     const ce = engine();
     ce.declare('L', 'list<number>');
     // `Zeta` has no interval lowering, and the call is not inlined either:
@@ -125,10 +125,17 @@ describe('Tycho item 216: point calls use shared helpers where supported', () =>
     for (const [latex, to] of [
       [String.raw`z((x,y))`, 'interval-js'],
       [String.raw`f(L)`, 'glsl'],
-      [String.raw`\operatorname{rec}(3)`, 'glsl'],
     ] as const) {
       const r = code(ce, latex, to);
       expect(typeof r).toBe('object');
     }
+  });
+
+  test('a bounded recursive shader compiles to a loop', () => {
+    const ce = engine();
+    const expr = ce.parse(String.raw`\operatorname{rec}(3)`);
+    expect(expr.evaluate().re).toBe(3);
+    const result = compile(expr, { to: 'glsl', fallback: false });
+    expect(result.preamble?.match(/for \(int /g)).toHaveLength(1);
   });
 });
