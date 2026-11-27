@@ -39,10 +39,12 @@ import {
 import {
   isDictionary,
   isFunction,
+  isMutableArray,
   isNumber,
   isString,
   isSymbol,
 } from '../compute-engine/boxed-expression/type-guards.js';
+import { containsObject } from '../compute-engine/boxed-expression/object-walk.js';
 import { isDeclarationTypeErrorValue } from '../compute-engine/boxed-expression/type-compatibility-error.js';
 import { listedElement } from '../compute-engine/boxed-expression/listed-element.js';
 import { protocolExtendsConflicts } from '../compute-engine/engine-protocols.js';
@@ -1027,7 +1029,7 @@ function* executeEpsilSteps(
     walkValue(walkFailure, () =>
       scanUnknownFunctions(
         ce,
-        value.json,
+        diagnosticCallTree(value),
         reportedUnknowns,
         diagnostics,
         stmt,
@@ -1040,7 +1042,7 @@ function* executeEpsilSteps(
       walkValue(walkFailure, () =>
         scanUnknownFunctions(
           ce,
-          boxedStmt.json,
+          diagnosticCallTree(boxedStmt),
           reportedUnknowns,
           diagnostics,
           stmt,
@@ -2734,6 +2736,15 @@ function scanConstantShadowingParams(
   }
   for (const op of operands(expr))
     scanConstantShadowingParams(ce, op, reported, diagnostics, stmt, source);
+}
+
+/** Preserve the call tree while treating mutable array cells as stored data. */
+function diagnosticCallTree(expr: Expression): MathJsonExpression {
+  if (!containsObject(expr)) return expr.json;
+  return expr.toMathJson({
+    prettify: false,
+    objects: (value) => (isMutableArray(value) ? 0 : undefined),
+  });
 }
 
 /**

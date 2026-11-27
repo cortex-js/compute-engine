@@ -148,6 +148,11 @@
 
 ### Performance
 
+- **Epsil skips mutable array cells when checking statement results for
+  unknown calls.** A top-level binding such as `let board = hostArray()`
+  no longer serializes every cell for diagnostics, including when a tuple
+  holds the array. Calls written in the source still receive diagnostics.
+
 - **Compiled JavaScript computes a nested operation on the elements of
   matrices of run-time size in one pass.** With `A, B: matrix<real>`,
   `2A + B` built the matrix `2A`, then the sum; it now computes

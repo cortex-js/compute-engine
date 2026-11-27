@@ -1,4 +1,5 @@
 import { ComputeEngine } from '../../src/compute-engine';
+import { isMutableArray } from '../../src/compute-engine/boxed-expression/type-guards';
 import { executeEpsil, executeEpsilAsync } from '../../src/epsil/execute-epsil';
 
 // An unknown call stays an inert application. The did-you-mean warning
@@ -21,6 +22,38 @@ function run(
 }
 
 describe('unknown call that does not reach the result', () => {
+  test.each([
+    ['synchronous', executeEpsil],
+    ['asynchronous', executeEpsilAsync],
+  ] as const)('%s diagnostics skip stored array cells', async (_name, execute) => {
+    const ce = new ComputeEngine();
+    const setup = executeEpsil(ce, `
+type alias Byte = integer<0..255>
+type Pixel = tuple<r: Byte, g: Byte, b: Byte, a: Byte>
+type Frame = tuple<pixels: array<Pixel>, id: integer>
+`);
+    expect(setup.diagnostics).toEqual([]);
+    const pixels = ce.array(new Uint8Array(4 * 128), 'Pixel');
+    if (!isMutableArray(pixels)) throw new Error('Expected an array');
+    const readCell = jest.spyOn(pixels, '_peek');
+    ce.declare('hostArray', {
+      signature: '() -> array<Pixel>',
+      pure: false,
+      evaluate: () => pixels,
+    });
+    const result = await execute(ce, `
+let direct = hostArray()
+let nested = Frame(hostArray(), 4)
+function unresolved() { rnage(1) }
+1
+`);
+    expect(result.value.json).toBe(1);
+    expect(result.diagnostics.map((d) => d.message)).toEqual([
+      ['unknown-function', 'rnage', 'Range'],
+    ]);
+    expect(readCell).not.toHaveBeenCalled();
+  });
+
   test('the source of a for loop', () => {
     expect(run('for i in range(1, 3) { i }')).toEqual({
       value: 'Nothing',
