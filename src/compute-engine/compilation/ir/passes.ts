@@ -57,6 +57,7 @@ import {
   literalKey,
   mapDirectArgs,
   mapLengths,
+  nativeVectorArithmetic,
   outsOf,
   recursiveFunctions,
   regionsOf,
@@ -110,6 +111,10 @@ export type PassOptions = {
   staticForward?: boolean;
   /** Lower bounded self-recursion to a shader loop. */
   shaderRecurrences?: boolean;
+  /** Keep GLSL arithmetic on native vectors during scalarization. */
+  nativeVectors?: boolean;
+  /** Use a proved shader loop index directly in a fixed-length list. */
+  shaderIndices?: boolean;
   /** Combine independent reductions with identical bounds. */
   fuseLoops?: boolean;
   dce?: boolean;
@@ -187,7 +192,12 @@ export function runPasses(
   }
   if (options.scalarize || short > 0)
     run('scalarize', (q, r) =>
-      scalarize(q, r, options.scalarize ? SCALARIZE_LIMIT : short)
+      scalarize(
+        q,
+        r,
+        options.scalarize ? SCALARIZE_LIMIT : short,
+        options.nativeVectors
+      )
     );
   // The budget of `inline` (`INLINE_BUDGET`) bounds the growth of the
   // program since the passes started, measured before `inline` in each
@@ -238,6 +248,8 @@ export function runPasses(
     options.dce
   )
     run('dce', dce);
+  if (options.shaderIndices && has((i) => i.k === 'op' && i.op === 'at'))
+    run('shader indices', shaderIndices);
   return p;
 }
 
@@ -346,6 +358,59 @@ function atToElem(
   return out;
 }
 
+/** A GLSL loop with literal integer bounds supplies an exact float index
+ *  through 2^24. Keep the proof local to its body, and leave all other
+ *  reads on the checked `At` path. */
+const shaderIndices: Pass = (p) => {
+  const { def } = useIndex(p);
+  const upper = new Map<V, number>();
+  const plan = new Set<Instr>();
+  const constant = (v: V) => {
+    const d = def.get(v);
+    return d?.k === 'const' ? d.value.value : undefined;
+  };
+  const walk = (r: Region) => {
+    for (const i of r.body) {
+      if (i.k === 'loop') {
+        const lo = constant(i.lo);
+        const hi = constant(i.hi);
+        if (
+          typeof lo === 'number' &&
+          typeof hi === 'number' &&
+          Number.isInteger(lo) &&
+          Number.isInteger(hi) &&
+          lo >= 1 &&
+          hi >= lo &&
+          hi <= 2 ** 24
+        )
+          upper.set(i.body.params[0], hi);
+      } else if (i.k === 'op' && i.op === 'at') {
+        const [list, index] = i.args;
+        const limit = upper.get(index);
+        const n = p.types[list].shape[0];
+        if (limit !== undefined && typeof n === 'number' && limit <= n)
+          plan.add(i);
+      }
+      regionsOf(i).forEach(walk);
+      if (i.k === 'loop') upper.delete(i.body.params[0]);
+    }
+  };
+  p.functions.forEach((f) => walk(f.body));
+  if (plan.size === 0) return { changed: false, resolve: (v) => v };
+  return rewrite(p, (i) => {
+    if (i.k !== 'op' || !plan.has(i)) return undefined;
+    const [list, index] = i.args;
+    const j = fresh(p, scalarType('integer'));
+    const out: Instr[] = [];
+    const one = integer(p, 1, out);
+    out.push(
+      { k: 'op', out: j, op: 'sub.int', args: [index, one] },
+      { k: 'op', out: i.out, op: 'elem', args: [list, j] }
+    );
+    return out;
+  });
+};
+
 /** Whether the operation `op` applies to each element of a list result. */
 const threads = (rows: readonly OperatorRow[], op: string) =>
   rowOfOp(rows, op)?.row.threads === true;
@@ -386,10 +451,12 @@ const count = (t: IRType): number =>
 const scalarize = (
   p: Program,
   rows: readonly OperatorRow[],
-  limit: number
+  limit: number,
+  nativeVectors = false
 ): ReturnType<Pass> =>
   rewrite(p, (i, { constants }) => {
     if (i.k !== 'op') return undefined;
+    if (nativeVectors && nativeVectorArithmetic(p, i)) return undefined;
     const at = atToElem(p, i, constants);
     if (at !== undefined) return at;
     const t = p.types[i.out];

@@ -2764,7 +2764,8 @@ describe('a literal value is read with no N() (CE-1065)', () => {
         }).code;
       })
     ).toBe(0);
-    expect(code).toMatch(/^vec2\(/);
+    expect(code).toMatch(/^vec2 (v\d+) = vec2\(2\.64, 17\.0\);/);
+    expect(code).toMatch(/return \(v\d+ \* t\);/);
     const literal = ce.box(['Add', 't', ['List', 1.5, 2, 3]]);
     const list = literal.ops![1];
     let r: CompilationResult<'javascript'> | undefined;

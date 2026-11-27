@@ -531,6 +531,7 @@ const cellReads = (op: string, helper: string) => ({
 });
 
 export const GLSL: Syntax = deepFreeze({
+  nativeVectors: true,
   ops: {
     ...ARITHMETIC,
     'div.q': { text: '_gpu_ir_quot($0, $1)', helpers: ['_gpu_ir_quot'] },

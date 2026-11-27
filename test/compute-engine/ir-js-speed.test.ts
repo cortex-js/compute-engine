@@ -427,6 +427,18 @@ describe('IR profile, batch G15: the count of the passes', () => {
     }
   );
 
+  test('a fixed block emits one loop and charges its entire count after it runs', () => {
+    const program = (end: number) =>
+      js(['Sum', ['Multiply', 'k', 'x'], ['Limits', 'k', 1, end]]);
+    for (const count of [101, 1024]) {
+      const r = program(count);
+      expect(r.code.match(/for \(let /g)).toHaveLength(1);
+      expect(ticksOf(r, { x: 2 })).toEqual([count]);
+      expect(r.run!({ x: 2 } as never)).toBe(count * (count + 1));
+    }
+    expect(ticksOf(program(1025), { x: 2 })).toEqual([1024, 1]);
+  });
+
   test('the count of the runtime stays modulo 1024: from 2^53 it still advances', () => {
     const sys = runtimeOf(ce);
     expect(

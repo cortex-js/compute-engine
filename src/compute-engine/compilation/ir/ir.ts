@@ -348,6 +348,45 @@ export type Sign = 'positive' | 'nonnegative';
 
 export const scalarType = (lane: Lane): IRType => ({ lane, shape: [] });
 
+/** Numeric component-wise operations that GLSL can spell with its native
+ *  vector operators. Keep the arithmetic order and the existing float lane. */
+export function nativeVectorArithmetic(p: Program, i: Instr): boolean {
+  if (
+    i.k !== 'op' ||
+    ![
+      'add',
+      'add.int',
+      'sub',
+      'sub.int',
+      'mul',
+      'mul.int',
+      'neg',
+      'neg.int',
+    ].includes(i.op)
+  )
+    return false;
+  const result = p.types[i.out];
+  const n = result.shape[0];
+  const numeric = (t: IRType) => t.lane === 'real' || t.lane === 'integer';
+  if (
+    !numeric(result) ||
+    result.shape.length !== 1 ||
+    typeof n !== 'number' ||
+    n < 2 ||
+    n > 4
+  )
+    return false;
+  const args = i.args.map((v) => p.types[v]);
+  if (args.some((t) => !numeric(t) || t.storage !== undefined)) return false;
+  const vector = (t: IRType) => t.shape.length === 1 && t.shape[0] === n;
+  if (i.op === 'mul' || i.op === 'mul.int')
+    return (
+      args.filter(vector).length === 1 &&
+      args.every((t) => vector(t) || t.shape.length === 0)
+    );
+  return args.every(vector);
+}
+
 export function entryOf(p: Program): IRFunction {
   return p.functions.find((f) => f.name === p.entry)!;
 }

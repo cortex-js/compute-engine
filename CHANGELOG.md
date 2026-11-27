@@ -195,6 +195,12 @@
 
 ### Performance
 
+- **The IR compiler emits smaller JavaScript loops and GLSL expressions.**
+  JavaScript uses a single counted loop for eligible constant ranges of up to
+  1024 iterations. GLSL uses native arithmetic for eligible short numeric
+  vectors and skips list-index guards when literal loop bounds prove the read
+  is in range.
+
 - **Epsil skips mutable array cells when checking statement results for
   unknown calls.** A top-level binding such as `let board = hostArray()`
   no longer serializes every cell for diagnostics, including when a tuple

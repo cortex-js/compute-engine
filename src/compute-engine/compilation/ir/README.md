@@ -3109,15 +3109,21 @@ more than about 2^25 elements is slower: V8 keeps such a `new Array(n)` as a
 dictionary. A loop or a build adds its passes to the deadline count of the
 runtime with `_SYS.tick(n)`: it runs its passes in blocks of at most 1024, an
 inner `for` in an outer one whose update adds the passes of the block, so no
-pass makes a call and a nest of short loops counts every pass. The count is on
-the deadline frame (on the runtime when the deadline is a number), so it holds
-across calls and re-entrant calls, and the steps charged to a step budget do not
-depend on calls made before the frame; it is kept modulo 1024. Each time it
-crosses a multiple of 1024 (once for a call of more than 1024 passes), `tick`
-checks the deadline (`ce.withTimeLimit()`, or the `deadline` of a runtime
-without an engine) and charges one step. `_SYS.tick()` with no argument counts
-one pass, the spelling of code stored before. A block left by a throw is not
-counted. The `iterationBudget` option follows the rule of `compile()`
+pass makes a call and a nest of short loops counts every pass. Ordinary
+JavaScript emits one counted loop when literal integer bounds fix the count
+at 1024 passes or fewer. This spelling excludes explicit `Loop` passes,
+early exits, windows, and parallel execution. It charges the block after
+completing it.
+
+The count is on the deadline frame (on the runtime when the deadline is a
+number), so it holds across calls and re-entrant calls, and the steps charged
+to a step budget do not depend on calls made before the frame. The count is
+kept modulo 1024. Each time it crosses a multiple of 1024 (once for a call of
+more than 1024 passes), `tick` checks the deadline (`ce.withTimeLimit()`, or
+the `deadline` of a runtime without an engine) and charges one step.
+`_SYS.tick()` with no argument counts one pass, the spelling of code stored
+before. A block left by a throw is not counted. The `iterationBudget` option
+follows the rule of `compile()`
 (`CompilationOptions.iterationBudget`): a pass of a `Loop` (a `loop` instruction
 with `passes`) also calls `_SYS.countLoopPass(budget)`, which adds one to one
 count for a call, nested loops and the loops of user functions included; over
@@ -4284,7 +4290,9 @@ entry of an array.
 - On JavaScript (not in the bigint and complex modes) `scalarize` writes an
   element-wise operation of at most 16 elements one element at a time (the short
   lists of "Lists"); a longer one stays element-wise.
-- On GLSL `scalarize` writes an element-wise operation as one expression per
+- On GLSL, addition, subtraction, negation and multiplication by a scalar can
+  use native numeric vector operators for two to four elements when the program
+  has no sampler-backed list. Otherwise `scalarize` writes one expression per
   element for a list of at most 64 elements (`SCALARIZE_LIMIT`); over a longer
   list, an array or a list in storage, the operation declines (`2·E` for
   `E: list<real^65>`), as the text would grow with the length. A reduction or an
@@ -4555,7 +4563,9 @@ marks `S` and, to a fixed point, the parameters of the functions it is passed to
 (`IRType.storage`): each read must be the list operand of `elem` or `at`, which
 the printer spells `elem.sampler2D` and `at.sampler2D` (one helper
 `_gpu_ir_texel(v, k)` for every length; `at` keeps the rule of `At`, NaN
-outside), or an argument of a call whose parameter is then a `sampler2D`. So
+outside), or an argument of a call whose parameter is then a `sampler2D`. An
+`At` indexed directly by a loop counter uses the unchecked element read when
+positive literal loop bounds prove the index is within the stated list length.
 `At(S, k)`, a reduction, an element-wise operation (scalarized to reads) and a
 user function that reads `S` or takes it as a list argument compile; `S` as a
 value (a result, an arm, a yield), a function called with `S` and with another

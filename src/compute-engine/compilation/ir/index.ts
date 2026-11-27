@@ -72,6 +72,7 @@ import {
   vectorRecord,
   type IRType,
   type Instr,
+  nativeVectorArithmetic,
   type Lane,
   type Program,
   type Region,
@@ -242,7 +243,8 @@ export function admits(
         !profile.elementwise &&
         p.types[i.out].shape.length > 0 &&
         lengthValues(p.types[i.out]).length === 0 &&
-        rowOfOp(rows, i.op)?.row.threads === true
+        rowOfOp(rows, i.op)?.row.threads === true &&
+        !(profile.syntax.nativeVectors && nativeVectorArithmetic(p, i))
       )
         return {
           head,
@@ -883,6 +885,12 @@ export function sliceProgram(
       ...passes,
       scalarize: !profile.elementwise,
       staticForward: options.target === 'glsl' && passes.forward === true,
+      // Keep projected element reads for a shader with sampler-backed lists.
+      nativeVectors:
+        options.target === 'glsl' &&
+        passes.fold === true &&
+        (options.storage?.length ?? 0) === 0,
+      shaderIndices: options.target === 'glsl' && passes.fold === true,
       shaderRecurrences: options.target === 'glsl',
       fuseLoops: passes.fuseLoops && !interval && !bigint,
       ...(bigint

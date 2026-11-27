@@ -260,9 +260,7 @@ describe('IR profile, batch G27: the targets and modes that do not write out', (
   test('GLSL keeps the loop of a Sum, and its own rule for a list', () => {
     const g = js(sum, { to: 'glsl' });
     expect(g.code).toContain('v13 = (v13 + (sin((v6 * x)) / v6));');
-    expect(js(['Multiply', 'x', 'L'], { to: 'glsl' }).code).toBe(
-      'vec3((L[int(0.0)] * x), (L[int(1.0)] * x), (L[int(2.0)] * x))'
-    );
+    expect(js(['Multiply', 'x', 'L'], { to: 'glsl' }).code).toBe('(L * x)');
   });
 
   test('the bigint mode keeps its loops', () => {

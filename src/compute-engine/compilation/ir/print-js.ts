@@ -631,6 +631,10 @@ export const JS: Syntax = deepFreeze({
   },
   declare: (_type, name, value, mutable) =>
     `${mutable ? 'let' : 'const'} ${name}${value === undefined ? '' : ` = ${value}`};`,
+  shortLoop: (k, start, count) => ({
+    open: `for (let ${k} = ${start}; ${k} < ${start + count}; ${k}++) {`,
+    ...(count > 0 ? { close: `_SYS.tick(${count});` } : {}),
+  }),
   loopOpen: loopOpen(NUMBERS),
   retTuple: (values) => `return [${values.join(', ')}];`,
   record: recordResult,
@@ -661,6 +665,7 @@ export const JS: Syntax = deepFreeze({
 export const JS_BIGINT: Syntax = deepFreeze({
   ...JS,
   updateList: undefined,
+  shortLoop: undefined,
   ops: {
     'add.int': '($0 + $1)',
     'sub.int': '($0 - $1)',

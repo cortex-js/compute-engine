@@ -420,6 +420,13 @@ function pointShaders(
 }
 
 describe('IR profile on GLSL: points', () => {
+  test('vector addition and scaling stay native', () => {
+    expect(glsl(['Add', ['Multiply', 'x', 'P'], 'R']).code).toBe(
+      '((P * x) + R)'
+    );
+    expect(glsl(['Subtract', 'P', 'R']).code).toBe('(P + (-R))');
+  });
+
   test.each(POINTS.map(([label, json, options]) => [label, json, options]))(
     '%s: the same text twice',
     (_label, json, options) => {
@@ -441,7 +448,7 @@ describe('IR profile on GLSL: points', () => {
     });
     expect(r.freeSymbolTypes!.P.lowered).toBe('vec2');
     expect(r.freeSymbols).toContain('P');
-    expect(r.code).toMatch(/g\.P\[/);
+    expect(r.code).toMatch(/g\.P\b/);
     expect(r.code).not.toMatch(/(?<!\.)\bP\b/);
     expect(glsl(['At', 'L', 1]).freeSymbolTypes!.L.lowered).toBe('vec3');
     for (const B of ['B2', 'BL2'])
@@ -1030,6 +1037,20 @@ describe('IR profile on GLSL: storage', () => {
       expect(r.freeSymbolTypes!.S.lowered).toBe('float[7]');
     }
   );
+
+  test('a literal loop bound proves a checked list index is in range', () => {
+    const sum = (end: number) => [
+      'Sum',
+      ['At', 'S', 'j'],
+      ['Limits', 'j', 1, end],
+    ];
+    for (const options of [{}, STORAGE]) {
+      const proved = glsl(sum(7), options);
+      expect(proved.code).not.toMatch(/floor\(|0x7fc00000u/);
+      expect(proved.code).toMatch(/int\(\(v\d+ - 1\.0\)\)/);
+      expect(glsl(sum(8), options).code).toContain('0x7fc00000u');
+    }
+  });
 
   test('the helper: one for every length; a function parameter is a sampler2D', () => {
     const r = glsl(['Add', ['At', 'S', 'ix'], ['gs', 'x']], STORAGE);

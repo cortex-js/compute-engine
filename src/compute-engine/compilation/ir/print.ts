@@ -22,6 +22,7 @@ import {
   type IRFunction,
   type IRType,
   type Instr,
+  nativeVectorArithmetic,
   type Length,
   type Literal,
   type Program,
@@ -52,6 +53,16 @@ export type RegionSpelling = (r: {
 };
 
 export type Syntax = {
+  readonly nativeVectors?: boolean;
+  /** A single fixed-count block, charged after successful completion. */
+  shortLoop?(
+    index: string,
+    start: number,
+    count: number
+  ): {
+    open: string;
+    close?: string;
+  };
   /** The spelling of each IR operation. An operation `add.int` with no
    *  spelling of its own is spelled as `add`. */
   readonly ops: Record<string, Spelling>;
@@ -458,7 +469,11 @@ export function printProgram(
         // A read of a list in storage is spelled `<op>.<storage kind>`.
         const held = i.args.length > 0 ? type(i.args[0]).storage : undefined;
         const op = held === undefined ? i.op : `${i.op}.${held}`;
-        if (!threads(rows, p, i)) return spell(op, (k) => use(i.args[k]), i);
+        if (
+          !threads(rows, p, i) ||
+          (syntax.nativeVectors && nativeVectorArithmetic(p, i))
+        )
+          return spell(op, (k) => use(i.args[k]), i);
         if (syntax.map === undefined)
           throw new Error(
             `slice printer: an element-wise ${i.op} on a target without them`
@@ -653,18 +668,38 @@ export function printProgram(
             `const ${k}_p = _run.loop(${pooled.id}, ${use(i.lo)}, ${use(i.hi)}, [${pooled.passed.map(use).join(', ')}], [${pooled.lists.map(use).join(', ')}]);`
           );
         if (pooled !== undefined) line(`if (${k}_p === undefined) {`);
-        syntax
-          .loopOpen(
-            name(i.body.params[0]),
-            use(i.lo),
-            use(i.hi),
-            i.passes === true,
-            i.exit === undefined ? undefined : name(i.outs[i.exit]),
-            i.window === undefined
-              ? undefined
-              : [use(i.window[0]), use(i.window[1])]
-          )
-          .forEach((s) => line(s));
+        const lo = index.def.get(i.lo);
+        const hi = index.def.get(i.hi);
+        const start = lo?.k === 'const' ? lo.value.value : undefined;
+        const end = hi?.k === 'const' ? hi.value.value : undefined;
+        const short =
+          syntax.shortLoop !== undefined &&
+          !i.passes &&
+          !i.parallel &&
+          i.exit === undefined &&
+          i.window === undefined &&
+          typeof start === 'number' &&
+          typeof end === 'number' &&
+          Number.isSafeInteger(start) &&
+          Number.isSafeInteger(end) &&
+          end < Number.MAX_SAFE_INTEGER &&
+          end - start < 1024
+            ? syntax.shortLoop(k, start, Math.max(0, end - start + 1))
+            : undefined;
+        if (short !== undefined) line(short.open);
+        else
+          syntax
+            .loopOpen(
+              k,
+              use(i.lo),
+              use(i.hi),
+              i.passes === true,
+              i.exit === undefined ? undefined : name(i.outs[i.exit]),
+              i.window === undefined
+                ? undefined
+                : [use(i.window[0]), use(i.window[1])]
+            )
+            .forEach((s) => line(s));
         if (privateList) {
           lines.push(...body(i.body, depth + 1, waiting));
           syntax
@@ -672,6 +707,7 @@ export function printProgram(
             .forEach((s) => line(s, depth + 1));
         } else nested(i.body, i.outs.map(name), true, waiting && !i.parallel);
         line('}');
+        if (short?.close !== undefined) line(short.close);
         if (pooled !== undefined) {
           line('} else {');
           line(`  const ${k}_s = ${awaited(`${k}_p`)};`);
