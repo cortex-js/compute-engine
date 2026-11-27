@@ -1,5 +1,69 @@
 ## [Unreleased]
 
+### Breaking Changes
+
+- **In Epsil, braces make a dictionary and never a set.** A set is written with
+  its constructor `set(…)`: `{1, 2}` is now the error `brace-set-literal`, with
+  a fixit to `set(1, 2)`. `{}` is now the empty dictionary everywhere (it was
+  the empty set, except as a default value); `{->}` is still accepted. A brace
+  literal is a dictionary from its first character, so an editor knows that
+  the word after `{` is a key.
+
+  | Before                     | Now                              |
+  | -------------------------- | -------------------------------- |
+  | `{1, 2, 3}`                | `set(1, 2, 3)`                   |
+  | `{}` (the empty set)       | `set()`                          |
+  | `{...a, ...b}` (a set)     | `set(...a, ...b)`                |
+  | `{x^2 for x in xs}`        | `setFrom([x^2 for x in xs])`     |
+  | `{->, ...d1, ...d2}`       | `{...d1, ...d2}` (both accepted) |
+  | the pattern `{a, b}`       | the pattern `Set(a, b)`          |
+
+  Epsil prints a set as `set(1, 2)` and the empty dictionary as `{}`. A LaTeX
+  island (`$\{1, 2\}$`) still gives a set. A brace of spreads alone,
+  `{...a, ...b}`, is now a dictionary merge with no diagnostic: where `a` and
+  `b` are sets or lists, it is an `incompatible-type` error when it runs; write
+  `set(...a, ...b)`.
+
+- **A set is no longer an iterator of `Sum`, `Product`, `Integrate` and
+  `Table`.** The Mathematica spelling `["Sum", "k", ["Set", "k", 1, 10]]` (in
+  LaTeX, `\mathrm{Sum}(k, \{k, 1, 10\})`) read the set as the ordered triple
+  `(k, 1, 10)`; a set has no order. It is now an error, for `Integrate` too,
+  where it gives an `incompatible-type` error instead of an integral. Write
+  the iterator as `k in 1..10` (`["Element", "k", ["Range", 1, 10]]`) or as
+  the tuple `(k, 1, 10)`. The order pair of a higher derivative,
+  `["D", f, ["Set", "x", 2]]`, is not changed; in Epsil, write `D(f, x, x)`.
+
+### New Features
+
+- **`table` takes an index over a collection, as `sum` and `product` do.**
+  `table(k^2, k in 1..5)` is `[1, 4, 9, 16, 25]`, where it was an
+  `incompatible-type` error; `table(i * j, i in 1..3, j in 1..i)` is
+  `[[1], [2, 4], [3, 6, 9]]`. The collection can be a list or a set
+  (`table(k % 2, k in set(1, 2, 3))` is `[1, 0, 1]`: a table is a list), and
+  an `in` iterator and an iterator tuple can be mixed. Such a table compiles to
+  JavaScript.
+
+- **An indexing set of `sum`, `product` and `table` takes a condition in
+  Epsil.** `sum(k, k in 1..10 if isPrime(k))` is `17` and
+  `table(k^2, k in 1..10 if k > 7)` is `[64, 81, 100]`, where the `if` was a
+  `conditional-else-expected` error. The condition is written as in a
+  comprehension clause, and the clause prints back the same way.
+
+### Improvements
+
+- **`{key: value}` in Epsil is an error with a fixit to `{key -> value}`.**
+  `{"a": 1}`, the spelling of JSON and Python, gave three unrelated errors; it
+  now gives the error `dictionary-arrow-expected`, whose fixit replaces the
+  `:` by `->`, and the entry is read as `"a" -> 1`.
+
+- **Epsil completion at a dictionary key and value.** At a key of a dictionary
+  literal (`plot(x^2, {▮`), completion offers the keys that the expected
+  record type or the `@key` documentation of the parameter gives, and nothing
+  else: no library function, constant or keyword. At the value of a key, the
+  type of the key ranks the items, also when it comes from a `@key` tag
+  (`{grid -> ▮` puts `true` and `false` first), and the strings of a union of
+  string literals come first, also for a record field.
+
 ### Resolved Issues
 
 - **Compiled JavaScript compares the length of the mask of a selection at

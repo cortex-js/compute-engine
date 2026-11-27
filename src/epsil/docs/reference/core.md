@@ -1438,7 +1438,7 @@ MathJSON `ReplaceAll` · `(any, any+) -> any`
 
 ReplaceAll(expr, rules): apply one or more replacement rules to `expr`, then evaluate the result (Mathematica `expr /. rules`).
 
-A rule is `Rule(lhs, rhs)`, or `lhs -> rhs` in LaTeX (parsed as `to`; in Epsil `->` builds a dictionary entry, which is not a rule). Several rules may be given as extra arguments or as a `List`/`Set` of rules; they are applied simultaneously in a single pass.
+A rule is `Rule(lhs, rhs)`, or `lhs -> rhs` in LaTeX (parsed as `to`; in Epsil `->` builds a dictionary entry, which is not a rule). Several rules may be given as extra arguments or as a `List`/`set` of rules; they are applied simultaneously in a single pass.
 
 ```epsil
 replaceAll(x^2 + x, Rule(x, 3))

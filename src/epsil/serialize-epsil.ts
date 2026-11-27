@@ -345,12 +345,7 @@ export function serializeEpsil(
           )
         );
 
-        if (keyValues.length === 0)
-          return fmt.line(
-            fmt.fence('{'),
-            fmt.relationalOperator('->'),
-            fmt.fence('}')
-          );
+        if (keyValues.length === 0) return fmt.text('{}');
 
         body = fmt.fencedList('{', fmt.separator(','), '}', keyValues);
       }
@@ -374,6 +369,19 @@ export function serializeEpsil(
    * so concurrent serializations cannot see each other's depth.
    */
   let loopDepth = 0;
+  // The node being serialized as a direct argument of a call (by
+  // `serializeGenericFunction`), where a guarded indexing set may print as
+  // `k in xs if cond`.
+  let callArgument: MathJsonExpression | null = null;
+  const serializeCallArgument = (x: MathJsonExpression): FormattingBlock => {
+    const saved = callArgument;
+    callArgument = x;
+    try {
+      return serializeExpression(x);
+    } finally {
+      callArgument = saved;
+    }
+  };
 
   /** Serialize with the `break`/`continue` context set to `depth`: one deeper
    * for a loop body, zero for a function-literal body (the boundary a `break`
@@ -847,26 +855,18 @@ export function serializeEpsil(
     // Set
     //
     Set: (expr: MathJsonExpression): FormattingBlock => {
-      if (nops(expr) === 0) return fmt.text('{}');
       // The engine's set-builder, `["Set", body, ["Element", v, domain,
       // cond?]]` with `v` a symbol the body mentions (the shape the LaTeX
       // `\{2k \mid k \in S\}` and the big operators produce;
       // `parseSetComprehension`, `library/collections.ts`), is a
-      // comprehension and prints as one, `{body for v in domain if cond}`.
-      // The literal spelling `{body, v in domain}` re-parses to the same
+      // comprehension and prints as one, `setFrom([body for v in domain if
+      // cond])`. The call spelling `set(body, v in domain)` gives the same
       // shape but reads as a two-element set holding a boolean. The reprint
       // re-parses to `SetFrom(Comprehension(…))`, the same set.
       const builder = setBuilderShape(expr);
-      if (builder !== null) {
-        const block = serializeComprehension(builder, '{', '}');
-        if (block !== null) return block;
-      }
-      return fmt.fencedList(
-        '{',
-        fmt.separator(','),
-        '}',
-        mapArgs<FormattingBlock>(expr, serializeExpression)
-      );
+      if (builder !== null)
+        return serializeGenericFunction(['SetFrom', builder]);
+      return serializeGenericFunction(expr);
     },
 
     //
@@ -874,13 +874,39 @@ export function serializeEpsil(
     //
     // `["Comprehension", body, ["Element", x, xs], …]` is the list
     // comprehension `[body for x in xs, …]`; a clause with a guard,
-    // `["Element", x, xs, cond]`, prints `x in xs if cond`. A `SetFrom` or
+    // `["Element", x, xs, cond]`, prints `x in xs if cond`. A
     // `DictionaryFrom` whose only operand is a comprehension is the brace
-    // form the parser produced for `{body for …}` and `{k -> v for …}`
-    // (the dictionary body is the `Tuple(k, v)` pair). Any other shape —
-    // a clause that is not an `Element`, a `SetFrom` of several operands —
-    // falls back to the call form, which re-parses faithfully.
+    // form the parser produced for `{k -> v for …}` (the dictionary body is
+    // the `Tuple(k, v)` pair). A `SetFrom` prints as its call,
+    // `setFrom([body for …])`. Any other shape — a clause that is not an
+    // `Element` — falls back to the call form, which re-parses faithfully.
     //
+    // `["Element", k, xs, cond]` is the guarded indexing set of a big
+    // operator or of a table, `k in xs if cond`. The parser reads that
+    // spelling only as a whole argument of a call
+    // (`sum(k, k in 1..10 if isPrime(k))`); elsewhere a guarded `Element`
+    // prints as its call. The other shapes keep the infix `in`.
+    Element: (expr: MathJsonExpression): FormattingBlock => {
+      const index = symbol(operand(expr, 1));
+      if (nops(expr) === 3 && index !== null && callArgument !== expr)
+        return serializeGenericFunction(expr);
+      if (nops(expr) === 3 && index !== null)
+        return fmt.line(
+          escapeSymbol(index),
+          ' in ',
+          serializeConditionalOperand(
+            operand(expr, 2),
+            CONDITIONAL_PRECEDENCE + 1
+          ),
+          ' if ',
+          serializeConditionalOperand(
+            operand(expr, 3),
+            CONDITIONAL_PRECEDENCE + 1
+          )
+        );
+      return serializeOperator(expr) ?? serializeGenericFunction(expr);
+    },
+
     Comprehension: (expr: MathJsonExpression): FormattingBlock =>
       serializeComprehension(expr, '[', ']') ?? serializeGenericFunction(expr),
 
@@ -888,20 +914,6 @@ export function serializeEpsil(
     // in xs, …]`: the same clauses, with `parallel` before the first `for`.
     ParallelComprehension: (expr: MathJsonExpression): FormattingBlock =>
       serializeComprehension(expr, '[', ']') ?? serializeGenericFunction(expr),
-
-    SetFrom: (expr: MathJsonExpression): FormattingBlock => {
-      const source = operand(expr, 1);
-      if (
-        source !== null &&
-        nops(expr) === 1 &&
-        (operator(source) === 'Comprehension' ||
-          operator(source) === 'ParallelComprehension')
-      ) {
-        const block = serializeComprehension(source, '{', '}');
-        if (block !== null) return block;
-      }
-      return serializeGenericFunction(expr);
-    },
 
     DictionaryFrom: (expr: MathJsonExpression): FormattingBlock => {
       const source = operand(expr, 1);
@@ -1127,16 +1139,11 @@ export function serializeEpsil(
     // Dictionary
     //
     // `["Dictionary", ["KeyValuePair", key, value], …]` → `{key -> value, …}`;
-    // the empty dictionary is `{->}`. Each `KeyValuePair` entry is serialized
+    // the empty dictionary is `{}`. Each `KeyValuePair` entry is serialized
     // through the operator table (`->`), so a string key prints quoted.
     //
     Dictionary: (expr: MathJsonExpression): FormattingBlock => {
-      if (nops(expr) === 0)
-        return fmt.line(
-          fmt.fence('{'),
-          fmt.relationalOperator('->'),
-          fmt.fence('}')
-        );
+      if (nops(expr) === 0) return fmt.text('{}');
       return fmt.fencedList(
         '{',
         fmt.separator(','),
@@ -1892,14 +1899,22 @@ export function serializeEpsil(
         ')',
         operands(p).map((x) => serializePattern(x, typed))
       );
+    // A set pattern is the operator pattern `Set(p, …)`: a pattern head is
+    // kept as written, so the library spelling `set(…)` would not match a
+    // set.
+    if (h === 'Set')
+      return fmt.line(
+        'Set',
+        fmt.fencedList(
+          '(',
+          fmt.separator(','),
+          ')',
+          operands(p).map((x) => serializePattern(x, typed))
+        )
+      );
     if (h === 'Dictionary') {
       const entries = operands(p);
-      if (entries.length === 0)
-        return fmt.line(
-          fmt.fence('{'),
-          fmt.relationalOperator('->'),
-          fmt.fence('}')
-        );
+      if (entries.length === 0) return fmt.text('{}');
       return fmt.fencedList(
         '{',
         fmt.separator(','),
@@ -2544,7 +2559,7 @@ export function serializeEpsil(
           '(',
           fmt.separator(','),
           ')',
-          mapArgs<FormattingBlock>(expr, serializeExpression)
+          mapArgs<FormattingBlock>(expr, serializeCallArgument)
         )
       );
     }

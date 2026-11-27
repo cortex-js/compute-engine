@@ -472,8 +472,15 @@ describe('EPSIL BLOCKS', () => {
   });
 
   test('a bare top-level `{…}` is the collection grammar, not a block', () => {
-    // Blocks are keyword-introduced only; a bare brace is a Set (Phase 2).
-    expect(validEpsil('{ 1, 2 }')).toStrictEqual(['Set', 1, 2]);
+    // Blocks are keyword-introduced only; a bare brace is a dictionary, and
+    // a brace of plain elements is the `brace-set-literal` error (recovered
+    // as the Set).
+    expect(validEpsil('{}')).toStrictEqual(['Dictionary']);
+    const [tree, diags] = parseEpsil('{ 1, 2 }');
+    expect((tree as any).fn[1].fn[0]).toBe('Set');
+    expect(diags.map((d) => d.message)).toStrictEqual([
+      ['brace-set-literal', 'set('],
+    ]);
   });
 });
 

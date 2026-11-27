@@ -487,7 +487,7 @@ h
 π²/6 — the difference is the tail of the series, ≈ 1/100:
 
 ```epsil
-let s = sum(1/k^2, (k, 1, 100))
+let s = sum(1/k^2, k in 1..100)
 N(pi^2 / 6 - s)
 // ➔ 0.00995016666333…
 ```
@@ -554,7 +554,7 @@ count
 pentagon on the unit circle; their vector sum is exactly zero:
 
 ```epsil
-sum(exp(2*pi*i*k/5), (k, 0, 4))
+sum(exp(2*pi*i*k/5), k in 0..4)
 // ➔ 0
 ```
 
@@ -879,7 +879,7 @@ with the same elements.
 ```epsil
 let d48 = [1, 2, 3, 4, 6, 8, 12, 16, 24, 48]
 let d36 = [1, 2, 3, 4, 6, 9, 12, 18, 36]
-intersection(d48, d36) == {1, 2, 3, 4, 6, 12}
+intersection(d48, d36) == set(1, 2, 3, 4, 6, 12)
 // ➔ true
 ```
 

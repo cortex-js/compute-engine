@@ -84,7 +84,7 @@ A default value is one of:
 - a string (`"auto"`), without interpolation;
 - `true` or `false`;
 - the empty list `[]` or the empty dictionary `{}` (in a parameter list, `{}`
-  is the empty dictionary, not the empty set);
+  is the empty dictionary);
 - a constant: a library constant (`pi`, `Integers`), or a symbol declared
   constant before the function is defined: a constant that the host
   declared, a `const` of an earlier program on the same engine, or a `const`
@@ -1119,7 +1119,8 @@ for x in a in b { x }
 ```
 
 A `for` loop runs for its effects. To build a collection from an iteration,
-write a **comprehension** — the same clause inside a list or brace literal,
+write a **comprehension** — the same clause inside a list or dictionary literal (a set is `setFrom` of a
+list comprehension),
 optionally with an `if` guard:
 
 ```epsil

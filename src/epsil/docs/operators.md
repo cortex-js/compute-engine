@@ -535,8 +535,8 @@ splices immediately; a symbolic argument is spliced when the call evaluates,
 and until then the call stays symbolic (the spread never binds positionally
 to a single parameter).
 
-In a **list or set literal**, `...` splices a collection — a list, a set, a
-range:
+In a **list literal** or the arguments of **`set(…)`**, `...` splices a
+collection — a list, a set, a range:
 
 ```epsil-live
 let xs = [1, 2]
@@ -545,8 +545,8 @@ let xs = [1, 2]
 ```
 
 ```epsil-live
-let s = {2, 3}
-{1, ...s, ...[3, 4]}
+let s = set(2, 3)
+set(1, ...s, ...[3, 4])
 // ➔ Set(1, 2, 3, 4)
 ```
 
@@ -558,7 +558,7 @@ materialization of `xs`, and an infinite segment stays lazy
 when it is evaluated, every finite segment is listed, also a lazy one:
 `[...take(xs, 1), 9]` is a plain list, not a `join` recipe. An element
 that is a finite lazy collection is listed too (`[1..3, 4]` is
-`[[1, 2, 3], 4]`). Set literals deduplicate as usual.
+`[[1, 2, 3], 4]`). A set deduplicates as usual.
 
 **Tuples do not spread here** — a tuple is a unit (a point, a pair), and
 splicing it would quietly discard that; spreading one is a `spread-tuple`
@@ -583,13 +583,12 @@ let defaults = {"verbose" -> false, "depth" -> 3}
 so they keep the literal rule — first wins, with a
 `duplicate-dictionary-key` diagnostic.)
 
-A brace of *only* spreads has nothing to mark it as a dictionary, so it is
-read as a **set**-spread. To write a pure merge, lead with the bare `->`
-marker (the same marker as the empty dictionary `{->}`):
+A brace of only spreads is a dictionary merge. The union of two sets is a
+spread in `set(…)`:
 
 ```epsil
-{...a, ...b}        // a SET containing the elements of a and b
-{->, ...d1, ...d2}  // a dictionary merge of d1 and d2
+{...d1, ...d2}      // a dictionary merge of d1 and d2
+set(...a, ...b)     // a SET containing the elements of a and b
 ```
 
 ## Unary prefix: `-` and `!` {#unary-prefix}

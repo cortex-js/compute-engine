@@ -167,7 +167,7 @@ export function operandRoleSites(
  * (excluded), a run of operands whose role is `clause` (see
  * {@link operandRoleSites}). The shapes are those that
  * `canonicalIndexingSet` and `canonicalLimits` recognize
- * (`Limits`/`Element`/`Tuple`/`Triple`/`Pair`/`Single`/`Set`, a symbol,
+ * (`Limits`/`Element`/`Tuple`/`Triple`/`Pair`/`Single`, a symbol,
  * or any of those held).
  */
 function clauseRunSites(
@@ -216,7 +216,6 @@ const INDEXING_SET_OPERATORS = new Set([
   'Triple',
   'Pair',
   'Single',
-  'Set',
 ]);
 
 /**
@@ -295,8 +294,7 @@ function rangeIndexType(
   if (
     op.operator === 'Tuple' ||
     op.operator === 'Triple' ||
-    op.operator === 'Pair' ||
-    op.operator === 'Set'
+    op.operator === 'Pair'
   )
     return iteratorSpecIndexType(op.ops, type, ops, flatIndexes);
   return type;
@@ -304,13 +302,12 @@ function rangeIndexType(
 
 /**
  * The ranged type of the index of the iterator specification `spec`, the
- * operands of a `Tuple`, `Triple`, `Pair` or `Set` clause, or of a
- * parenthesized tuple. The parser spells `\sum_{k=1}^{16}` as
- * `Tuple(k, 1, 16)`, which `canonicalIndexingSet` reads as
- * `Limits(k, 1, 16)`; `Triple(k, 1, 16)`, the held iterator set
- * `{k, 1, 16}` and the parenthesized tuple `(k, 1, 16)` are read the same
- * way. The two-operand specification `{k, 16}` is `k` from 1 to 16, as in
- * Mathematica. With a fourth operand (a step), the clause is a `Range`, and
+ * operands of a `Tuple`, `Triple` or `Pair` clause, or of a parenthesized
+ * tuple. The parser spells `\sum_{k=1}^{16}` as `Tuple(k, 1, 16)`, which
+ * `canonicalIndexingSet` reads as `Limits(k, 1, 16)`; `Triple(k, 1, 16)` and
+ * the parenthesized tuple `(k, 1, 16)` are read the same way. The
+ * two-operand specification `(k, 16)` is `k` from 1 to 16. With a fourth
+ * operand (a step), the clause is a `Range`, and
  * its index is left untyped, as {@link rangeIndexType} describes.
  */
 function iteratorSpecIndexType(
@@ -1131,8 +1128,6 @@ function heldIndefiniteIntegralVariables(
       )
     ) {
       if (op.nops <= 3) add(variable(op.ops));
-    } else if (isFunction(op, 'Set')) {
-      if (op.nops === 3 && isSymbol(op.op1)) add(variable(op.ops));
     } else if (isSymbol(op)) {
       const span = flatLimitsSpan(clauses, i);
       add(variable(clauses.slice(i, i + span)));

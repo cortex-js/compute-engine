@@ -2,8 +2,8 @@
  * `Sum` and `Product` accept the iterator specifications that `Table`
  * accepts (user decision of 2026-10-18):
  *
- * - the Mathematica iterator `{i, n}`, `i` from 1 to `n`, in each spelling:
- *   a `Set` (`\{i, n\}` in LaTeX), a `Tuple` or a `Pair`;
+ * - the iterator `(i, n)`, `i` from 1 to `n`, in each spelling: a `Tuple`
+ *   or a `Pair` (a `Set` is no longer an iterator);
  * - the parenthesized tuple `(i, 1, 10)` that the LaTeX parser gives as
  *   `Delimiter(Sequence(i, 1, 10), "(,)")` in a held operand.
  *
@@ -19,15 +19,17 @@ import { ComputeEngine } from '../../src/compute-engine';
 
 const ce = new ComputeEngine();
 
-describe('THE ITERATOR {i, n}', () => {
-  test('Sum(k^2, {k, 3}) is 14', () => {
-    const e = ce.box(['Sum', ['Power', 'k', 2], ['Set', 'k', 3]]);
+describe('THE ITERATOR (i, n)', () => {
+  test('Sum(k^2, (k, 3)) is 14', () => {
+    const e = ce.box(['Sum', ['Power', 'k', 2], ['Tuple', 'k', 3]]);
     expect(e.json).toEqual(['Sum', ['Power', 'k', 2], ['Limits', 'k', 1, 3]]);
     expect(e.evaluate().json).toBe(14);
   });
 
-  test('Product(k, {k, 4}) is 24', () => {
-    expect(ce.box(['Product', 'k', ['Set', 'k', 4]]).evaluate().json).toBe(24);
+  test('Product(k, (k, 4)) is 24', () => {
+    expect(ce.box(['Product', 'k', ['Tuple', 'k', 4]]).evaluate().json).toBe(
+      24
+    );
   });
 
   test('the Tuple and Pair spellings', () => {
@@ -38,7 +40,7 @@ describe('THE ITERATOR {i, n}', () => {
   });
 
   test('the ce.function route', () => {
-    const spec = ce.function('Set', [ce.symbol('k'), ce.number(3)], {
+    const spec = ce.function('Tuple', [ce.symbol('k'), ce.number(3)], {
       form: 'raw',
     });
     expect(ce.function('Sum', [ce.parse('k^2'), spec]).evaluate().json).toBe(
@@ -47,13 +49,12 @@ describe('THE ITERATOR {i, n}', () => {
   });
 
   test('the LaTeX spellings', () => {
-    expect(ce.parse('\\mathrm{Sum}(k^2, \\{k, 3\\})').evaluate().json).toBe(14);
     expect(ce.parse('\\mathrm{Sum}(k^2, (k, 3))').evaluate().json).toBe(14);
     expect(ce.parse('\\mathrm{Product}(k, (k, 4))').evaluate().json).toBe(24);
   });
 
   test('a symbolic upper bound', () => {
-    expect(ce.parse('\\mathrm{Sum}(i, \\{i, n\\})').json).toEqual([
+    expect(ce.parse('\\mathrm{Sum}(i, (i, n))').json).toEqual([
       'Sum',
       'i',
       ['Limits', 'i', 1, 'n'],
@@ -69,9 +70,16 @@ describe('THE ITERATOR {i, n}', () => {
       'Sqrt',
       ['Subtract', 1, ['Power', ['Divide', ['Subtract', 'k', 0.5], 40], 2]],
     ];
-    expect(ce.box(['Sum', body, ['Set', 'k', 40]]).type.toString()).toBe(
+    expect(ce.box(['Sum', body, ['Tuple', 'k', 40]]).type.toString()).toBe(
       'real'
     );
+  });
+
+  test('a Set is no longer an iterator', () => {
+    for (const op of ['Sum', 'Product']) {
+      const e = ce.box([op, 'k', ['Set', 'k', 3]]);
+      expect(JSON.stringify(e.evaluate().json)).toContain('"Error"');
+    }
   });
 
   test('two iterators', () => {

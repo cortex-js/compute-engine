@@ -17,18 +17,20 @@ expressions; evaluation is exact unless you ask for a number; the library
 is written in lowercase (`simplify`, `solve`, `integrate`, `limit`, `series`,
 `factor`, `expand`) and the Wolfram spelling with a capital works too
 (`simplify`, `solve`); `D`, `N` and the linear-algebra operators keep their
-names; user names are lowercase and shadow a library name by scope; `{k, 1, n}` iterator triples work in `sum`,
-`product`, `integrate`, `D` and `table`; `1..5` is `Range[5]`; indexing is
-1-based and `-1` is the last element; arithmetic threads over lists the way a
-`Listable` function does.
+names; user names are lowercase and shadow a library name by scope; a
+Wolfram iterator `{k, 1, n}` is `k in 1..n` in `sum`, `product` and `table`
+(the tuple `(k, 1, n)` is also accepted), and the tuple `(k, 1, n)` in
+`integrate`; `1..5` is `Range[5]`; indexing is 1-based and `-1`
+is the last element; arithmetic threads over lists the way a `Listable`
+function does.
 
 **What to unlearn.** Four things:
 
 1. **Function application uses parentheses**: `f(x)`, not `f[x]`. Square
    brackets are indexing (Wolfram's `[[…]]`).
-2. **`{…}` is a set, not a list.** An Epsil list is `[1, 2, 3]`. The braces
-   survive in iterator triples, where they read positionally, but a bare
-   `{1, 2, 2}` is the *set* `{1, 2}`.
+2. **`{…}` is a dictionary, not a list.** An Epsil list is `[1, 2, 3]`. A set
+   is written with its constructor: `set(1, 2, 2)` is the *set* `set(1, 2)`.
+   A bare `{1, 2, 3}` is an error.
 3. **`=` assigns only as a whole statement; inside an expression it is `Equal`.** `->` is a key/value pair. `:=` always assigns and `==` always compares
    (as in Wolfram), but replacement rules must be written `Rule(x, 3)`.
 4. **There is no `%`**, no `Out[]`, and no notebook history. `%` is the
@@ -56,7 +58,7 @@ names; user names are lowercase and shadow a library name by scope; `{k, 1, n}` 
 
 ```epsil
 f(x) = x^2 + 1
-(f(3), D(f(x), x), integrate(f(x), {x, 0, 1}))
+(f(3), D(f(x), x), integrate(f(x), (x, 0, 1)))
 // ➔ (10, 2x, 4/3)
 ```
 
@@ -90,7 +92,7 @@ by exact value, so `0.5 === 1/2` is `True` too.
 
 | Wolfram | Epsil |
 |:--|:--|
-| `{1, 2, 3}` (list) | `[1, 2, 3]` — braces make a **set** |
+| `{1, 2, 3}` (list) | `[1, 2, 3]` — braces make a **dictionary**; a set is `set(1, 2, 3)` |
 | `xs[[i]]` | `xs[i]` — 1-based, as in Wolfram |
 | `xs[[-1]]`, `first`, `last`, `rest` | `xs[-1]`, `first(xs)`, `last(xs)`, `rest(xs)` |
 | `xs[[2 ;; 4]]` | `xs[2..4]` |
@@ -124,11 +126,11 @@ let xs = [3, 1, 4, 1, 5, 1]
 // ➔ (6, 3, 3)
 ```
 
-Lists and sets are genuinely different types, so the brace/bracket distinction
+Lists and sets are genuinely different types, so the bracket/`set` distinction
 is not cosmetic:
 
 ```epsil
-(type({1, 2, 3}), type([1, 2, 3]))
+(type(set(1, 2, 3)), type([1, 2, 3]))
 // ➔ (TypeFrom("set<integer>"), TypeFrom("vector<integer^3>"))
 ```
 
@@ -150,21 +152,21 @@ let A = [[2, 1], [1, 3]]
 
 ## Iterators and Table
 
-Iterator triples in braces work exactly as in Wolfram — `sum`, `product`,
-`integrate`, `D` and `table` all read `{var, lo, hi}` (and `{var, lo, hi,
-step}`) positionally:
+A Wolfram iterator `{var, lo, hi}` is `var in lo..hi` in Epsil: an index over
+a collection. `sum`, `product` and `table` read it; the tuple `(var, lo, hi)`
+is also accepted, and `integrate` takes the tuple. `(var, hi)` counts from 1,
+and `sum`, `product` and `table` also take a step, `(var, lo, hi, step)`:
 
 ```epsil
-let squares = table(k^2, {k, 1, 5})
-(sum(squares), sum(1/k^2, {k, 1, Infinity}), product(k, {k, 1, 5}))
-// ➔ (55, 1/6 * pi^2, 120)
+let squares = table(k^2, k in 1..5)
+(sum(squares), sum(1/k^2, (k, 1, Infinity)), product(k, (k, 1, 5, 2)))
+// ➔ (55, 1/6 * pi^2, 15)
 ```
 
-`sum`, `product`, `integrate` and `table` all accept the tuple spelling
-`(k, 1, 5)` as well. `D(expr, {x, 2})` takes a second derivative.
+`D(expr, x, x)` takes a second derivative (Wolfram's `D[expr, {x, 2}]`).
 
 ```epsil
-sum(table(k^2, (k, 1, 5)))
+sum(table(k^2, (k, 5)))
 // ➔ 55
 ```
 
@@ -233,8 +235,8 @@ This is the part that needs the least translation:
 | `simplify`, `expand`, `factor` | same names |
 | `solve[x^2 == 4, x]` | `solve(x^2 == 4, x)` |
 | `solve[{e1, e2}, {x, y}]` | `solve([e1, e2], [x, y])` — lists in brackets |
-| `D[f, x]`, `D[f, {x, 2}]` | `D(f, x)`, `D(f, {x, 2})` |
-| `integrate[f, x]`, `integrate[f, {x, a, b}]` | same, with parentheses |
+| `D[f, x]`, `D[f, {x, 2}]` | `D(f, x)`, `D(f, x, x)` |
+| `integrate[f, x]`, `integrate[f, {x, a, b}]` | `integrate(f, x)`, `integrate(f, (x, a, b))` |
 | `limit[f, x -> 0]` | `limit(f, x, 0)` |
 | `series[f, {x, 0, n}]` | `series(f, x, 0)` — the tail is a `bigO` term |
 | `Det`, `inverse`, `transpose`, `eigenvalues` | `determinant`, `inverse`, `transpose`, `eigenvalues` |
@@ -267,7 +269,7 @@ Surface forms that look like Wolfram but behave differently.
 | You write | What actually happens | Write instead |
 |:--|:--|:--|
 | `f[x]` | `f` *indexed* at `x` — an `incompatible-type` error value, not a call | `f(x)` |
-| `{1, 2, 3}` for a list | A **set**: unordered, deduplicated, not indexable by position | `[1, 2, 3]` |
+| `{1, 2, 3}` for a list | An error (`brace-set-literal`): braces make a dictionary | `[1, 2, 3]` |
 | `E`, `I` | Ordinary undeclared symbols — they stay symbolic, silently | `e`, `i` |
 | `expr /. x -> 3` | `->` builds a `KeyValuePair`, not a `Rule` | `replaceAll(expr, Rule(x, 3))` |
 | `%` for the last result | `%` is the `Mod` operator | bind results with `let` |
@@ -304,9 +306,8 @@ function). `MemberQ[xs, v]` maps directly to `contains(xs, v)`, same
 argument order.
 
 Also worth knowing: lazy collection operators (`Range`, `map`, `filter`,
-`take`, `table`) enumerate only when materialized, and a tuple does **not**
-materialize its operands — `(table(k, {k, 1, 3}), 5)` keeps the unevaluated
-`Tabulate(…)`. Aggregate or index where you stand.
+`take`, `table`) enumerate only when materialized. Aggregate or index where
+you stand.
 
 ## Next
 

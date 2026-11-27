@@ -71,9 +71,9 @@ describe('EPSIL COMPREHENSIONS — parse', () => {
     ]);
   });
 
-  test('set comprehension is SetFrom of the comprehension', () => {
-    expect(validEpsil('{x % 3 for x in xs}')).toStrictEqual([
-      'SetFrom',
+  test('a set comprehension is setFrom of the list comprehension', () => {
+    expect(validEpsil('setFrom([x % 3 for x in xs])')).toStrictEqual([
+      'setFrom',
       ['Comprehension', ['Mod', 'x', 3], ['Element', 'x', 'xs']],
     ]);
   });
@@ -117,11 +117,10 @@ describe('EPSIL COMPREHENSIONS — parse', () => {
 
   test('the literals are unchanged', () => {
     expect(validEpsil('[1, 2, 3]')).toStrictEqual(['List', 1, 2, 3]);
-    expect(validEpsil('{1, 2}')).toStrictEqual(['Set', 1, 2]);
-    expect(validEpsil('{}')).toStrictEqual(['Set']);
+    expect(validEpsil('{}')).toStrictEqual(['Dictionary']);
     expect(validEpsil('{->}')).toStrictEqual(['Dictionary']);
     expect(validEpsil('{...a, ...b}')).toStrictEqual([
-      'Set',
+      'Dictionary',
       ['Spread', 'a'],
       ['Spread', 'b'],
     ]);
@@ -240,7 +239,7 @@ describe('EPSIL COMPREHENSIONS — evaluation', () => {
   });
 
   test('a set comprehension deduplicates', () => {
-    expect(run('{x % 3 for x in 1..10}')).toBe('Set(0, 1, 2)');
+    expect(run('setFrom([x % 3 for x in 1..10])')).toBe('Set(0, 1, 2)');
   });
 
   test('a dictionary comprehension over (key, value) pairs', () => {
@@ -550,7 +549,7 @@ describe('EPSIL COMPREHENSIONS — serialization', () => {
     roundTrip('[x ^ 2 for x in xs if x % 2 == 1]');
     roundTrip('[(x, y) for x in xs, y in ys]');
     roundTrip('[p + q for (p, q) in pairs if p > 0]');
-    roundTrip('{x % 3 for x in xs}');
+    roundTrip('setFrom([x % 3 for x in xs])');
     roundTrip('{k -> v for (k, v) in pairs}');
     roundTrip('[x if x > 0 else 0 for x in xs]');
   });
@@ -577,38 +576,38 @@ describe('EPSIL COMPREHENSIONS — serialization', () => {
 
   test("the engine's set-builder prints as a set comprehension", () => {
     // `["Set", body, ["Element", v, domain, cond?]]` with `v` in the body is
-    // the engine's set-builder (form A of `parseSetComprehension`); its
-    // literal spelling `{body, v in domain}` reads as a two-element set.
+    // the engine's set-builder (form A of `parseSetComprehension`); its call
+    // spelling `set(body, v in domain)` reads as a two-element set.
     expect(
       serializeEpsil(['Set', ['Power', 'x', 2], ['Element', 'x', 'xs']])
-    ).toBe('{x ^ 2 for x in xs}');
+    ).toBe('setFrom([x ^ 2 for x in xs])');
     expect(
       serializeEpsil([
         'Set',
         ['Multiply', 2, 'k'],
         ['Element', 'k', 'S', ['Greater', 'k', 2]],
       ])
-    ).toBe('{2k for k in S if k > 2}');
+    ).toBe('setFrom([2k for k in S if k > 2])');
     // The reprint re-parses to the same set, as `SetFrom(Comprehension(…))`.
-    expect(validEpsil('{x^2, x in xs}')).toStrictEqual([
+    expect(validEpsil('Set(x^2, x in xs)')).toStrictEqual([
       'Set',
       ['Power', 'x', 2],
       ['Element', 'x', 'xs'],
     ]);
-    expect(serializeEpsil(parseEpsil('{x^2, x in xs}')[0]!)).toBe(
-      '{x ^ 2 for x in xs}'
+    expect(serializeEpsil(parseEpsil('Set(x^2, x in xs)')[0]!)).toBe(
+      'setFrom([x ^ 2 for x in xs])'
     );
     // A domain that names the index reads the ENCLOSING variable in the
-    // set-builder; a comprehension would capture it, so the literal stays.
+    // set-builder; a comprehension would capture it, so the call stays.
     expect(
       serializeEpsil(['Set', 'n', ['Element', 'n', ['Range', 1, 'n']]])
-    ).toBe('{n, n in Range(1, n)}');
+    ).toBe('set(n, n in Range(1, n))');
     // A two-element set whose membership does not bind a name of the body
-    // stays a literal.
+    // stays a call.
     expect(serializeEpsil(['Set', 'a', ['Element', 'b', 'c']])).toBe(
-      '{a, b in c}'
+      'set(a, b in c)'
     );
-    expect(serializeEpsil(['Set', 1, 2])).toBe('{1, 2}');
+    expect(serializeEpsil(['Set', 1, 2])).toBe('set(1, 2)');
   });
 
   test('a comprehension whose clause is not an Element keeps the call form', () => {

@@ -111,7 +111,7 @@
   // Object: cs[i] is "{" — key-value pairs become a dictionary
   function parseObject(cs, i) {
     let j = skipWs(cs, i + 1)
-    if cs[j] == "}" { ({->}, j + 1) } else { parseMembers(cs, j, [], []) }
+    if cs[j] == "}" { ({}, j + 1) } else { parseMembers(cs, j, [], []) }
   }
 
   // Any JSON value, dispatched on its first character

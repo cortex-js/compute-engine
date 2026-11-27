@@ -179,7 +179,7 @@ Epsil has literal syntax for lists and dictionaries.
 [3, 5, 7, 11]
 ```
 
-**Dictionaries** are sets of key/value pairs. The empty dictionary is `{->}`:
+**Dictionaries** are sets of key/value pairs. The empty dictionary is `{}`:
 
 ```epsil-live
 {one -> 1, two -> 2}

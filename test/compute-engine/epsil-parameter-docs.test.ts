@@ -192,6 +192,26 @@ describe('COMPLETION: PARAMETER DOCUMENTATION', () => {
     expect(values.slice(0, 2).map((i) => i.label)).toEqual(['"red"', '"blue"']);
   });
 
+  test('the value of a documented key expects the type of the key', () => {
+    const result = epsilCompletions(ce, ...at(`${PLOT}plot(x, {grid -> ▮`));
+    expect(result.expectedType).toBe('boolean');
+    expect(result.items.slice(0, 2).map((i) => [i.label, i.fit])).toEqual([
+      ['false', 'match'],
+      ['true', 'match'],
+    ]);
+    // A documented key narrower than the declared field keeps its strings.
+    const typed = `/// @key options.color: "red" | "blue" -- the color
+function draw(options: record{color: string}) { options }
+`;
+    const labels = items(`${typed}draw({color -> ▮`).map((i) => i.label);
+    expect(labels.indexOf('"red"')).toBeGreaterThanOrEqual(0);
+    expect(labels.indexOf('"blue"')).toBe(labels.indexOf('"red"') + 1);
+    // An operand in the value does not expect the type of the key.
+    const nested = epsilCompletions(ce, ...at(`${PLOT}plot(x, {color -> y + ▮`));
+    expect(nested.expectedType).toBeUndefined();
+    expect(nested.items.map((i) => i.label)).not.toContain('"red"');
+  });
+
   test('a library item carries its examples in the Epsil spelling', () => {
     const join = items('joi▮').find((i) => i.label === 'join');
     expect(join?.examples).toEqual([

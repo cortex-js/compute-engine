@@ -23,18 +23,18 @@ element types.
 | Kind         | Epsil literal          | Description                                                 |
 | :----------- | :--------------------- | :---------------------------------------------------------- |
 | list         | `[1, 2, 3]`            | Elements in order, read by index. Duplicates are allowed.  |
-| set          | `{1, 2, 3}`            | Unique elements, not in order.                              |
+| set          | `set(1, 2, 3)`         | Unique elements, not in order.                              |
 | tuple        | `(1, "a")`             | A fixed number of elements, each with its own type.         |
 | dictionary   | `{"a" -> 1, "b" -> 2}` | Key-value pairs. The keys are strings.                      |
 | range        | `1..10`                | Numbers from a start to an end, with an optional step.      |
 | string       | `"hello"`              | The characters of the text, in order.                       |
 
-A set literal removes duplicates and stores its elements in the canonical
+A set removes duplicates and stores its elements in the canonical
 order, so two sets with the same elements are written, printed and walked
-alike. The empty set is `{}`, and the empty dictionary is `{->}`:
+alike. The empty set is `set()`, and the empty dictionary is `{}`:
 
 ```epsil
-{3, 1, 3, 2}
+set(3, 1, 3, 2)
 // ➔ Set(1, 2, 3)
 ```
 
@@ -98,7 +98,7 @@ marker: `NaN` when the elements are numbers, `Missing` otherwise. See
 Membership works on every collection:
 
 ```epsil
-3 in {1, 2, 3}
+3 in set(1, 2, 3)
 // ➔ true
 ```
 
@@ -228,7 +228,7 @@ with a fixed set of known keys has a record type, such as
 such as `vector<integer^3>`.
 
 ```epsil
-(type([1, 2, 3]), type({1, 2}), type((1, "a")), type({x -> 1}))
+(type([1, 2, 3]), type(set(1, 2)), type((1, "a")), type({x -> 1}))
 // ➔ (TypeFrom("vector<integer^3>"), TypeFrom("set<integer>"), TypeFrom("tuple<integer, string>"), TypeFrom("record{x: integer}"))
 ```
 
@@ -492,12 +492,12 @@ Closed(x): the endpoint x of an Interval, marked as included. A marker with no v
 
 MathJSON `Complement` · `(set<any>+) -> set`
 
-- arguments 1, … — The sets: the first one, then the sets whose elements are removed from it. Sample: `{1, 2, 3, 4}`.
+- arguments 1, … — The sets: the first one, then the sets whose elements are removed from it. Sample: `Set(1, 2, 3, 4)`.
 
 Return the elements of the first set that are not in any of the subsequent sets.
 
 ```epsil
-listFrom(complement({1, 2, 3, 4}, {2, 4}))
+listFrom(complement(set(1, 2, 3, 4), set(2, 4)))
 // ➔ [1,3]
 ```
 
@@ -723,7 +723,7 @@ Type-style membership works with:
 - Invalid type names remain unevaluated (e.g., Element(2, "Booleans"))
 
 ```epsil
-3 in {1, 2, 3}
+3 in set(1, 2, 3)
 // ➔ true
 ```
 
@@ -986,12 +986,12 @@ The set of all finite integers.
 
 MathJSON `Intersection` · `(any+) -> set`
 
-- arguments 1, … — A set or another finite collection, whose duplicate elements count once. Sample: `{1, 2, 3}`.
+- arguments 1, … — A set or another finite collection, whose duplicate elements count once. Sample: `Set(1, 2, 3)`.
 
 Return the intersection of one or more collections as a set.
 
 ```epsil
-intersection({1, 2, 3}, {2, 3, 4})
+intersection(set(1, 2, 3), set(2, 3, 4))
 // ➔ Set(2, 3)
 ```
 
@@ -1155,7 +1155,7 @@ MathJSON `ListFrom` · `(value*) -> list`
 Create a list from the elements of a collection.
 
 ```epsil
-listFrom({1, 2}, 3..4)
+listFrom(set(1, 2), 3..4)
 // ➔ [1,2,3,4]
 ```
 
@@ -1172,7 +1172,7 @@ The result is a list whatever the kind of the operands: the elements of a set op
 A tuple operand is included as a single element, and so is a scalar operand.
 
 ```epsil
-ListJoin(Set(3, 1), [0])
+ListJoin(set(3, 1), [0])
 // ➔ [1,3,0]
 ```
 
@@ -1318,7 +1318,7 @@ The set of all non-positive real numbers.
 Test whether a value is not an element of a collection.
 
 ```epsil
-4 !in {1, 2, 3}
+4 !in set(1, 2, 3)
 // ➔ true
 ```
 
@@ -1329,7 +1329,7 @@ Test whether a value is not an element of a collection.
 Test whether the first collection is not a strict subset of the second.
 
 ```epsil
-NotSubset({1, 4}, {1, 2, 3})
+NotSubset(set(1, 4), set(1, 2, 3))
 // ➔ true
 ```
 
@@ -1340,7 +1340,7 @@ NotSubset({1, 4}, {1, 2, 3})
 Test whether the first collection is not a strict superset of the second.
 
 ```epsil
-NotSuperset({1, 2}, {1, 2, 3})
+NotSuperset(set(1, 2), set(1, 2, 3))
 // ➔ true
 ```
 
@@ -1351,7 +1351,7 @@ NotSuperset({1, 2}, {1, 2, 3})
 Test whether the first collection is not a superset (possibly equal) of the second.
 
 ```epsil
-NotSupersetEqual({1, 2}, {1, 2, 3})
+NotSupersetEqual(set(1, 2), set(1, 2, 3))
 // ➔ true
 ```
 
@@ -1794,14 +1794,14 @@ second([7, 8, 9])
 // ➔ 8
 ```
 
-### Set
+### set
 
-`(any*) -> set`
+MathJSON `Set` · `(any*) -> set`
 
 An unordered collection of distinct elements (a set).
 
 ```epsil
-{3, 1, 2, 1}
+set(3, 1, 2, 1)
 // ➔ Set(1, 2, 3)
 ```
 
@@ -1822,13 +1822,13 @@ setFrom([1, 2, 2, 3])
 
 MathJSON `SetMinus` · `(set<any>, value*) -> set`
 
-- argument 1 — The set to remove elements from. Sample: `{1, 2, 3, 4}`.
+- argument 1 — The set to remove elements from. Sample: `Set(1, 2, 3, 4)`.
 - arguments 2, … — A value to remove, or a collection whose elements are removed; a string is removed as one value. Sample: `2`.
 
 Return the set difference between the first set and subsequent values.
 
 ```epsil
-setMinus({1, 2, 3, 4}, 2, 4)
+setMinus(set(1, 2, 3, 4), 2, 4)
 // ➔ Set(1, 3)
 ```
 
@@ -1902,13 +1902,13 @@ startsWith([1, 2, 3], [1, 2])
 
 MathJSON `Subset` · `(any, any*) -> boolean`
 
-- argument 1 — The collection tested as a strict subset. Sample: `{1, 2}`.
-- arguments 2, … — A collection that strictly contains the collection before it; with more than two arguments, each argument is tested against the next. Sample: `{1, 2, 3}`.
+- argument 1 — The collection tested as a strict subset. Sample: `Set(1, 2)`.
+- arguments 2, … — A collection that strictly contains the collection before it; with more than two arguments, each argument is tested against the next. Sample: `Set(1, 2, 3)`.
 
 Test whether the first collection is a strict subset of the second.
 
 ```epsil
-subset({1, 2}, {1, 2, 3})
+subset(set(1, 2), set(1, 2, 3))
 // ➔ true
 ```
 
@@ -1916,13 +1916,13 @@ subset({1, 2}, {1, 2, 3})
 
 MathJSON `SubsetEqual` · `(any, any*) -> boolean`
 
-- argument 1 — The collection tested as a subset. Sample: `{1, 2}`.
-- arguments 2, … — A collection that contains the collection before it; with more than two arguments, each argument is tested against the next. Sample: `{1, 2, 3}`.
+- argument 1 — The collection tested as a subset. Sample: `Set(1, 2)`.
+- arguments 2, … — A collection that contains the collection before it; with more than two arguments, each argument is tested against the next. Sample: `Set(1, 2, 3)`.
 
 Test whether the first collection is a subset (possibly equal) of the second.
 
 ```epsil
-subsetEqual({1, 2, 3}, {1, 2, 3})
+subsetEqual(set(1, 2, 3), set(1, 2, 3))
 // ➔ true
 ```
 
@@ -1930,13 +1930,13 @@ subsetEqual({1, 2, 3}, {1, 2, 3})
 
 MathJSON `Superset` · `(any, any*) -> boolean`
 
-- argument 1 — The collection tested as a strict superset. Sample: `{1, 2, 3}`.
-- arguments 2, … — A collection that the collection before it strictly contains; with more than two arguments, each argument is tested against the next. Sample: `{1, 2}`.
+- argument 1 — The collection tested as a strict superset. Sample: `Set(1, 2, 3)`.
+- arguments 2, … — A collection that the collection before it strictly contains; with more than two arguments, each argument is tested against the next. Sample: `Set(1, 2)`.
 
 Test whether the first collection is a strict superset of the second.
 
 ```epsil
-superset({1, 2, 3}, {1, 2})
+superset(set(1, 2, 3), set(1, 2))
 // ➔ true
 ```
 
@@ -1944,13 +1944,13 @@ superset({1, 2, 3}, {1, 2})
 
 MathJSON `SupersetEqual` · `(any, any*) -> boolean`
 
-- argument 1 — The collection tested as a superset. Sample: `{1, 2, 3}`.
-- arguments 2, … — A collection that the collection before it contains; with more than two arguments, each argument is tested against the next. Sample: `{1, 2}`.
+- argument 1 — The collection tested as a superset. Sample: `Set(1, 2, 3)`.
+- arguments 2, … — A collection that the collection before it contains; with more than two arguments, each argument is tested against the next. Sample: `Set(1, 2)`.
 
 Test whether the first collection is a superset (possibly equal) of the second.
 
 ```epsil
-supersetEqual({1, 2}, {1, 2})
+supersetEqual(set(1, 2), set(1, 2))
 // ➔ true
 ```
 
@@ -1973,13 +1973,13 @@ swap(arrayFrom([1, 2]), arrayFrom([3, 4, 5]))
 
 MathJSON `SymmetricDifference` · `(set<any>, set<any>) -> set`
 
-- argument 1 — The first set. Sample: `{1, 2, 3}`.
-- argument 2 — The second set; the order of the two sets does not change the result. Sample: `{2, 3, 4}`.
+- argument 1 — The first set. Sample: `Set(1, 2, 3)`.
+- argument 2 — The second set; the order of the two sets does not change the result. Sample: `Set(2, 3, 4)`.
 
 Return the symmetric difference of two sets (elements in either set but not both).
 
 ```epsil
-symmetricDifference({1, 2, 3}, {2, 3, 4})
+symmetricDifference(set(1, 2, 3), set(2, 3, 4))
 // ➔ Set(1, 4)
 ```
 
@@ -1988,15 +1988,20 @@ symmetricDifference({1, 2, 3}, {2, 3, 4})
 MathJSON `Table` · `(function, integer+) -> collection`
 
 - argument 1 — The function of the indices, or an expression in the index variables of the iterator specs. Sample: `i => i^2`.
-- arguments 2, … — The size of one dimension, or an iterator spec `(i, n)`, `(i, lo, hi)` or `(i, lo, hi, step)`. Sample: `5`.
+- arguments 2, … — The size of one dimension, or an iterator: `i in xs`, `(i, n)`, `(i, lo, hi)` or `(i, lo, hi, step)`. Sample: `5`.
 
 Return the list of the values of a function at each index of the given dimensions, as `tabulate` (the preferred name) does.
 
-It also accepts Mathematica-style iterator specs, e.g. `table(i^2, {i, n})` (`i` from 1 to `n`), `table(i^2, {i, 1, n})` or `table(i, {i, lo, hi, step})`, and the equivalent tuple spelling `table(i^2, (i, 1, n))`.
+It also takes iterators: an index over a collection, `table(i^2, i in 1..n)`, or an iterator tuple, `table(i^2, (i, n))` (`i` from 1 to `n`), `table(i^2, (i, 1, n))` or `table(i, (i, lo, hi, step))`. Several iterators give a nested list, the first iterator outermost.
 
 ```epsil
-table(i^2, (i, 1, 5))
+table(i^2, i in 1..5)
 // ➔ [1,4,9,16,25]
+```
+
+```epsil
+table(i * j, i in 1..2, j in 1..3)
+// ➔ [[1,2,3],[2,4,6]]
 ```
 
 ### tabulate
@@ -2112,12 +2117,12 @@ tupleFrom([1, 2, 3])
 
 MathJSON `Union` · `(any+) -> set`
 
-- arguments 1, … — A collection whose elements go into the union; an element in several collections appears once. Sample: `{1, 2}`.
+- arguments 1, … — A collection whose elements go into the union; an element in several collections appears once. Sample: `Set(1, 2)`.
 
 Return the union of two or more collections as a set.
 
 ```epsil
-union({1, 2}, {2, 3})
+union(set(1, 2), set(2, 3))
 // ➔ Set(1, 2, 3)
 ```
 

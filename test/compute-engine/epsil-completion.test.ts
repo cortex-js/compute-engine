@@ -1558,14 +1558,28 @@ describe('EPSIL COMPLETION: RECORD LITERAL FIELDS', () => {
     expect(item(result, 's')?.fit).toBe('never');
   });
 
-  test('a literal with no expected record type offers the names', () => {
+  test('a key with no expected record type offers nothing', () => {
+    // A key is a literal name (`{n -> 1}` has the key "n"): no name of the
+    // source or of the library fits there.
     const result = complete('const n = 2\nconst r = {▮');
     expect(result.expectedType).toBe(undefined);
-    expect(labels(result)).toContain('n');
-    expect(labels(result)).toContain('abs');
+    expect(labels(result)).toEqual([]);
     expect(
       labels(complete('let d: dictionary<integer> = {a -> 1, ▮'))
-    ).toContain('abs');
+    ).toEqual([]);
+    // The value of a key takes any name.
+    expect(labels(complete('const n = 2\nconst r = {a -> ▮'))).toContain('n');
+    // A call at a key is a computed key, an expression.
+    expect(
+      labels(complete('function key() -> string { "a" }\nconst d = {ke▮() -> 1}'))
+    ).toContain('key');
+    expect(
+      labels(complete('const keys = ["a"]\nconst d = {ke▮[1] -> 1}'))
+    ).toContain('keys');
+    // The key of a comprehension is an expression.
+    expect(
+      labels(complete('const n = 2\nconst r = {▮ -> 1 for k in ["a", "b"]}'))
+    ).toContain('k');
   });
 
   test('a nested literal offers the fields of its field', () => {
@@ -1592,6 +1606,11 @@ describe('EPSIL COMPLETION: RECORD LITERAL FIELDS', () => {
     expect(complete(`${source}f({x -> 1, w -> ▮`).expectedType).toBe('string');
   });
 
+  test('the value of a field typed as a union of string literals offers the strings first', () => {
+    const result = complete('const r: record{c: "red" | "blue"} = {c -> ▮');
+    expect(labels(result).slice(0, 2)).toEqual(['"blue"', '"red"']);
+  });
+
   test('an alias of a record type offers its fields', () => {
     expect(fields('type alias P = record{x: real}\nconst r: P = {▮')).toEqual([
       ['x', 'x -> ', 'real'],
@@ -1601,8 +1620,7 @@ describe('EPSIL COMPLETION: RECORD LITERAL FIELDS', () => {
   test('a nominal type with a record body does not admit a literal', () => {
     // `const r: P = {x -> 1}` is an `incompatible-type` error.
     const result = complete('type P = record{x: real}\nconst r: P = {▮');
-    expect(labels(result)).not.toContain('x');
-    expect(labels(result)).toContain('abs');
+    expect(labels(result)).toEqual([]);
   });
 });
 

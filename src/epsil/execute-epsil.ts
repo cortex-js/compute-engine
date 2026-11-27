@@ -645,9 +645,8 @@ function* executeEpsilSteps(
   // Unwrap a top-level `Block` into its statement list. The parser wraps a
   // multi-statement program in `Block`; a single statement is not wrapped, and
   // an empty program is `Nothing`. A top-level `Block` node is unambiguously the
-  // program wrapper: top-level `{…}` source is the collection grammar
-  // (Set/Dictionary), statement blocks parse only in keyword position, and a
-  // program whose only statement is a `do { … }` block is wrapped too, so
+  // program wrapper: top-level `{…}` source is a dictionary, statement
+  // blocks parse only in keyword position, and a program whose only statement is a `do { … }` block is wrapped too, so
   // that block stays a nested scope (`Block(Block(…))`).
   const sourceStatements =
     operator(ast) === 'Program' ? [...operands(ast)] : [ast];

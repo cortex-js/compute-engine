@@ -23,7 +23,7 @@
  * labels (`"Type error"`).
  */
 export const ERROR_EXPLANATIONS: Record<string, string> = {
-  'spread-tuple': `A spread (\`...x\`) in a list or set literal was given a tuple. Tuples are units — a point, a pair — so they do not splice into a surrounding collection; the spread would silently do nothing, which is why it is rejected instead.
+  'spread-tuple': `A spread (\`...x\`) in a list literal or in \`set(…)\` was given a tuple. Tuples are units — a point, a pair — so they do not splice into a surrounding collection; the spread would silently do nothing, which is why it is rejected instead.
 
 To use a tuple's elements as list elements, convert explicitly: \`ListFrom(t)\` is the list of t's elements, so \`[...ListFrom(t), 3]\` splices them. (In a CALL argument list the rule is reversed: argument lists are tuple-shaped, so there \`f(...t)\` spreads exactly tuples.)`,
 
@@ -134,6 +134,14 @@ In a call, \`name -> value\` is a rule argument — a key-value pair whose key i
   'mapsto-arrow-legacy': `\`|->\` was the mapsto arrow in earlier versions of the language. It is now spelled \`=>\`, the same arrow a \`match\` case uses for its body — one glyph, meaning "yields", in both places.
 
 Write \`x => x + 1\`; the fixit in the diagnostic replaces the arrow for you. The expression was parsed as the function it was meant to be, so any other diagnostic reported here is a separate problem. (Function TYPES and dictionary entries are unaffected: they keep \`->\`, as in \`(number) -> number\` and \`{k -> v}\`.)`,
+
+  'dictionary-arrow-expected': `A dictionary entry pairs a key with a value with \`->\`: \`{x -> 1, y -> 2}\`. The \`:\` of JSON and Python (\`{"x": 1}\`) is not an Epsil operator; in Epsil, \`name: value\` is a named argument of a call (\`f(x: 1)\`) or a type annotation (\`let x: real\`).
+
+Write \`{x -> 1}\`; the fixit in the diagnostic replaces the \`:\` by \`->\`. The entry was read as the pair it meant, so any other diagnostic reported here is a separate problem. A key written as a bare name is a string (\`{x -> 1}\` has the key "x"), the same as \`{"x" -> 1}\`.`,
+
+  'brace-set-literal': `Braces make a dictionary: \`{x -> 1, y -> 2}\`, the empty dictionary \`{}\`, a merge \`{...d1, ...d2}\` and a comprehension \`{k -> v for k in ks}\`. A set is written with its constructor, \`set(1, 2, 3)\`, so a brace literal never has to wait for its first element to tell a set from a dictionary.
+
+Write \`set(1, 2)\` for \`{1, 2}\`, \`set(...a, ...b)\` for the union of the elements of \`a\` and \`b\`, and \`setFrom([x^2 for x in xs])\` for a set comprehension. In a \`match\` pattern, a set is the operator pattern \`Set(a, b)\`. A brace that holds one \`name = value\`, as the block of another language does (\`x => { a = 2 }\`), is a block written without \`do\`: write \`do { a = 2 }\`. The fixit in the diagnostic makes that rewrite. The literal was read as the set it meant, so any other diagnostic reported here is a separate problem.`,
 
   'chained-assignment': `An assignment is a statement, not a value, so assignments do not chain. In \`a = b = 5\` the OUTER \`=\` assigns and the inner one compares: \`a\` would receive the boolean of \`b = 5\`. In \`a := b := 5\` the inner assignment is an operand, which is not allowed.
 

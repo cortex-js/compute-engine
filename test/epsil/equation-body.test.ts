@@ -92,8 +92,15 @@ describe('a body that is only `name = value`, with its value unread', () => {
     ]);
   });
 
-  test('a set that holds the equation, the block body of another language', () => {
-    expect(codes('let a = 0; match 1 { 1 => { a = 2 } }; a')).toEqual([CODE]);
+  test('a brace that holds the equation, the block body of another language, is a parse error that asks for `do {`', () => {
+    const source = 'let a = 0; match 1 { 1 => { a = 2 } }; a';
+    expect(codes(source)).toEqual([]);
+    expect(run(source).diagnostics.map((d) => d.message)).toEqual([
+      ['brace-set-literal', 'do {'],
+    ]);
+    expect(
+      checkSource(source).diagnostics.map((d) => d.message)
+    ).toContainEqual(['brace-set-literal', 'do {']);
   });
 
   test('a parenthesized equation', () => {

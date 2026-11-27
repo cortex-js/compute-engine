@@ -983,12 +983,12 @@ export const COMBINATORICS_LIBRARY: SymbolDefinitions[] = [
     },
     CartesianProduct: {
       description: 'Return the Cartesian product of input sets.',
-      examples: ['Count(CartesianProduct({1, 2}, {"a", "b", "c"}))'],
+      examples: ['Count(CartesianProduct(Set(1, 2), Set("a", "b", "c")))'],
       parameters: [
         {
           description:
             'A factor of the product; each element of the result is a tuple with one component from each factor.',
-          sample: '{1, 2}',
+          sample: 'Set(1, 2)',
         },
       ],
       // Aka the product set, the set direct product or cross product
@@ -1059,12 +1059,12 @@ export const COMBINATORICS_LIBRARY: SymbolDefinitions[] = [
 
     PowerSet: {
       description: 'Return the power set of a set (set of all subsets).',
-      examples: ['Count(PowerSet({1, 2, 3}))'],
+      examples: ['Count(PowerSet(Set(1, 2, 3)))'],
       parameters: [
         {
           description:
             'The set whose subsets are listed; the power set of the empty set holds the empty set alone.',
-          sample: '{1, 2, 3}',
+          sample: 'Set(1, 2, 3)',
         },
       ],
       wikidata: 'Q205170',

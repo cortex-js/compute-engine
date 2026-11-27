@@ -435,8 +435,8 @@ describe('EPSIL EFFECTS — end to end through the engine', () => {
       ce,
       [
         'f(n) = do {',
-        '  let acc = {}',
-        '  for p in 2..n { acc = union(acc, {p}) }',
+        '  let acc = set()',
+        '  for p in 2..n { acc = union(acc, set(p)) }',
         '  filter(1..n, k => k !in acc)',
         '}',
         'f(5)',

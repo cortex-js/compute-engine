@@ -537,6 +537,9 @@ export class Parser {
    * call's `(` is the key of a rule argument (`f(GridLines -> [10, 10])`),
    * not a lambda parameter. */
   private callArgumentOpens = new Set<number>();
+  /** The local start of the argument being parsed, for each call argument
+   * list, by the offset of its `(`. */
+  private callArgumentStarts = new Map<number, number>();
 
   /** Implicit guards accumulated while patternizing a single `match` case:
    * one `Element(name, type)` per type-annotated binding (`n: integer`). Reset
@@ -4021,7 +4024,7 @@ export class Parser {
    * collection]`, or `["Element", binding, collection, guard]` when the clause
    * has a guard, the same three-operand form `Sum` and `Product` take. The
    * result is `["Comprehension", body, clause, …]`; the caller wraps it for
-   * a set or a dictionary. Later clauses see the names bound by earlier
+   * a dictionary. Later clauses see the names bound by earlier
    * ones, so a clause's collection may depend on an earlier binding
    * (`[(x, y) for x in 1..3, y in 1..x]`).
    *
@@ -4837,14 +4840,17 @@ export class Parser {
     );
   }
 
-  /** A brace pattern: `{k -> p, …}` → `Dictionary` (keys literal, values
-   * patternized); `{p, …}` → `Set` of patterns; `{}` → empty `Set`. */
+  /** A brace pattern is a dictionary pattern: `{k -> p, …}` → `Dictionary`
+   * (keys literal, values patternized); `{}` and `{->}` → the empty
+   * `Dictionary`. A set pattern is the operator pattern `Set(p, …)`: `{p, …}`
+   * is a `brace-set-literal` error with that fixit, recovered as the `Set`
+   * of patterns. */
   private parseBracePattern(): MathJsonExpression {
-    // `{}` → empty Set.
+    // `{}` → empty Dictionary.
     if (this.peek().type === 'CLOSE_BRACE') {
       const open = this.advance();
       const close = this.advance();
-      return this.wrap(['Set'], open.start, close.end);
+      return this.wrap(['Dictionary'], open.start, close.end);
     }
     // `{->}` → empty Dictionary.
     if (
@@ -4861,6 +4867,7 @@ export class Parser {
     const { values, open, end } = this.parsePatternElements('CLOSE_BRACE', '}');
     if (values.length > 0 && operator(values[0]) === 'KeyValuePair')
       return this.buildDictionary(values, open.start, end);
+    this.reportBraceSet(open.start, end, 'Set(', ')');
     return this.wrap(
       ['Set', ...values] as MathJsonExpression[],
       open.start,
@@ -7366,7 +7373,9 @@ export class Parser {
   /**
    * The tail of a conditional expression — `if cond else alternative`, with
    * the already-parsed `consequent` to its left and the `if` current —
-   * yielding `["If", cond, consequent, alternative]`.
+   * yielding `["If", cond, consequent, alternative]`. In a call argument, an
+   * indexing set with no `else` (`k in xs if cond`) is the guarded clause
+   * `["Element", k, xs, cond]`.
    *
    * Unlike the block form (`parseIf`), both branches are plain **expressions**,
    * never `Block`s, so the conditional introduces no scope and no statement can
@@ -7389,6 +7398,33 @@ export class Parser {
     this.checkConditionAssign(cond);
 
     if (!(this.check('SYMBOL') && this.current.text === 'else')) {
+      // `k in xs if cond` as an argument of a call is an indexing set with a
+      // condition (`sum(k, k in 1..10 if isPrime(k))`), the clause of a
+      // comprehension: `["Element", k, xs, cond]`.
+      // The conditional is the whole argument: it starts the argument and a
+      // `,` or the `)` follows it, so a lambda body (`map(xs, x => x in s if
+      // c)`) or a named argument keeps needing its `else`.
+      const top = this.brackets[this.brackets.length - 1];
+      if (
+        top !== undefined &&
+        this.callArgumentOpens.has(top.start) &&
+        this.callArgumentStarts.get(top.start) ===
+          this.outerStart(consequent) &&
+        (this.check('COMMA') || this.check('CLOSE_PAREN')) &&
+        operator(consequent) === 'Element' &&
+        operands(consequent).length === 2 &&
+        symbol(operand(consequent, 1)) !== null
+      )
+        return this.wrap(
+          [
+            'Element',
+            operand(consequent, 1)!,
+            operand(consequent, 2)!,
+            cond,
+          ] as MathJsonExpression[],
+          this.outerStart(consequent) ?? kw.start,
+          this.outerEnd(cond) ?? this.previousEnd()
+        );
       this.error(
         ['conditional-else-expected'],
         this.current.start,
@@ -9744,16 +9780,19 @@ export class Parser {
   }
 
   /**
-   * A brace construct: `{}` → `["Set"]`; `{->}` → empty `Dictionary`; a first
-   * element with a top-level `->` → `Dictionary` (all elements must then be
-   * `key -> value`); otherwise a `Set`.
+   * A brace construct is a dictionary: `{}` and `{->}` are the empty
+   * `Dictionary`, and every element is a `key -> value` pair or a `...d`
+   * merge. Braces do not make a set: a literal whose elements are values
+   * (`{1, 2}`) or a comprehension whose body is a value (`{x for x in xs}`)
+   * is a `brace-set-literal` error, with a fixit to `set(…)` or
+   * `setFrom([…])`, and is recovered as that set.
    */
   private parseBrace(): MathJsonExpression {
-    // `{}` → empty Set.
+    // `{}` → empty Dictionary.
     if (this.peek().type === 'CLOSE_BRACE') {
       const open = this.advance(); // `{`
       const close = this.advance(); // `}`
-      return this.wrap(['Set'], open.start, close.end);
+      return this.wrap(['Dictionary'], open.start, close.end);
     }
     // `{->}` → empty Dictionary.
     if (
@@ -9778,14 +9817,12 @@ export class Parser {
         /* allowComprehension */ true
       );
 
-    // A brace comprehension. The body decides the kind exactly as the first
-    // element of a literal does: `{k -> v for …}` builds a DICTIONARY from
-    // the `(key, value)` pairs the comprehension produces (the key is an
+    // A brace comprehension: `{k -> v for …}` builds a DICTIONARY from the
+    // `(key, value)` pairs the comprehension produces (the key is an
     // expression here — it is evaluated, unlike the unquoted literal key of
-    // `{one -> 1}`, which becomes a string); any other body builds a SET from
-    // the values. Both lower to the constructor the spread forms use
-    // (`{...xs}` is `SetFrom`, `{->, ...d}` is `DictionaryFrom`), so the set
-    // deduplicates and the dictionary keeps the last value of a repeated key.
+    // `{one -> 1}`, which becomes a string), as `DictionaryFrom`, so the
+    // dictionary keeps the last value of a repeated key. A body that is not
+    // a pair is the set `setFrom([body for …])` written with braces.
     if (comprehension !== undefined) {
       const body = operand(comprehension, 1);
       if (body !== null && operator(body) === 'KeyValuePair') {
@@ -9817,6 +9854,7 @@ export class Parser {
           end
         );
       }
+      this.reportBraceSet(open.start, end, 'setFrom([', '])');
       return this.wrap(
         ['SetFrom', comprehension] as MathJsonExpression[],
         open.start,
@@ -9824,19 +9862,69 @@ export class Parser {
       );
     }
 
-    // Disambiguate Set vs Dictionary: ANY element with a top-level `->` (a
-    // `KeyValuePair`), or the bare `->` marker, makes it a dictionary
-    // (ruled 2026-08-14 — a `...spread` element carries no `->`, so a pure
-    // merge is spelled `{->, ...d1, ...d2}` while `{...a, ...b}` is a
-    // set-spread).
-    if (dictMarker || values.some((v) => operator(v) === 'KeyValuePair'))
+    // A dictionary: an element with a top-level `->` (a `KeyValuePair`), the
+    // bare `->` marker, or only `...d` merges (`{...d1, ...d2}`). Elements
+    // that are values, with no pair, are a set written with braces.
+    if (
+      dictMarker ||
+      values.some((v) => operator(v) === 'KeyValuePair') ||
+      values.every((v) => operator(v) === 'Spread')
+    )
       return this.buildDictionary(values, open.start, end);
 
+    // A brace that holds one `name = value` is the block of another
+    // language (`x => { a = 2 }`): the fixit makes it a `do` block.
+    if (values.length === 1 && this.isSingleEqualsEquation(values[0]))
+      this.reportBraceSet(open.start, end, 'do {', '}');
+    else this.reportBraceSet(open.start, end, 'set(', ')');
     return this.wrap(
       ['Set', ...values] as MathJsonExpression[],
       open.start,
       end
     );
+  }
+
+  /** Whether `node` is an `Equal` written with `=` (not `==`): the parser
+   * gives both the same node, so only the source between its operands tells
+   * them apart. */
+  private isSingleEqualsEquation(node: MathJsonExpression): boolean {
+    if (operator(node) !== 'Equal' || operands(node).length !== 2) return false;
+    const gapStart = this.localEnd(operand(node, 1)!);
+    const gapEnd = this.localStart(operand(node, 2)!);
+    if (gapStart === undefined || gapEnd === undefined) return false;
+    return /^\s*=(?!=)/.test(this.source.slice(gapStart, gapEnd));
+  }
+
+  /** Report a set written with braces, `{…}` from the local `start` to
+   * `end`, with a fixit that replaces the opening brace by `opening` and the
+   * closing brace by `closing` (`set(…)`, `setFrom([…])`, `do {…}`, whose
+   * closing brace stays). The fixit is left out when the literal has no
+   * closing brace. */
+  private reportBraceSet(
+    start: number,
+    end: number,
+    opening: string,
+    closing: string
+  ): void {
+    const diagnostic: ParsingDiagnostic = {
+      severity: 'error',
+      message: ['brace-set-literal', opening],
+      range: [this.baseOffset + start, this.baseOffset + end],
+    };
+    if (this.source[end - 1] === '}')
+      diagnostic.fixits = [
+        [this.baseOffset + start, this.baseOffset + start + 1, opening],
+        ...(closing === '}'
+          ? []
+          : [
+              [this.baseOffset + end - 1, this.baseOffset + end, closing] as [
+                number,
+                number,
+                string,
+              ],
+            ]),
+      ];
+    this.diagnostics.push(diagnostic);
   }
 
   /** Assemble a `Dictionary` from parsed brace elements. Every element must be
@@ -10071,11 +10159,81 @@ export class Parser {
           if (this.check(closeType)) break; // trailing comma
           continue;
         }
-        const expr = this.parseExpression(0);
+        if (allowNamedArgs)
+          this.callArgumentStarts.set(open.start, this.current.start);
+        let expr = this.parseExpression(0);
         if (expr === null) {
           this.reportUnexpected(this.current);
           this.recoverInBracket();
           break;
+        }
+        // `key: value` in a brace literal, the spelling of JSON and Python: a
+        // `dictionary-arrow-expected` error with a fixit to `key -> value`,
+        // read as that pair. As for a named argument, a token that starts
+        // with `:` opens it (`{a:-1}`), but not `:=` or `::`.
+        if (
+          allowDictionaryMarker &&
+          this.check('OPERATOR') &&
+          this.current.text.startsWith(':') &&
+          !this.current.text.startsWith(':=') &&
+          !this.current.text.startsWith('::')
+        ) {
+          const colon = this.current;
+          // `->` is spaced on both sides, as an infix operator must be.
+          const arrow =
+            (colon.precededByWhitespace ? '' : ' ') +
+            '->' +
+            (/\s/.test(this.source[colon.start + 1] ?? ' ') ? '' : ' ');
+          const fixits: Fixit[] = [
+            [
+              this.baseOffset + colon.start,
+              this.baseOffset + colon.start + 1,
+              arrow,
+            ],
+          ];
+          this.diagnostics.push({
+            severity: 'error',
+            message: ['dictionary-arrow-expected'],
+            range: [
+              this.baseOffset + colon.start,
+              this.baseOffset + colon.start + 1,
+            ],
+            fixits,
+          });
+          this.consumeNamedArgumentColon();
+          const value = this.parseExpression(0);
+          if (value === null) {
+            this.reportUnexpected(this.current);
+            this.recoverInBracket();
+            break;
+          }
+          // A value that binds as loosely as `->` or more (`x => x + 1`,
+          // `xs |> sort`) is parenthesized by the fixit: `{"f" -> x => x}`
+          // would read the pair as the parameters of the lambda.
+          const valueStart = this.outerStart(value);
+          const valueEnd = this.outerEnd(value);
+          const looseness = operatorDefByName(
+            operator(value) === 'Function' ? 'MapsTo' : operator(value)
+          )?.precedence;
+          if (
+            valueStart === this.localStart(value) &&
+            valueStart !== undefined &&
+            valueEnd !== undefined &&
+            looseness !== undefined &&
+            looseness <= operatorDefByName('KeyValuePair')!.precedence
+          )
+            fixits.push(
+              [this.baseOffset + valueStart, this.baseOffset + valueStart, '('],
+              [this.baseOffset + valueEnd, this.baseOffset + valueEnd, ')']
+            );
+          // The pair is the element, and the body of a comprehension that
+          // follows (`{k: v for k in ks}`, Python's dictionary
+          // comprehension).
+          expr = this.wrap(
+            ['KeyValuePair', expr, value] as MathJsonExpression[],
+            this.outerStart(expr) ?? colon.start,
+            this.outerEnd(value) ?? this.previousEnd()
+          );
         }
         // `body for binding in collection …` — a comprehension. Only a first
         // plain element can be a body; the clauses run to the closer.
@@ -10502,10 +10660,8 @@ function lowerParameterDefault(
   if (isStringObject(node)) return { value: node };
   if (ops !== null && ops.length === 1) {
     if (ops[0] === 'List') return { value: node };
-    // `{}` is the empty SET in an expression, and `{->}` the empty
-    // dictionary. A default has no set value, so both spell the empty
-    // dictionary here, as `{}` does in a type signature.
-    if (ops[0] === 'Set' || ops[0] === 'Dictionary')
+    // `{}` and `{->}` are the empty dictionary.
+    if (ops[0] === 'Dictionary')
       return {
         value: {
           fn: ['Dictionary'],

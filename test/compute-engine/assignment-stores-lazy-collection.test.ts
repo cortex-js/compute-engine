@@ -288,7 +288,7 @@ describe('a lazy collection that stays lazy reads its variables when an element 
     ],
     [
       'a filter over a set held by a local typed collection<any>',
-      'let k = 1\nlet s: collection<any> = {1, 2, 3}\nlet z = filter(s, c => c > k)\nlet a = length(z)\nk = 2\n[a, length(z)]',
+      'let k = 1\nlet s: collection<any> = set(1, 2, 3)\nlet z = filter(s, c => c > k)\nlet a = length(z)\nk = 2\n[a, length(z)]',
       '[2,1]',
     ],
     [

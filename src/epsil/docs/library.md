@@ -335,7 +335,7 @@ The [Collections reference](/epsil/reference/collections/) has the full descript
 | `rotateRight` | `RotateRight` | `((xs: T, n: integer?) -> T where T: string) & ((xs: T, n: integer?) -> T where T: list) & ((xs: indexed_collection<T>, n: integer?) -> list<T> where T: any)` | Rotate the elements of the collection to the right by n positions. |
 | `scan` | `Scan` | `(xs: indexed_collection<T>, reducer: (unknown, T) any -> unknown, initial: value?) -> indexed_collection where T` | Return the cumulative fold of a collection: a same-length collection whose k-th element is the running result of applying a binary function left to right (optionally seeded by an initial value). |
 | `second` | `Second` | `(xs: indexed_collection<any>) -> any` | The second element of a collection. |
-| — | `Set` | `(any*) -> set` | An unordered collection of distinct elements (a set). |
+| `set` | `Set` | `(any*) -> set` | An unordered collection of distinct elements (a set). |
 | `setFrom` | `SetFrom` | `(value*) -> set` | Create a set from the elements of a collection. |
 | `setMinus` | `SetMinus` | `(set<any>, value*) -> set` | Return the set difference between the first set and subsequent values. |
 | — | `Single` | `(value: T) -> tuple<T> where T` | A tuple with a single element |

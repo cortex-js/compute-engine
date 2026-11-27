@@ -762,7 +762,7 @@ Intersection(d48, d36)`);
     const { text, diagnostics } = run(`
 let d48 = [1, 2, 3, 4, 6, 8, 12, 16, 24, 48]
 let d36 = [1, 2, 3, 4, 6, 9, 12, 18, 36]
-Intersection(d48, d36) == {1, 2, 3, 4, 6, 12}`);
+Intersection(d48, d36) == set(1, 2, 3, 4, 6, 12)`);
     expect(diagnostics).toEqual([]);
     expect(text).toBe('"True"');
   });

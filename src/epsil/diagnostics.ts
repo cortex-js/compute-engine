@@ -9,6 +9,8 @@ export type DiagnosticCode =
   | 'closing-bracket-expected' // %0 = bracket
   | 'decimal-number-expected'
   | 'dictionary-key-value-expected'
+  | 'dictionary-arrow-expected' // a `key: value` entry in a brace literal (`{a: 1}`, `{"a": 1}`), the spelling of JSON and Python; carries a fixit replacing `:` by `->` and is recovered as the pair `key -> value`
+  | 'brace-set-literal' // %0 = the spelling that replaces the opening brace (`set(`, `setFrom([`, `Set(`, or `do {` for a brace that holds one `name = value`, the block of another language) — a set written with braces (`{1, 2}`, `{x for x in xs}`, the pattern `{a, b}`): braces make a dictionary. Carries a fixit and is recovered as the set
   | 'duplicate-dictionary-key' // %0 = key
   | 'eof-expected' // %0 = unexpected symbol
   | 'empty-verbatim-symbol'

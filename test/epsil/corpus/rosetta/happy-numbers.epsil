@@ -1,10 +1,10 @@
 // The first eight happy numbers, by iterating the digit-square sum until 1 or a
 // cycle, compared with the library predicate.
 isHappyByHand(n) = do {
-  let seen = {}
+  let seen = set()
   let m = n
   while m != 1 && m !in seen {
-    seen = union(seen, {m})
+    seen = union(seen, set(m))
     m = sum(map(d => d^2, integerDigits(m)))
   }
   m == 1

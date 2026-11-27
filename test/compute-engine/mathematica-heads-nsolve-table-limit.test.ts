@@ -160,25 +160,23 @@ describe('NSolve', () => {
   });
 });
 
-describe('Table with the `{i, n}` iterator spec', () => {
+describe('Table with the `(i, n)` iterator spec', () => {
   const table = (...ops: any[]) =>
     ce
       .box(['Table', ...ops] as any)
       .evaluate()
       .toString();
 
-  test('box route: Set, Tuple and Pair spellings', () => {
-    expect(table(['Power', 'i', 2], ['Set', 'i', 4])).toBe('[1,4,9,16]');
+  test('box route: Tuple and Pair spellings', () => {
     expect(table(['Power', 'i', 2], ['Tuple', 'i', 4])).toBe('[1,4,9,16]');
     expect(table(['Power', 'i', 2], ['Pair', 'i', 4])).toBe('[1,4,9,16]');
-    // Same value as the `{i, 1, n}` spelling.
-    expect(table(['Power', 'i', 2], ['Set', 'i', 4])).toBe(
-      table(['Power', 'i', 2], ['Set', 'i', 1, 4])
+    // Same value as the `(i, 1, n)` spelling.
+    expect(table(['Power', 'i', 2], ['Tuple', 'i', 4])).toBe(
+      table(['Power', 'i', 2], ['Tuple', 'i', 1, 4])
     );
   });
 
-  test('parse route: `\\{i, n\\}` and `(i, n)`', () => {
-    expect(evalLatex('\\operatorname{Table}(i^2, \\{i, 3\\})')).toBe('[1,4,9]');
+  test('parse route: `(i, n)`', () => {
     expect(evalLatex('\\operatorname{Table}(i^2, (i, 3))')).toBe('[1,4,9]');
   });
 
@@ -193,19 +191,19 @@ describe('Table with the `{i, n}` iterator spec', () => {
 
   test('nested specs, mixed spellings', () => {
     expect(
-      table(['Multiply', 'i', 'j'], ['Set', 'i', 2], ['Tuple', 'j', 3])
+      table(['Multiply', 'i', 'j'], ['Pair', 'i', 2], ['Tuple', 'j', 3])
     ).toBe('[[1,2,3],[2,4,6]]');
     expect(
-      evalLatex('\\operatorname{Table}(i j, \\{i, 2\\}, \\{j, 1, 3\\})')
+      evalLatex('\\operatorname{Table}(i j, (i, 2), (j, 1, 3))')
     ).toBe('[[1,2,3],[2,4,6]]');
   });
 
-  test('a symbolic count stays symbolic, as `{i, 1, n}` does', () => {
-    const e = ce.box(['Table', ['Power', 'i', 2], ['Set', 'i', 'n']] as any);
+  test('a symbolic count stays symbolic, as `(i, 1, n)` does', () => {
+    const e = ce.box(['Table', ['Power', 'i', 2], ['Tuple', 'i', 'n']] as any);
     expect(e.operator).toBe('Tabulate');
     expect(
       e.isSame(
-        ce.box(['Table', ['Power', 'i', 2], ['Set', 'i', 1, 'n']] as any)
+        ce.box(['Table', ['Power', 'i', 2], ['Tuple', 'i', 1, 'n']] as any)
       )
     ).toBe(true);
   });
@@ -218,9 +216,9 @@ describe('Table with the `{i, n}` iterator spec', () => {
     );
   });
 
-  test('Epsil route: `Table(k^2, (k, 5))` and `{k, 5}`', () => {
+  test('Epsil route: `Table(k^2, (k, 5))` and `k in 1..5`', () => {
     expect(epsil('Table(k^2, (k, 5))')).toBe('[1,4,9,16,25]');
-    expect(epsil('Table(k^2, {k, 5})')).toBe('[1,4,9,16,25]');
+    expect(epsil('Table(k^2, k in 1..5)')).toBe('[1,4,9,16,25]');
   });
 });
 

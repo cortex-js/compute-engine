@@ -64,9 +64,9 @@ let double = x => 2x
 | Python | Epsil |
 |:--|:--|
 | `[1, 2, 3]` | `[1, 2, 3]` |
-| `{1, 2, 3}` (set) | `{1, 2, 3}` |
+| `{1, 2, 3}` (set) | `set(1, 2, 3)` |
 | `(1, 2)` (tuple) | `(1, 2)` |
-| `{"a": 1}` (dict) | `{"a" -> 1}`; empty dictionary is `{->}` |
+| `{"a": 1}` (dict) | `{"a" -> 1}`; empty dictionary is `{}`; `{"a": 1}` is an error whose fixit writes the `->` |
 | `d["a"]` | `d["a"]`, or `d.a` when the key is an identifier |
 | `xs[0]` | `xs[1]` — **1-based** |
 | `xs[-1]` | `xs[-1]` |
@@ -111,7 +111,8 @@ default. See [Traps](#traps).
 
 List, set and dictionary comprehensions read as in Python, with two
 differences: several `for` clauses are separated by a **comma** instead of a
-repeated `for`, and a dictionary key is written with `->`.
+repeated `for`, and a dictionary key is written with `->`. A set
+comprehension is `setFrom` of a list comprehension.
 
 ```python
 [n**2 for n in range(1, 11) if n % 2 == 1]
@@ -122,13 +123,14 @@ repeated `for`, and a dictionary key is written with `->`.
 
 ```epsil
 [n^2 for n in 1..10 if n % 2 == 1]        // ➔ [1, 9, 25, 49, 81]
-{n % 3 for n in 1..10}                     // ➔ {1, 2, 0}
+setFrom([n % 3 for n in 1..10])            // ➔ Set(0, 1, 2)
 {s -> length(s) for s in ["ab", "cde"]}    // ➔ {"ab" -> 2, "cde" -> 3}
 [(x, y) for x in 1..3, y in 1..x]
 ```
 
 There is no bare generator expression: `sum(n**2 for n in …)` is written with
-brackets, `sum([n^2 for n in 1..10 if n % 2 == 1])`, or as a pipeline. A list
+brackets, `sum([n^2 for n in 1..10 if n % 2 == 1])`, with an indexing set,
+`sum(n^2, n in 1..10 if n % 2 == 1)`, or as a pipeline. A list
 comprehension is lazy like a Python generator, so the brackets cost nothing
 until the list is read. The pipeline operator `|>` with `filter`/`map` remains
 available; `_` is the placeholder for the piped value.
