@@ -8181,7 +8181,6 @@ function lowerOnce(
    *  pass in a frame of its own, which compiled code does not have. */
   let parallel: Fn | undefined;
   const parallelLoop = (e: Fn, want: boolean): undefined => {
-    if (!options.javascript) decline(e, 'a parallel for (JavaScript only)');
     const outer = outerWrite(e.ops[0], new Set());
     if (outer !== undefined)
       decline(
@@ -8191,7 +8190,7 @@ function lowerOnce(
     if (jumps(e.ops[0]) !== 0)
       decline(e, 'a Break or a Continue of a parallel for (parallel-exit)');
     parallel ??= e;
-    return loop(e, want, true);
+    return loop(e, want, options.javascript);
   };
 
   /** A name declared outside `x` that `x` writes with `Assign`: a name of

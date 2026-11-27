@@ -3224,8 +3224,8 @@ a `Tuple` of the same length, a lane change (a real value for an integer local)
 and a read of its value decline. `facts()` counts the targets of both as writes,
 so a `Loop` carries them.
 
-`ParallelLoop(body, Element(x, coll), …)` (the Epsil `parallel for`) on
-JavaScript is the `Loop` of the same operands (`parallelLoop()`): the passes run
+`ParallelLoop(body, Element(x, coll), …)` (the Epsil `parallel for`) is the
+`Loop` of the same operands on all targets (`parallelLoop()`): the passes run
 in order on one thread, as the interpreter runs them, so a read of an
 accumulator in a pass gives the interpreter's value. It declines when the body
 assigns with `Assign` a name declared outside it (`outerWrite()`; `AddTo` is the
@@ -3235,8 +3235,8 @@ its own (`jumps()`, which stops at an inner `Loop` or `ParallelLoop`:
 `choice`, a `sample` or a `seeded` region in any function (`draws()`, checked in
 `program()`): inside a frame the interpreter runs each pass in a random frame of
 its own (`docs/RANDOMNESS-MODEL.md`, "Pass frames of a parallel loop"), which
-compiled code does not have. GLSL and the interval mode decline it. The `loop`
-of its first clause is marked `parallel`, which every pass keeps (`cse` keys
+compiled code does not have. On JavaScript, the `loop` of its first clause
+is marked `parallel`, which every pass keeps (`cse` keys
 it); `runAsync()` can send such a loop to the worker pool ("Batches and
 `runAsync()`").
 

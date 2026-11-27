@@ -1251,10 +1251,11 @@ and it stays an identifier everywhere else. The statement lowers to
 `["ParallelLoop", body, ["Element", "x", "xs"]]`, and the comprehension to
 `["ParallelComprehension", body, …clauses]`.
 
-**On the worker pool.** The interpreter runs the passes of a `parallel for`
-and of a parallel comprehension in order, on one thread. Compiled to
-JavaScript, a `parallel for` runs in order in `run()` too, and `runAsync()`
-sends it to the engine's worker pool when its passes only add to numbers
+**Compiled loops.** The interpreter runs the passes of a `parallel for`
+and of a parallel comprehension in order, on one thread. JavaScript's
+`run()`, GLSL and `interval-js` run supported loops in order too.
+JavaScript's `runAsync()` sends a loop to the engine's worker pool when
+its passes only add to numbers
 (`s += e`) and to the elements of a list declared outside the loop
 (`L[i] += e`), with no other read of them: each worker runs a range of the
 passes, and the partial sums are added in order. A parallel comprehension

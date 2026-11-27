@@ -427,14 +427,43 @@ describe('ParallelLoop runs in order (4.4)', () => {
     );
   });
 
-  test('GLSL declines it', () =>
-    expect(
-      declines(
-        'function f(x: real) -> real { let s = 0.0; parallel for k in 1..4 { s += k * x }; s }',
-        { x: 0.5 },
-        'glsl'
-      )
-    ).toMatch(/a parallel for \(JavaScript only\)/));
+  test('GLSL emits the same counted loop as for', () => {
+    const emit = (keyword: 'for' | 'parallel for') => {
+      const ce = new ComputeEngine();
+      executeEpsil(
+        ce,
+        `function f(x: real) -> real { let s = 0.0; ${keyword} k in 1..4 { s += k * x }; s }`
+      );
+      ce.declare('x', 'real');
+      const result = compile(ce.box(['f', 'x']), {
+        to: 'glsl',
+        fallback: false,
+      });
+      expect(result.success).toBe(true);
+      return { code: result.code, preamble: result.preamble };
+    };
+    const serial = emit('for');
+    expect(serial.preamble).toContain('for (');
+    expect(emit('parallel for')).toEqual(serial);
+  });
+
+  test('interval-js runs the sequential reduction with interval arithmetic', () => {
+    const ce = new ComputeEngine();
+    executeEpsil(
+      ce,
+      'function f(x: real) -> real { let s = 0.0; parallel for k in 1..4 { s += k * x }; s }'
+    );
+    ce.declare('x', 'real');
+    const result = compile(ce.box(['f', 'x']), {
+      to: 'interval-js',
+      fallback: false,
+    });
+    expect(result.success).toBe(true);
+    expect(result.run!({ x: { lo: 0.5, hi: 1 } })).toEqual({
+      kind: 'interval',
+      value: { lo: 5, hi: 10 },
+    });
+  });
 });
 
 // The `step` of Tycho's `buddhabrot` prelude, without its comments.

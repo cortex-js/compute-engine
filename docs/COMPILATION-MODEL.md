@@ -756,7 +756,7 @@ interpreter's value. A line is removed when the case declines or is fixed.
 
 ## `parallel for` and `runAsync()`
 
-On `javascript` a `parallel for` (`ParallelLoop(body, Element(x, coll))`)
+On all targets a `parallel for` (`ParallelLoop(body, Element(x, coll))`)
 compiles as the `Loop` of the same operands: its passes run in order, on one
 thread, as the interpreter runs them, so its values are the interpreter's,
 also where a pass reads an accumulator (`parallel for k in 1..3 { s += k;
@@ -766,7 +766,8 @@ declared outside the loop other than with `AddTo` (`s = s + k`:
 loop itself (`parallel-exit`; those of an inner `Loop` compile), and when the
 program draws or has a `WithRandomSeed` frame: inside a frame the
 interpreter runs each pass in a random frame of its own, which compiled code
-does not have. GLSL and the interval mode decline it.
+does not have. GLSL and the interval mode apply their usual loop and body
+limits. For example, both support a scalar reduction `s += k * x`.
 
 A `javascript` result called with an object of variables
 (`calling: 'expression'`) has `runAsync(inputs, options?)`, a promise of the

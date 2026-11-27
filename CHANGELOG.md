@@ -57,6 +57,10 @@
 
 ### Improvements
 
+- **GLSL and interval compilation accept sequential `parallel for` loops.**
+  A scalar reduction such as `parallel for k in 1..4 { s += k * x }`
+  compiles with the target's usual support for `for` loops.
+
 - **Compiled expressions accept named numeric tuples as inputs.** With
   `type Point = tuple<x: real, y: real>` and `p: Point`, JavaScript reads
   `p.x` from `run({ p: { x: 3, y: 4 } })`. GLSL reads the same point from
