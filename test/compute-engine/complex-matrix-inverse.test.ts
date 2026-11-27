@@ -214,6 +214,25 @@ describe('INVERSE OF A MATRIX OF COMPLEX MACHINE NUMBERS', () => {
     expect(ce.box(['Inverse', toJson(m)]).evaluate().operator).toBe('Inverse');
   });
 
+  test.each([
+    [0.1, 0.3, 0.3, 0.9],
+    [0.6, 0.7, 4.2, 4.9],
+  ])(
+    'a rounding residue in a zero entry cannot become a pivot (%s, %s, %s, %s)',
+    (a, b, c, d) => {
+      const m: C[][] = [
+        [[0, a], [0, b], [0, 0]],
+        [[0, c], [0, d], [0, 0]],
+        [[0, 0], [1, 0], [1, 0]],
+      ];
+      expect(complexMatrixInverse(toComplex(m))).toBeUndefined();
+
+      const inverse = ce.box(['Inverse', toJson(m)]);
+      expect(inverse.evaluate().operator).toBe('Inverse');
+      expect(inverse.N().operator).toBe('Inverse');
+    }
+  );
+
   for (const [name, m] of REGULAR) {
     test(`a regular matrix: ${name}`, () => {
       const a = toComplex(m);

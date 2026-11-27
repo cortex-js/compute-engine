@@ -78,6 +78,11 @@
   an `incompatible-type` error. The names are kept when the pixel is saved
   in a variable.
 
+- **The inverse of a singular complex decimal matrix stays unevaluated when
+  rounding affects a zero entry** (CE-1862). `Inverse([[0.1i, 0.3i, 0],
+  [0.3i, 0.9i, 0], [0, 1, 1]])` used to give entries of magnitude up to
+  `5.4e16`. It now stays unevaluated with both `evaluate()` and `N()`.
+
 - **Epsil reports `dictionary-entry-expected` at an unfinished dictionary
   entry.** `plot(sin(x), {` and `{a -> 1,` now expect a dictionary entry.
   `f(1,` and the empty value in `{a -> ▮` still report

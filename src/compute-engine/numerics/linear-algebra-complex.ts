@@ -15,7 +15,7 @@ import { complexDivide } from './numeric-complex.js';
  *  elimination in doubles leaves a rounding residue
  *  (`[[3 + i, 2, 1], [1, 1, 1], [4 + i, 3, 2]]` gives entries of about
  *  5e15). Here an entry of the elimination is a residue when its modulus is
- *  at most `1024ε` times its running bound (`bound`: the sum of the moduli
+ *  at most `1024ε` times its running scale (`bound`, which tracks the sizes
  *  of the terms that made it). A residue is not a pivot, and the matrix is
  *  singular when every candidate for a pivot is a residue: a residue pivot
  *  was at most `43ε` of its bound over 45,000 random singular matrices of
@@ -32,7 +32,7 @@ import { complexDivide } from './numeric-complex.js';
  *  The result is also `undefined` when an entry of `m` is infinite or NaN,
  *  or when an entry of the inverse is (an intermediate value was out of the
  *  range of a double): the elimination has no test for these values, and
- *  its result for them is not the inverse. A running bound adds moduli with
+ *  its result for them is not the inverse. The running scale adds terms with
  *  no cancellation, so it can be infinite where the entry is finite; the
  *  pivot is then refused, and a regular matrix with entries near the top of
  *  the range of a double (`[[1e308, 1e308], [1e308·i, -1e308]]`) has no
@@ -74,10 +74,19 @@ export function complexMatrixInverse(
       const factor = aug[i][k];
       if (factor.isZero()) continue;
       const factorSize = factor.abs();
+      const factorBound = bound[i][k];
+      const factorIsResidue = factorSize <= tiny * factorBound;
+      for (let j = k + 1; j < n; j++) {
+        // A residue cannot create a pivot in a cell that was zero or
+        // already a residue. A significant entry keeps its own scale.
+        const scale =
+          factorIsResidue && aug[i][j].abs() <= tiny * bound[i][j]
+            ? factorBound
+            : factorSize;
+        bound[i][j] = bound[i][j] + scale * bound[k][j];
+      }
       for (let j = 0; j < 2 * n; j++)
         aug[i][j] = aug[i][j].sub(factor.mul(aug[k][j]));
-      for (let j = 0; j < n; j++)
-        bound[i][j] = bound[i][j] + factorSize * bound[k][j];
     }
   }
   return finiteOrUndefined(aug.map((row) => row.slice(n)));
