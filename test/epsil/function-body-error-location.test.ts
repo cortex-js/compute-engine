@@ -236,6 +236,36 @@ describe('an error made by an earlier statement', () => {
     const src = `let q: any = "a"\nlet x = 2\nlet w2: any = ${fn}(q)\nlet v = w2 * ${fn}(x)\n0`;
     expect(underlines(src)).toEqual(['w2']);
   });
+
+  // The value of the statement holds the error of `x` in a tuple or a set:
+  // the sum did not fail, and records no frame. The frames
+  // `Ln argument 1, Add argument 2` recorded by the statement of `x` would
+  // select the `y` of `ln(y)`.
+  const prefix = 'let w: any = "s"\nlet y = 2\nlet x = y + ln(w)\n';
+  test.each([
+    ['let v = Tuple(x, 1) + ln(y)', 'let v = Tuple(x, 1) + ln(y)'],
+    ['let v = Tuple(x, 1) - ln(y)', 'let v = Tuple(x, 1) - ln(y)'],
+    ['let v = set(x) + ln(y)', 'let v = set(x) + ln(y)'],
+    ['let v = Tuple(x) + ln(2)', 'let v = Tuple(x) + ln(2)'],
+    // A variable holds the tuple.
+    ['let t = Tuple(x, 1)\nlet v = t + ln(y)', 'let v = t + ln(y)'],
+    // The error was made by `Ln(w)`, but the other tuple can hold an error
+    // made outside the statement.
+    [
+      'let v = Tuple(y, Ln(w)) + Tuple(x)',
+      'let v = Tuple(y, Ln(w)) + Tuple(x)',
+    ],
+    // The sum records its frame, which selects the operand.
+    ['let v = do { x } + ln(y)', 'do { x }'],
+    ['let v = x + ln(y)', 'x'],
+    // No other element can hold an error made outside the statement.
+    ['let v = Tuple(Ln(w), 1) + Tuple(y, 2)', 'w'],
+    // The error bubbled out of the statement, and the frames of the
+    // statement select the argument.
+    ['let v = Ln(w) + Length([x, 2])', 'w'],
+  ])('%s underlines %s', (stmt, expected) => {
+    expect(underlines(`${prefix}${stmt}\n0`)).toEqual([expected]);
+  });
 });
 
 describe('the frames of the statement still select the argument', () => {

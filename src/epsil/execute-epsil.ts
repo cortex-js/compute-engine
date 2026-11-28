@@ -849,7 +849,8 @@ function* executeEpsilSteps(
           stmt,
           range,
           boxedStmt,
-          heldElement(ce, value, heldErrors[0], stmt, boxedStmt)
+          heldElement(ce, value, heldErrors[0], stmt, boxedStmt),
+          isHeldInCollection(value, heldErrors[0])
         ).range;
     });
     // A runtime problem in a NON-final statement would otherwise vanish —
@@ -1420,8 +1421,10 @@ export function errorFrameChain(
  *
  * A range in one element of a list or a tuple literal is not used when
  * another element can hold an error made outside the statement
- * ({@link isAcrossElements}): the range of the statement, or of `element`,
- * is the range then.
+ * ({@link isAcrossElements}), and, when the value holds the error in a
+ * collection, a range is not used when a part of the statement outside it
+ * can hold such an error ({@link isOuterErrorOutside}): the range of the
+ * statement, or of `element`, is the range then.
  */
 function narrowErrorRange(
   ce: ComputeEngine,
@@ -1429,7 +1432,10 @@ function narrowErrorRange(
   stmt: MathJsonExpression,
   fallback: [number, number],
   boxedStmt?: Expression,
-  held?: HeldElement
+  held?: HeldElement,
+  /** Whether the value of the statement holds the error in a list, a tuple
+   * or a set ({@link isHeldInCollection}). */
+  inCollection = false
 ): { range: [number, number]; frames: (ErrorFrameRef | null)[] } {
   let frames = traceFrames(error);
   const read = elementReader(ce, stmt, boxedStmt);
@@ -1460,7 +1466,8 @@ function narrowErrorRange(
   );
   if (
     located.range !== fallback &&
-    isAcrossElements(ce, stmt, located.range, read)
+    (isAcrossElements(ce, stmt, located.range, read) ||
+      (inCollection && isOuterErrorOutside(ce, stmt, located.range, read)))
   )
     return { range: fallback, frames: located.frames };
   return located;
@@ -1656,6 +1663,86 @@ function isAcrossElements(
         return true;
     }
     pending.push(...ops);
+  }
+  return false;
+}
+
+/**
+ * Whether a part of the written value of `region` (raw MathJSON, see
+ * {@link writtenStatementValue}) that the range `range` neither is inside
+ * nor contains can hold an error with frames recorded outside the statement
+ * ({@link hasOuterFrames}). It is read when the value of the statement holds
+ * the error in a list, a tuple or a set ({@link isHeldInCollection}).
+ *
+ * The calls around such a collection did not fail, so they recorded no
+ * frame, and the frames of the error can all come from the body of a called
+ * function or from the earlier statement that assigned a variable. They can
+ * then match a call of the statement outside the part that holds the error:
+ * with `let x = y + ln(w)`, the frames `Ln argument 1, Add argument 2` of the
+ * error of `Tuple(x, 1) + ln(y)`, and of `t + ln(y)` with
+ * `let t = Tuple(x, 1)`, select the `y` of `ln(y)`. The range of the whole
+ * region is then used. This also drops a correct range when the error was
+ * made where the frames select, as in `Tuple(y, Ln(w)) + Tuple(x)`, and when
+ * a part outside the range reads a local of a block of the statement, which
+ * has no value after the statement
+ * (`do { let k = 3; Tuple(Ln(w), 1) + k }`). An error
+ * that bubbled out of the statement went through the calls of the statement,
+ * which recorded their frames: `Ln(w) + Length([x, 2])` keeps the range `w`.
+ */
+function isOuterErrorOutside(
+  ce: ComputeEngine,
+  region: MathJsonExpression,
+  range: [number, number],
+  read: ElementReader
+): boolean {
+  const pending: MathJsonExpression[] = [
+    writtenStatementValue(region) ?? region,
+  ];
+  while (pending.length > 0) {
+    const node = pending.pop()!;
+    const o = sourceOffsetsOf(node);
+    // The range contains the part, and thus the error that it can hold.
+    if (o !== undefined && range[0] <= o[0] && o[1] <= range[1]) continue;
+    const head = operator(node);
+    // A call that holds the range (or that has no source range and can hold
+    // it): only its operands can be outside.
+    if (
+      head !== '' &&
+      (o === undefined || (o[0] <= range[0] && range[1] <= o[1]))
+    ) {
+      // The operands of a `Function` after its body are its parameters,
+      // which hold no value.
+      const ops = operands(node);
+      pending.push(...(head === 'Function' ? ops.slice(0, 1) : ops));
+      continue;
+    }
+    // The placeholder `_` of a pipe is the piped operand, which is read as
+    // an operand of the pipe.
+    if (symbol(node) === '_') continue;
+    if (hasOuterFrames(ce, node, read)) return true;
+  }
+  return false;
+}
+
+/**
+ * Whether `value`, the value of a statement, holds `error` in a list, a
+ * tuple or a set: `Tuple(Error, 1) + Ln(2)`, the value of
+ * `Tuple(x, 1) + ln(y)` when `x` holds the error. The error did not bubble
+ * out of the calls around the collection, so they recorded no frame.
+ */
+function isHeldInCollection(value: Expression, error: Expression): boolean {
+  const holds = (x: Expression) => x === error || x.errors.includes(error);
+  const pending: Expression[] = [value];
+  while (pending.length > 0) {
+    const node = pending.pop()!;
+    if (node === error || !isFunction(node) || !holds(node)) continue;
+    if (
+      node.operator === 'List' ||
+      node.operator === 'Tuple' ||
+      node.operator === 'Set'
+    )
+      return true;
+    pending.push(...node.ops);
   }
   return false;
 }
@@ -2007,7 +2094,8 @@ function errorValueDiagnostic(
     boxedStmt,
     value === undefined
       ? undefined
-      : heldElement(ce, value, error, stmt, boxedStmt)
+      : heldElement(ce, value, error, stmt, boxedStmt),
+    value !== undefined && isHeldInCollection(value, error)
   );
   const range = located.range;
   const frames = errorFrameChain(error.json, located.frames);

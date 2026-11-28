@@ -143,6 +143,16 @@
 
 ### Resolved Issues
 
+- **In Epsil, an error that a tuple or a set holds no longer underlines
+  another operand of the call around it.** With `let w: any = "s"`,
+  `let y = 2` and `let x = y + ln(w)`, `let v = Tuple(x, 1) + ln(y)` and
+  `let v = set(x) + ln(y)` underlined the `y` of `ln(y)`: the frames of the
+  error were recorded by the statement of `x`. So did `let v = t + ln(y)`
+  with `let t = Tuple(x, 1)`. When the value of a statement holds the error
+  in a list, a tuple or a set, and a part of the statement outside the
+  underline reads a variable that holds an error or calls a function of the
+  program, the whole statement is now underlined.
+
 - **A sum or product with no index keeps an arithmetic lower bound.**
   `\sum_{a+1}^5 x` parsed as `["Sum", "x"]`, with no bounds, so the LaTeX of
   `["Sum", "x", ["Limits", "Nothing", ["Add", "a", 1], 5]]` did not read
