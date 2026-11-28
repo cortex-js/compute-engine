@@ -53,9 +53,8 @@ describe('CE-1175 invisible box before a prefix operator', () => {
   });
 
   test('after an operand, an empty command does not make the sign a factor', () => {
-    // `\placeholder{}` and `\smash{}` give `Nothing` but are not skipped as
-    // decorations before an infix operator: the juxtaposition reads them as
-    // its right operand. The sign after them is not a prefix operator.
+    // `\placeholder{}` and `\smash{}` give `Nothing`. The sign after them is
+    // not a prefix operator whose result is a factor of `a`.
     for (const s of [
       'a\\placeholder{}-b',
       'a\\smash{}-b',
@@ -74,6 +73,39 @@ describe('CE-1175 invisible box before a prefix operator', () => {
     }
     // The number reader does not read `-1` as a factor either.
     expect(canonical('a\\placeholder{}\\,-1')).toEqual(canonical('a-1'));
+  });
+
+  // CE-1758: an empty content command gives `Nothing` and is skipped before
+  // an infix operator, as a decoration is. It was the right operand of the
+  // juxtaposition: `a\placeholder{}-b` was `Sequence(a, Negate(b))`.
+  test.each([
+    ['a\\placeholder{}-b', 'a-b'],
+    ['a\\smash{}-b', 'a-b'],
+    ['a\\smash[b]{ }-b', 'a-b'],
+    ['a\\placeholder[b]{}-b', 'a-b'],
+    ['a\\placeholder{}\\,-b', 'a-b'],
+    ['a\\placeholder{}\\phantom{x}-b', 'a-b'],
+    ['a\\phantom{x}\\smash{}-b', 'a-b'],
+    ['x\\placeholder{}+1', 'x+1'],
+    ['x\\smash{}=1', 'x=1'],
+  ])('%s is %s', (boxed, plain) => {
+    expect(raw(boxed)).toEqual(raw(plain));
+    expect(canonical(boxed)).toEqual(canonical(plain));
+  });
+
+  test('a content command with content stays an operand', () => {
+    expect(raw('a\\smash{x}-b')).toEqual(raw('ax-b'));
+  });
+
+  test('an empty content command with no infix operator after it is left for the primary parser', () => {
+    expect(raw('a\\placeholder{} b')).toEqual(raw('ab'));
+  });
+
+  test('an unclosed option does not reach past the enclosing group', () => {
+    // The `[` of the numerator does not take the `]{}` of the denominator.
+    const json = raw('\\frac{a\\smash[}{b]}{}-c');
+    expect(json).toMatchObject(['Subtract', ['Divide', {}, {}], 'c']);
+    expect(JSON.stringify(json)).toContain("'{b]}'");
   });
 
   test('visual space with no prefix operator after it stays an operand', () => {

@@ -143,6 +143,20 @@
 
 ### Resolved Issues
 
+- **A pipe into a call by a qualified name has the type of the call.** With
+  `xs` of type `list<integer>`, `["Pipe", "xs", ["Apply", ["Module",
+  "Take"], 2]]` (Epsil `xs |> std::take(2)`) was typed `unknown`; it is now
+  `list<integer>`, as `["Pipe", "xs", ["Take", 2]]` is. So in `xs |>
+  std::sum() |> std::take(1)` the error of the last stage is now reported
+  before the run. In Epsil signature help, `xs |> std::take(▮` now marks
+  the parameter that the piped value fills also when the program has a
+  function `take`.
+
+- **An empty `\placeholder{}` or `\smash{}` before an infix operator no
+  longer splits the expression.** `a\placeholder{}-b` and `a\smash{}-b`
+  parsed as the sequence of `a` and `-b`; they now parse as `a-b`, as
+  `a\phantom{x}-b` does. `a\placeholder{}\,-b` is also `a-b`, where it was
+  the product of `a` and a space minus `b`.
 - **A function literal applied in place maps a list at a parameter declared
   as a scalar, as the same function held by a name does.** With
   `lit = ["Function", ["Add", "k", "x"], "k", ["Typed", "x", "'real'"]]`,

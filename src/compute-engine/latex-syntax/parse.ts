@@ -2389,7 +2389,9 @@ export class _Parser implements Parser {
    * Skip a decoration that comes after an operand and before an infix
    * operator, as in `x \displaystyle + 1` or `x \vphantom{y} + 1`. The
    * decorations are a style switch (`\displaystyle`, `\large`, …), an
-   * invisible box (`\phantom{…}` and its variants) and a strut.
+   * invisible box (`\phantom{…}` and its variants), a strut, and a content
+   * command with an empty group (`\placeholder{}`, `\smash{}`), which gives
+   * `Nothing`.
    *
    * A decoration is parsed as a primary. After an operand, the primary
    * parser reads what follows it as a new operand, so `x \displaystyle + 1`
@@ -2414,8 +2416,12 @@ export class _Parser implements Parser {
     while (true) {
       const before = this.index;
       const command = this.peek;
-      if (!this.atDecorationCommand()) break;
-      if (STYLE_SWITCH_COMMANDS.has(command) || STRUT_COMMANDS.has(command)) {
+      if (!this.atDecorationCommand()) {
+        if (!this.skipEmptyContentCommand()) break;
+      } else if (
+        STYLE_SWITCH_COMMANDS.has(command) ||
+        STRUT_COMMANDS.has(command)
+      ) {
         this.nextToken();
       } else if (INVISIBLE_BOX_COMMANDS.has(command)) {
         this.nextToken();
@@ -2469,6 +2475,31 @@ export class _Parser implements Parser {
       defs.length > 0 &&
       defs.every(([def]) => CONTENT_PARSE_HANDLERS.has(def.parse))
     );
+  }
+
+  /** Skip a content command whose group is empty (`\placeholder{}`,
+   * `\smash[b]{ }`): it gives `Nothing`, so it is not an operand, as a
+   * decoration is not. Return false, and leave the index unchanged, when the
+   * command at the index is not a default content command, or when its group
+   * is missing or not empty. A command with no group, or with a group that
+   * holds only an empty group (`a\placeholder{{}}-b`), also gives `Nothing`
+   * but is not skipped: no editor writes these forms. */
+  private skipEmptyContentCommand(): boolean {
+    if (this.peekDefinitions('operator').length > 0) return false;
+    if (!this.atContentCommand()) return false;
+    const start = this.index;
+    this.nextToken();
+    // The option is read as the handler reads it: a string group that stops
+    // at an enclosing boundary, so an unclosed `[` does not reach past the
+    // group of the command.
+    this.parseStringGroup(true);
+    while (this.match('<space>')) {}
+    if (this.match('<{>')) {
+      while (this.match('<space>')) {}
+      if (this.match('<}>')) return true;
+    }
+    this.index = start;
+    return false;
   }
 
   /** Skip a `{…}` group, with the groups nested in it, without parsing it.
