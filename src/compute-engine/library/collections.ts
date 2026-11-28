@@ -1393,6 +1393,27 @@ const peekMembershipPreserving = (
   op: Expression | undefined
 ): Expression | undefined => peekWrappers(op, MEMBERSHIP_PRESERVING_WRAPPERS);
 
+// The reducers of `Reduce` whose fold does not depend on the order of the
+// elements (see `reduceEvaluate`).
+const ORDER_INDEPENDENT_REDUCERS = ['Add', 'Multiply', 'Max', 'Min'];
+
+/**
+ * Whether the reducer `fn` of `Reduce` is the symbol of one of the library
+ * operators `ORDER_INDEPENDENT_REDUCERS`, bound to its library definition
+ * (`isLibraryOperator`): a user `Max(a, b)` that gives `b` depends on the
+ * order of the elements.
+ */
+function isOrderIndependentReducer(fn: Expression | undefined): boolean {
+  if (!isSymbol(fn) || !ORDER_INDEPENDENT_REDUCERS.includes(fn.symbol))
+    return false;
+  return isLibraryOperator({
+    operator: fn.symbol,
+    operatorDefinition: fn.operatorDefinition,
+    valueDefinition: fn.valueDefinition,
+    engine: fn.engine,
+  });
+}
+
 /**
  * The collection that an operator reads when its result does not depend on
  * the order of the elements (a sum, a product, an extremum, the count of a
@@ -1405,11 +1426,27 @@ const peekMembershipPreserving = (
  * sum of the sorted list. A wrapper is removed under the conditions of
  * `peekWrappers`, and only when its source is a collection: otherwise the
  * operator keeps the call as written.
+ *
+ * A lazy `Reverse` over such a call, `Reverse(Sort([3, x, 1]))`, is a
+ * collection with no elements to read either, so its wrappers are removed
+ * too. A view whose every wrapper is a collection is kept: its elements can
+ * be read, and its order is the order of the walk.
  */
 export function orderIndependentSource(value: Expression): Expression {
-  if (value.isCollection) return value;
   const source = peekCountPreserving(value);
-  return source !== undefined && source.isCollection ? source : value;
+  if (source === undefined || source === value || !source.isCollection)
+    return value;
+  // The wrappers between `value` and `source` are a chain of first
+  // operands. One of them that is not a collection has no elements, and no
+  // view over it has any. Each wrapper must be the library operator: a user
+  // `Sort` need not keep the elements of its source.
+  let readable = true;
+  for (let layer = value; layer !== source && isFunction(layer); ) {
+    if (!isLibraryOperator(layer)) return value;
+    if (!layer.isCollection) readable = false;
+    layer = layer.op1;
+  }
+  return readable ? value : source;
 }
 
 // Parsed signatures (kept in sync with the `signature:` strings on the
@@ -12018,7 +12055,18 @@ const reduceEvaluate = <R>(
   if (listed !== undefined && !isFunction(listed, 'List')) {
     if (!isInfiniteListing(listed)) return listed;
   }
-  const collection = isFunction(listed, 'List') ? listed : source;
+  // A fold with `Add`, `Multiply`, `Max` or `Min` does not depend on the
+  // order of the elements, so a view over a `Sort` that could not order
+  // them, `Reverse(Sort([3, x, 1]))`, is read as the source of the `Sort`.
+  // `Product(Reverse(…))` is such a fold: its canonical form is
+  // `Reduce(Reverse(…), Multiply, 1)`. A reducer of the same name that a
+  // binding of the program defines can depend on the order: it keeps the
+  // view.
+  const collection = isFunction(listed, 'List')
+    ? listed
+    : isOrderIndependentReducer(fn)
+      ? orderIndependentSource(source)
+      : source;
   if (!collection.isFiniteCollection) return undefined;
   // A collection may report a finite count yet decline enumeration
   // (e.g. Linspace(a, 1, 3) with a symbolic endpoint: size 3, but the

@@ -143,6 +143,18 @@
 
 ### Resolved Issues
 
+- **The sum, the product, the maximum, the minimum and the count of a value
+  of a reversed sorted list are found when an element is a variable**
+  (CE-1821). With `x` declared `real`, `Sum(Reverse(Sort([3, x, 1])))` and
+  `Max(Reverse(Sort([3, x, 1])))` stayed unevaluated, and
+  `Count(Reverse(Sort([3, x, 1])), 3)` gave `0`. They now give `x + 4`,
+  `Max(3, x)` and `1`, as for the sorted list without `Reverse`.
+  `Reduce` with the reducer `Add`, `Multiply`, `Max` or `Min` reads the same
+  elements: `Reduce(Reverse(Sort([3, x, 1])), Add, 0)` gives `x + 4`. A
+  function named `Sort` or `Max` that the program defines is not read as
+  the library operator: `Sum(Sort([1, 2]))` with a user `Sort` that does not
+  evaluate gave `3`, and now stays unevaluated.
+
 - **A sum or a product over a sorted, reversed or shortened list is
   evaluated** (CE-1820). `Sum(k^2, Element(k, Sort([3, 2, 1])))` stayed
   unevaluated, and so did the same sum over `Reverse([3, 2, 1])` or

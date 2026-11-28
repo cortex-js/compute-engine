@@ -17224,13 +17224,15 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         }
         // A view over a source that is not a collection value yet
         // (`Rest(g(3))`) is not known to be finite before it is evaluated:
-        // read its value (`isViewOverHeldEagerSource()`). (CE-97.1)
+        // read its value (`readsSumOperandValue()`). (CE-97.1) A view over a
+        // `Sort` that could not order its elements is read as the source of
+        // the `Sort` (`orderIndependentSource()`).
         if (
           rest.length === 0 &&
           first !== undefined &&
-          isViewOverHeldEagerSource(first)
+          readsSumOperandValue(first)
         )
-          first = first.evaluate();
+          first = orderIndependentSource(first.evaluate());
         // Arity-1 collection-reducer form: Sum(L).
         if (rest.length === 0 && first?.isCollection) {
           // Non-finite collections stay symbolic — infinite iteration would
@@ -17469,14 +17471,16 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         if (
           rest.length === 0 &&
           first !== undefined &&
-          isViewOverHeldEagerSource(first)
+          readsSumOperandValue(first)
         )
-          first = await first.evaluateAsync({
-            signal,
-            _effects: effects,
-            _contextStack,
-            _precisionWindow,
-          });
+          first = orderIndependentSource(
+            await first.evaluateAsync({
+              signal,
+              _effects: effects,
+              _contextStack,
+              _precisionWindow,
+            })
+          );
         // Arity-1 collection-reducer form: Sum(L). A literal collection
         // whose elements hold an asynchronous-only application is evaluated
         // first, which awaits them (`List` evaluates its elements); the
@@ -19041,6 +19045,26 @@ function processMinMaxItem(
     if (nonNumeric !== undefined) return [nonNumeric, []];
   }
   return [undefined, [item]];
+}
+
+/**
+ * Whether the one-operand form `Sum(first)` reads the value of `first`
+ * before it sums it.
+ *
+ * - A view over a source that is not a collection value yet (`Rest(g(3))`)
+ *   is not known to be finite before it is evaluated
+ *   (`isViewOverHeldEagerSource`).
+ * - A view with a wrapper that `orderIndependentSource` can remove,
+ *   `Reverse(Sort([3, x, 1]))`, is read as its value, and the caller removes
+ *   the wrappers of that value. They are removed only when the `Sort` could
+ *   not order its elements: the value of `Reverse(Sort([3, 2, 1]))` is
+ *   `Reverse([1, 2, 3])`, which is summed in its own order.
+ */
+function readsSumOperandValue(first: Expression): boolean {
+  return (
+    isViewOverHeldEagerSource(first) ||
+    (first.isCollection && orderIndependentSource(first) !== first)
+  );
 }
 
 /**

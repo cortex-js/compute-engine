@@ -5366,6 +5366,75 @@ describe('PEEK THROUGH COUNT/MEMBERSHIP-PRESERVING WRAPPERS', () => {
       const result = local.expr(['Sum', ['Sort', ['Set', 3, 1]]]).evaluate();
       expect(result.operator).toBe('Error');
     });
+
+    // A `Reverse` over such a `Sort` is a view with no elements to read
+    // either: its wrappers are removed too (CE-1821).
+    const reversed: Expression = ['Reverse', sorted];
+    test.each<[Expression, Expression]>([
+      [['Sum', reversed], ['Add', 'x', 4]],
+      [['Product', reversed], ['Multiply', 3, 'x']],
+      [['Max', reversed], ['Max', 3, 'x']],
+      [['Min', reversed], ['Min', 1, 'x']],
+      [['Count', reversed, 3], 1],
+      [['Length', reversed], 3],
+      [['Sum', ['Reverse', reversed]], ['Add', 'x', 4]],
+      [['Reduce', reversed, 'Add', 0], ['Add', 'x', 4]],
+      [['Sum', ['Reverse', 'd']], ['Add', 'x', 4]],
+    ])('%j evaluates to %j', (input, expected) => {
+      expect(local.expr(input).evaluate().json).toEqual(expected);
+    });
+
+    test('the asynchronous route reads the source of a reversed Sort', async () => {
+      const sum = await local.expr(['Sum', reversed]).evaluateAsync();
+      expect(sum.json).toEqual(['Add', 'x', 4]);
+    });
+
+    test('a reversed Sort that orders its elements is summed', () => {
+      expect(
+        local.expr(['Sum', ['Reverse', ['Sort', ['List', 3, 2, 1]]]]).evaluate()
+          .json
+      ).toEqual(6);
+    });
+
+    // A fold whose result depends on the order keeps the view.
+    test('a Reduce with Subtract over a reversed Sort stays unevaluated', () => {
+      const input: Expression = ['Reduce', reversed, 'Subtract', 0];
+      expect(local.expr(input).evaluate().json).toEqual(input);
+    });
+
+    // A user `Max` that gives its second argument depends on the order.
+    test('a Reduce with a user function named Max keeps the view', () => {
+      const shadow = new ComputeEngine();
+      shadow.declare('x', 'real');
+      shadow.pushScope();
+      shadow.declare('Max', {
+        signature: '(number, number) -> number',
+        evaluate: ([, b]) => b,
+      });
+      const input: Expression = ['Reduce', reversed, 'Max', 0];
+      const result = shadow.expr(input).evaluate().json;
+      shadow.popScope();
+      expect(result).toEqual(input);
+    });
+
+    // A user `Sort` need not keep the elements of its source, so it is not
+    // removed.
+    test.each<[Expression]>([
+      [['Reduce', ['Sort', ['List', 1, 2]], 'Add', 0]],
+      [['Sum', ['Sort', ['List', 1, 2]]]],
+      [['Max', ['Sort', ['List', 1, 2]]]],
+      [['Count', ['Sort', ['List', 1, 2]], 1]],
+    ])('%j with a user function named Sort stays unevaluated', (input) => {
+      const shadow = new ComputeEngine();
+      shadow.pushScope();
+      shadow.declare('Sort', {
+        signature: '(list<real>) -> list<real>',
+        evaluate: () => undefined,
+      });
+      const result = shadow.expr(input).evaluate().json;
+      shadow.popScope();
+      expect(result).toEqual(input);
+    });
   });
 });
 

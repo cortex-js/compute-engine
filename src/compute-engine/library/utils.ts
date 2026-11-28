@@ -5429,7 +5429,10 @@ export function* reduceBigOp<T>(
   // spelling answered `k + 2` where the call spelling answered `[3, 6]`
   // (Tycho item 121).
   if (indexes.length === 0 && body.isCollection) {
-    const collection = body.evaluate();
+    // The fold does not depend on the order of the elements, so a view over
+    // a `Sort` that could not order them (`Reverse(Sort([3, x, 1]))`) is
+    // read as the source of the `Sort`.
+    const collection = orderIndependentSource(body.evaluate());
     // A collection whose iterator declines (e.g. symbolic elements or
     // bounds) would fold to the bare initial value: keep it symbolic.
     return yield* reduceCollectionOrDecline(collection, fn, initial);
