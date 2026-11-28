@@ -143,6 +143,20 @@
 
 ### Resolved Issues
 
+- **A series of an inverse trigonometric or hyperbolic function, of
+  `GammaLn`, `LogGamma`, `PolyLog`, `ExpIntegralEi`, `CosIntegral`,
+  `CoshIntegral`, `LogIntegral`, `EllipticK` or `EllipticE`, whose complex
+  argument is on the cut of the function at the point, is no longer
+  computed** (CE-1794). The argument crosses the cut there, so the function
+  has a jump, and a series does not hold on both sides.
+  `Series(Arcsin(2 + i·x), x, 0, 3)` gave `arcsin(2) + √3/3·x + …`, which is
+  wrong by about `2.63i` for `x > 0`, and the constant term of
+  `Series(GammaLn(-1/2 + i·x), x, 0, 3)` was `ln(2√π)`, the value on the
+  real axis, which is wrong by `±πi` on both sides. Such a `Series` now stays
+  unevaluated, as the series of a root or a logarithm of such an argument
+  does. An argument that is real for every real `x` keeps its series:
+  `Series(Arcsin(2 + x), x, 0, 3)`.
+
 - **In a scope with a user function named `Power` or `Root`, the reciprocal
   of a power with a symbolic exponent stays a power** (CE-1793). The
   reciprocal of the library call `y^x` was a call of the user function: with

@@ -395,3 +395,81 @@ describe('SERIES OF A ROOT WHOSE BASE HAS A COMPLEX TERM OF A HIGH ORDER', () =>
       for (const x of [-0.01, 0.01]) expect(gap(f, x)).toBeLessThan(1e-6);
     });
 });
+
+//
+// The operators of `CUTS` in `series.ts` (an inverse trigonometric or
+// hyperbolic function, `GammaLn`, `PolyLog`, `ExpIntegralEi`, `EllipticK`, …)
+// have a cut too. An argument that is on the cut at
+// the point and that is not real for every real x crosses it there, and no
+// series holds on both sides: arcsin(2 + i·x) is arcsin(2) + … for x < 0 and
+// π − arcsin(2) + … for x > 0, and the Taylor constant term of
+// GammaLn(−1/2 + i·x) is ln|Γ(−1/2)|, on neither side.
+//
+
+describe('SERIES OF A FUNCTION WHOSE COMPLEX ARGUMENT IS ON ITS CUT', () => {
+  const ix = ['Multiply', 'ImaginaryUnit', 'x'];
+  const at = (u: unknown) => ['Add', u, ix];
+  const minusHalf = ['Rational', -1, 2];
+  const declined: [string, unknown][] = [
+    ['arcsin(2 + i·x)', ['Arcsin', at(2)]],
+    ['arcsin(−2 + i·x)', ['Arcsin', at(-2)]],
+    ['arccos(2 + i·x)', ['Arccos', at(2)]],
+    ['artanh(2 + i·x)', ['Artanh', at(2)]],
+    ['arcsec(1/2 + i·x)', ['Arcsec', at(half)]],
+    ['arccsc(1/2 + i·x)', ['Arccsc', at(half)]],
+    ['arcoth(1/2 + i·x)', ['Arcoth', at(half)]],
+    ['arcosh(1/2 + i·x)', ['Arcosh', at(half)]],
+    ['arsech(2 + i·x)', ['Arsech', at(2)]],
+    ['arctan(2i + x)', ['Arctan', ['Add', ['Complex', 0, 2], 'x']]],
+    ['arccot(2i + x)', ['Arccot', ['Add', ['Complex', 0, 2], 'x']]],
+    ['arsinh(2i + x)', ['Arsinh', ['Add', ['Complex', 0, 2], 'x']]],
+    ['arcsch(i/2 + x)', ['Arcsch', ['Add', ['Complex', 0, 0.5], 'x']]],
+    ['GammaLn(−1/2 + i·x)', ['GammaLn', at(minusHalf)]],
+    ['LogGamma(−1/2 + i·x)', ['LogGamma', at(minusHalf)]],
+    ['LambertW(−1 + i·x)', ['LambertW', at(-1)]],
+    ['Li₂(2 + i·x)', ['PolyLog', 2, at(2)]],
+    ['Ei(−1 + i·x)', ['ExpIntegralEi', at(-1)]],
+    ['Ci(−1 + i·x)', ['CosIntegral', at(-1)]],
+    ['Chi(−1 + i·x)', ['CoshIntegral', at(-1)]],
+    ['li(−1 + i·x)', ['LogIntegral', at(-1)]],
+    ['K(2 + i·x)', ['EllipticK', at(2)]],
+    ['E(2 + i·x)', ['EllipticE', at(2)]],
+    ['arcsin(2·e^{i·x})', ['Arcsin', ['Multiply', 2, ['Exp', ix]]]],
+  ];
+  for (const [name, f] of declined)
+    test(`${name} at 0 stays Series`, () =>
+      expect(series(f).operator).toBe('Series'));
+
+  /** `|f − Normal(Series(f))|` at `x`. */
+  const gap = (f: unknown, x: number): number => {
+    const s = series(f);
+    expect(s.operator).not.toBe('Series');
+    const normal = ce.expr(['Normal', s.json] as never).evaluate();
+    const d = ce
+      .expr(['Subtract', f, normal.json] as never)
+      .subs({ x })
+      .N();
+    return Math.hypot(d.re, d.im);
+  };
+
+  // A real argument on the cut, and a complex argument away from the cut.
+  const held: [string, unknown][] = [
+    ['arcsin(2 + x)', ['Arcsin', ['Add', 2, 'x']]],
+    ['arcsin(1/2 + i·x)', ['Arcsin', at(half)]],
+    ['arctan(i/2 + x)', ['Arctan', ['Add', ['Complex', 0, 0.5], 'x']]],
+    ['GammaLn(1/2 + i·x)', ['GammaLn', at(half)]],
+    ['Li₂(1/2 + i·x)', ['PolyLog', 2, at(half)]],
+    ['Ei(1 + i·x)', ['ExpIntegralEi', at(1)]],
+  ];
+  for (const [name, f] of held)
+    test(`${name} at 0 holds on both sides`, () => {
+      for (const x of [-0.01, 0.01]) expect(gap(f, x)).toBeLessThan(1e-6);
+    });
+});
+
+// The table of cuts has no prototype: a function named `toString` has no cut.
+test('Series of a function named toString does not throw', () => {
+  expect(() =>
+    series(['toString', ['Multiply', 'ImaginaryUnit', 'x']])
+  ).not.toThrow();
+});

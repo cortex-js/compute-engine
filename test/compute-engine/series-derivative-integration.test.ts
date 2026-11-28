@@ -159,13 +159,20 @@ describe('Series — agrees with the derivative loop', () => {
     );
   });
 
-  test('Arctan at 2i, order 3', () => {
+  // 2i is on the cut of arctan, and 2i + t crosses it at t = 0: arctan(x)
+  // jumps by π there, so no series holds on both sides.
+  test('Arctan at 2i, order 3, stays Series', () => {
     const r = ce
       .box(['Series', ['Arctan', 'x'], 'x', ['Complex', 0, 2], 3])
       .evaluate();
-    expect(r.latex).toBe(
-      '\\arctan(2\\imaginaryI)-\\frac{x-2\\imaginaryI}{3}+(-\\frac{2}{9}\\imaginaryI)(x-2\\imaginaryI)^2+\\frac{1}{81}\\times13(x-2\\imaginaryI)^3+O\\left((x-2\\imaginaryI)^4\\right)'
-    );
+    expect(r.operator).toBe('Series');
+  });
+
+  test('Arctan at i/2, order 2', () => {
+    const r = ce
+      .box(['Series', ['Arctan', 'x'], 'x', ['Complex', 0, 0.5], 2])
+      .evaluate();
+    expect(r.operator).not.toBe('Series');
   });
 
   // The coefficients are evaluated: no `0.64(-0.5 - 0.5)` or `(a + a)`

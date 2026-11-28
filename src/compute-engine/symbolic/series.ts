@@ -2660,19 +2660,88 @@ function holdsBranch(e: Expression): boolean {
  * real near the point only, such as `ln(√x − 1)` and `√(√x − 1)` at 1/4,
  * `ln(ln x)` at 1/2 and `√(1 − √x)` at +∞ (`isRealOnRealAxis()` is false for
  * a root or a logarithm of `x`).
+ *
+ * The same test applies to the operators of `CUTS`, with the cut of each:
+ * `arcsin(2 + i·x)` at 0 is `arcsin(2) + …` for `x < 0` and
+ * `π − arcsin(2) + …` for `x > 0`, and the constant term of
+ * `GammaLn(−1/2 + i·x)` is `ln|Γ(−1/2)|`, the value on the real axis, which
+ * is on neither side.
  */
 function crossesCutAt(f: Expression, x: string, x0: Expression): boolean {
   if (!isFunction(f) || !f.has(x)) return false;
   const op = f.operator;
   let args: ReadonlyArray<Expression> = [];
+  let onCut: (u: Expression) => boolean = isNearNegativeReal;
+  const cut = CUTS.get(op);
   if (op === 'Ln' || op === 'Log') args = f.ops;
   else if (op === 'Sqrt' || op === 'Root') args = [f.op1];
   else if (op === 'Power' && asSmallInteger(f.op2) === null) args = [f.op1];
+  else if (
+    cut !== undefined &&
+    f.nops === (cut.operand ?? 0) + 1 &&
+    isLibraryOperator(f, op)
+  ) {
+    args = [f.ops[cut.operand ?? 0]];
+    onCut = (u) => isNearCut(u, cut);
+  }
   for (const arg of args) {
     if (!arg.has(x) || isRealAlongAxis(arg, x, x0)) continue;
-    if (isNearNegativeReal(arg.subs({ [x]: x0 }).evaluate())) return true;
+    if (onCut(arg.subs({ [x]: x0 }).evaluate())) return true;
   }
   return f.ops.some((operand) => crossesCutAt(operand, x, x0));
+}
+
+/** The cut of an operator (`CUTS`). */
+type Cut = { imaginary?: true; on: (s: number) => boolean; operand?: number };
+
+/**
+ * The cut of an operator other than a root and a logarithm: it is on the real
+ * axis, or on the imaginary axis when `imaginary` is set, at the points whose
+ * coordinate `s` on that axis passes `on`. The end points are included: they
+ * are branch points. `operand` is the index of the operand that has the cut
+ * (0 when it is not given); the operator has no other operand after it. The
+ * cuts are the ones of the numeric evaluation: `Arccot` is `π/2 − arctan`,
+ * with the cut of `arctan`, and `GammaLn` and `LogGamma` have their cut on
+ * the negative real axis. `LogIntegral` does not evaluate for a complex
+ * operand; its cut is the one of `Ei(ln z)`.
+ */
+const CUTS: ReadonlyMap<string, Cut> = new Map<string, Cut>([
+  ['Arcsin', { on: (s) => Math.abs(s) >= 1 }],
+  ['Arccos', { on: (s) => Math.abs(s) >= 1 }],
+  ['Artanh', { on: (s) => Math.abs(s) >= 1 }],
+  ['Arcsec', { on: (s) => Math.abs(s) <= 1 }],
+  ['Arccsc', { on: (s) => Math.abs(s) <= 1 }],
+  ['Arcoth', { on: (s) => Math.abs(s) <= 1 }],
+  ['Arcosh', { on: (s) => s <= 1 }],
+  ['Arsech', { on: (s) => s <= 0 || s >= 1 }],
+  ['Arctan', { imaginary: true, on: (s) => Math.abs(s) >= 1 }],
+  ['Arccot', { imaginary: true, on: (s) => Math.abs(s) >= 1 }],
+  ['Arsinh', { imaginary: true, on: (s) => Math.abs(s) >= 1 }],
+  ['Arcsch', { imaginary: true, on: (s) => Math.abs(s) <= 1 }],
+  ['GammaLn', { on: (s) => s <= 0 }],
+  ['LogGamma', { on: (s) => s <= 0 }],
+  ['ExpIntegralEi', { on: (s) => s <= 0 }],
+  ['CosIntegral', { on: (s) => s <= 0 }],
+  ['CoshIntegral', { on: (s) => s <= 0 }],
+  ['LogIntegral', { on: (s) => s <= 0 }],
+  ['EllipticK', { on: (s) => s >= 1 }],
+  ['EllipticE', { on: (s) => s >= 1 }],
+  ['LambertW', { on: (s) => s <= -Math.exp(-1) }],
+  ['PolyLog', { on: (s) => s >= 1, operand: 1 }],
+]);
+
+/** Whether the constant `u` is on `cut` (`CUTS`), or at a distance from it
+ * below `SMOOTH_POINT_TOLERANCE`, relative to `|s|` above 1, as in
+ * `isNearNegativeReal()`. An end point that is close to the cut but not on
+ * it counts as on it. */
+function isNearCut(u: Expression, cut: Cut): boolean {
+  const n = u.N();
+  if (!isNumber(n) || !Number.isFinite(n.re) || !Number.isFinite(n.im))
+    return false;
+  const [s, off] = cut.imaginary ? [n.im, n.re] : [n.re, n.im];
+  const tol = SMOOTH_POINT_TOLERANCE * Math.max(1, Math.abs(s));
+  if (Math.abs(off) > tol) return false;
+  return cut.on(s) || cut.on(s - tol) || cut.on(s + tol);
 }
 
 /** Whether the constant `u` is a negative real number, or a number whose
