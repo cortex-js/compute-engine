@@ -101,3 +101,102 @@ describe('a string view over a source that is not evaluated yet', () => {
     expect(value(['Reverse', ['Take', sorted, 2]])).toBe("'ba'");
   });
 });
+
+describe('the count of a reordering of a string that is not evaluated yet', () => {
+  const count = (json: unknown) => ce.box(json as never).count;
+
+  test('a reordering whose characters are grouped again has no count', () => {
+    // `Reverse(mark + "a")` is `"a" + mark`, one character.
+    expect(count(['Reverse', str(`${mark}a`)])).toBeUndefined();
+    expect(count(['RotateLeft', str(`${mark}a`), 1])).toBeUndefined();
+    expect(count(['RotateRight', str(`${mark}a`), 1])).toBeUndefined();
+    // The order of `Sort` and `RandomShuffle` is not known before the
+    // evaluation.
+    expect(count(['Sort', str(`${mark}a`)])).toBeUndefined();
+    expect(count(['RandomShuffle', str(`${mark}a`)])).toBeUndefined();
+    expect(count(['Sort', str('cab')])).toBeUndefined();
+  });
+
+  test('the count agrees with the evaluated string', () => {
+    for (const json of [
+      ['Reverse', str(`${mark}a`)],
+      ['RotateLeft', str(`${mark}a`), 1],
+      ['RotateRight', str(`${mark}a`), 1],
+      ['RotateLeft', ['Reverse', str(`${mark}ab`)], 1],
+      ['Take', ['Reverse', str(`${mark}a`)], 2],
+      ['Reverse', str('héllo')],
+      ['RotateLeft', str('abc'), 1],
+    ]) {
+      const c = count(json);
+      const v = ce.box(json as never).evaluate();
+      expect(typeof v.string).toBe('string');
+      if (c !== undefined) expect(c).toBe(v.count);
+    }
+  });
+
+  test('a reordering that keeps the characters keeps the count', () => {
+    expect(count(['Reverse', str('héllo')])).toBe(5);
+    expect(count(['RotateLeft', str('abc'), 1])).toBe(3);
+    expect(count(['RotateRight', str('abc'), 2])).toBe(3);
+    expect(count(['Reverse', ['List', 1, 2, 3]])).toBe(3);
+    expect(count(['Sort', ['List', 3, 1, 2]])).toBe(3);
+  });
+
+  test('a rotation whose characters are grouped again evaluates to a string', () => {
+    const text = (json: unknown) =>
+      ce.box(json as never).evaluate().string?.normalize('NFD');
+    expect(text(['RotateLeft', str(`${mark}a`), 1])).toBe(`a${mark}`);
+    expect(text(['RotateRight', str(`${mark}a`), 1])).toBe(`a${mark}`);
+    expect(text(['RotateLeft', str(`${mark}ab`), 1])).toBe(`ab${mark}`);
+    ce.assign('s1770', ce.string(`${mark}a`));
+    expect(ce.box(['Reverse', 's1770']).count).toBeUndefined();
+    expect(text(['RotateLeft', 's1770', 1])).toBe(`a${mark}`);
+  });
+
+  test('a count is read without an evaluation of the source', () => {
+    // The source is an application: it is not evaluated (a shuffle would
+    // draw), so the count is not known.
+    expect(count(['Reverse', ['Unique', str('cab')]])).toBeUndefined();
+    expect(value(['Reverse', ['Unique', str('cab')]])).toBe("'bac'");
+  });
+
+  test('Rest of a string that is not evaluated yet', () => {
+    expect(value(['Rest', ['Unique', str('cab')]])).toBe("'ab'");
+    expect(value(['Rest', ['Sort', str('cab')]])).toBe("'bc'");
+  });
+
+  test('Join of a view over a string that is not evaluated yet', () => {
+    // The view has no count, and its walk reads nothing of the source by
+    // position: the join evaluates the view first.
+    for (const source of [
+      ['Sort', str('cab')],
+      ['Unique', str('abc')],
+    ]) {
+      expect(value(['Join', ['Take', source, 2], str('z')])).toBe("'abz'");
+      expect(value(['Join', str('z'), ['Drop', source, 1]])).toBe("'zbc'");
+      expect(value(['Join', ['Slice', source, 1, 2], str('z')])).toBe("'abz'");
+      expect(value(['Join', ['RotateLeft', source, 1], str('z')])).toBe(
+        "'bcaz'"
+      );
+    }
+  });
+
+  test('Join of a view gives the join of the value of the view', () => {
+    const text = (json: unknown) =>
+      ce.box(json as never).evaluate().string?.normalize('NFD');
+    const view = ['Take', ['Reverse', str(`${mark}ab`)], 2];
+    // `Reverse(mark + "ab")` is `"b" + "a" + mark`, two characters.
+    expect(text(view)).toBe(`ba${mark}`);
+    expect(text(['Join', view, str('z')])).toBe(`ba${mark}z`);
+    expect(text(['Join', str('z'), view])).toBe(`zba${mark}`);
+  });
+
+  test('Rest of an empty lazy source with no count', () => {
+    expect(
+      value([
+        'Sum',
+        ['Rest', ['FlatMap', ['List', 1], ['Function', ['List'], 'x']]],
+      ])
+    ).toBe(0);
+  });
+});

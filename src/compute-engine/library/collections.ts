@@ -588,6 +588,74 @@ export function joinCharacters(
 }
 
 /**
+ * The count of a view that reorders the elements of its source `src`
+ * (`Reverse`, `RotateLeft`, `RotateRight`), with `reorder` the order that the
+ * view gives to the characters of a string.
+ *
+ * The count of a source that cannot be a string is the count of the view.
+ * A string view evaluates to the string of its reordered characters, and
+ * these characters are grouped again (see {@link joinCharacters}): the
+ * reverse of U+0301 "a" is "a" U+0301, one character where the source has
+ * two. So for a string the function returns the count of the source only
+ * when the reordered string has the same count, and `undefined` otherwise.
+ * It does not return the count of the reordered string: the walk of the view
+ * gives one element for each character of the source, and the evaluation of
+ * the view (`evaluateStringPreservingCollection`) compares the two counts.
+ * A source that can be a string but is not a string literal or a symbol that
+ * holds one gives `undefined`.
+ */
+function countOfReorderedSource(
+  src: Expression,
+  reorder: (chars: string[]) => string[]
+): number | bigint | undefined {
+  if (src.type.isDisjointFrom('string')) return src.count;
+  // The value of a symbol is read, but an application is not evaluated: a
+  // count is read without an evaluation (`RandomShuffle` would draw).
+  const value = isSymbol(src) ? src.value : undefined;
+  const text = isString(src) ? src : isString(value) ? value : undefined;
+  if (text === undefined) return isTextAtom(src) ? undefined : src.count;
+  // Printable ASCII, tab and line feed: each character is a character of its
+  // own in every order (a carriage return before a line feed is one).
+  if (/^[\t\n\x20-\x7e]*$/.test(text.string)) return text.count;
+  const chars: string[] = [];
+  for (const c of text.each()) if (isCharacter(c)) chars.push(c.string);
+  const regrouped = src.engine.string(reorder(chars).join('')).count;
+  return regrouped === chars.length ? chars.length : undefined;
+}
+
+/**
+ * The `count` handler of `RotateLeft` (`sign` 1) and `RotateRight` (`sign`
+ * -1): `undefined` when the offset has no value, otherwise the count that
+ * {@link countOfReorderedSource} gives for the rotation.
+ */
+function rotationCount(expr: Expression, sign: 1 | -1): number | undefined {
+  if (!isFunction(expr)) return undefined;
+  const offset = integerParam(expr.op2);
+  if (offset === null) return undefined;
+  const count = countOfReorderedSource(expr.op1, (chars) => {
+    const l = chars.length;
+    if (l === 0) return chars;
+    const n = (((sign * (offset ?? 1)) % l) + l) % l;
+    return [...chars.slice(n), ...chars.slice(0, n)];
+  });
+  return typeof count === 'bigint' ? undefined : count;
+}
+
+/**
+ * The `elementCount` handler of an eager operator that reorders the elements
+ * of its source (`Sort`, `RandomShuffle`): `elementCountOfIndexedSource`, or
+ * `undefined` for a source that can be a string. The result of such an
+ * operator for a string is a string whose characters are grouped again
+ * (see {@link countOfReorderedSource}), and the order is not known before
+ * the evaluation.
+ */
+function elementCountOfReorderedSource(expr: Expression): number | undefined {
+  if (isFunction(expr) && !expr.op1.type.isDisjointFrom('string'))
+    return isTextAtom(expr.op1) ? undefined : elementCountOfIndexedSource(expr);
+  return elementCountOfIndexedSource(expr);
+}
+
+/**
  * The source operand as an actual string node when it is text, otherwise the
  * operand unchanged — the form {@link innerRun} needs.
  *
@@ -19662,7 +19730,24 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
             if (count !== undefined && index > count)
               return { value: undefined, done: true };
             const value = op1.at(index);
-            if (value === undefined) return { value: undefined, done: true };
+            if (value === undefined) {
+              // A first read that finds nothing, in an eager source with no
+              // count that is not evaluated yet and gives no first element
+              // either, is a read the source cannot answer
+              // (`Rest(Sort("cab"))`): the walk misses its elements (see
+              // `enumerableFromSmallSource()`). A lazy source (an operator
+              // with an `iterator` handler) answers its reads by position.
+              if (
+                index === 2 &&
+                count === undefined &&
+                isFunction(op1) &&
+                op1.operatorDefinition?.collection?.iterator === undefined &&
+                op1.isEmptyCollection !== true &&
+                op1.at(1) === undefined
+              )
+                noteIncompleteWalk();
+              return { value: undefined, done: true };
+            }
             index += 1;
             return { value, done: false };
           },
@@ -20047,7 +20132,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       isLazy: (_expr) => true,
       count: (expr) => {
         if (!isFunction(expr)) return undefined;
-        return expr.op1.count;
+        return countOfReorderedSource(expr.op1, (chars) => chars.reverse());
       },
       isEmpty: (expr) => {
         if (!isFunction(expr)) return undefined;
@@ -20721,11 +20806,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       // `contains` is deliberately NOT gated: `false` there means definitively
       // absent, so suppressing it would answer a wrong question rather than
       // decline one.
-      count: (expr) => {
-        if (!isFunction(expr) || integerParam(expr.op2) === null)
-          return undefined;
-        return smallCount(expr.op1);
-      },
+      count: (expr) => rotationCount(expr, 1),
       isEmpty: (expr) => {
         if (!isFunction(expr) || integerParam(expr.op2) === null)
           return undefined;
@@ -20841,11 +20922,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       isLazy: (_expr) => true,
       // See `RotateLeft`: knowable, but suppressed while `at`/`iterator`
       // cannot back it up.
-      count: (expr) => {
-        if (!isFunction(expr) || integerParam(expr.op2) === null)
-          return undefined;
-        return smallCount(expr.op1);
-      },
+      count: (expr) => rotationCount(expr, -1),
       // See `RotateLeft`. Without this handler the finiteness was read from
       // the count, which a finite source with no count does not have
       // (`FlatMap([1, 2], x ↦ [x, x])`), so `Sum(RotateRight(…, 1))` stayed
@@ -21524,8 +21601,8 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // Provable declines only (finite, walkable source required); success is
     // not cheaply decidable, so never `true` — see `canEnumerateFiniteSource`.
     canEnumerate: canEnumerateFiniteSource,
-    // A permutation of the source: length-preserving.
-    elementCount: elementCountOfIndexedSource,
+    // A permutation of the source: length-preserving, except for a string.
+    elementCount: elementCountOfReorderedSource,
     evaluate: ([xs, fn], { engine: ce }) => runWalk(sortWalk(xs, fn, ce), ce),
     // The same walk, with the key function or the comparator awaited
     // (`asyncCallbackRoute`).
@@ -21813,9 +21890,10 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // Mirrors the evaluate guards: an infinite source errors, an unknown
     // finiteness stays symbolic.
     canEnumerate: canEnumerateFiniteSource,
-    // A permutation of the source: length-preserving, and reading it consumes
-    // ZERO draws (`elementCountOfFiniteSource` never evaluates).
-    elementCount: elementCountOfIndexedSource,
+    // A permutation of the source: length-preserving except for a string, and
+    // reading it consumes ZERO draws (`elementCountOfFiniteSource` never
+    // evaluates).
+    elementCount: elementCountOfReorderedSource,
     evaluate: ([xs], { engine: ce }) => {
       // An INFINITE collection can never be shuffled: error loudly, matching
       // `Random`/`RandomSample` (`out-of-range`, "a finite collection").

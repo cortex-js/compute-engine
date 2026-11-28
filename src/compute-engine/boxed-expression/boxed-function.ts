@@ -22807,10 +22807,17 @@ function evaluateStringPreservingCollection(
     expr.isFiniteCollection === true &&
     count !== undefined &&
     Number.isFinite(count);
+  // An enumerable or finite operand is walkable only when it states its
+  // count too. A finite view with no count over an eager source that is not
+  // evaluated yet (`Take(Sort("cab"), 2)`) reads no element of that source
+  // by position, and its walk can end at once without noting a missed
+  // element. A view with no count over a string whose characters are
+  // grouped again (`Take(Reverse(U+0301 "ab"), 2)`) walks the characters of
+  // its source, where its value is read from the value of the source.
   const isWalkableNow = (op: Expression) =>
     isString(op) ||
-    op.isEnumerableCollection === true ||
-    op.isFiniteCollection === true;
+    ((op.isEnumerableCollection === true || op.isFiniteCollection === true) &&
+      op.count !== undefined);
   const operandsAreWalkableStrings =
     expr.ops.length > 0 &&
     expr.ops.every((op) => {
@@ -22820,10 +22827,31 @@ function evaluateStringPreservingCollection(
       // without being run, so it is run once. `StringJoin(["b"])` answers with
       // the string; `StringJoin(xs)` over an unassigned symbol, and a
       // `StringJoin` over an infinite source, answer with themselves and are
-      // refused.
+      // refused. The walk below reads the operand, not its value: the value
+      // is the walk only for an operator with no `iterator` handler, whose
+      // `each()` walks its evaluation. A lazy view (`Take(Sort("cab"), 2)`)
+      // walks its own source and is refused.
+      if (isFunction(op) && op.operatorDefinition?.collection?.iterator)
+        return false;
       return isWalkableNow(op.evaluate());
     });
-  if (!hasFiniteCount && !operandsAreWalkableStrings) return undefined;
+  // 3. The node is finite, its first operand is a string value, and every
+  //    other operand is a number literal. The view then reads the characters
+  //    of a string in memory at positions that it computes from numbers. This
+  //    proof is for a rotation of a string whose characters are grouped
+  //    again when they are joined (`RotateLeft` of U+0301 "a" is "a" U+0301,
+  //    one character): such a view states no count (see
+  //    `countOfReorderedSource` in `library/collections.ts`), and the
+  //    integer offset is not a string, so neither proof above applies.
+  const isStringValue = (op: Expression) =>
+    isString(op) || (isSymbol(op) && isString(op.value));
+  const readsStringAtNumbers =
+    expr.isFiniteCollection === true &&
+    expr.ops.length > 0 &&
+    isStringValue(expr.ops[0]) &&
+    expr.ops.slice(1).every((op) => isNumber(op));
+  if (!hasFiniteCount && !operandsAreWalkableStrings && !readsStringAtNumbers)
+    return undefined;
 
   // A walk that misses elements declines: the view reads a source that is
   // not a string value yet (`Reverse(Sort("cab"))`, `Take(Unique("cab"), 2)`),

@@ -143,6 +143,20 @@
 
 ### Resolved Issues
 
+- **The count of a reversed, rotated, sorted or shuffled string that is not
+  evaluated yet is no longer larger than the string has** (CE-1770). The
+  characters of such a string are grouped again: with `m` the combining
+  acute accent U+0301, `ce.box(['Reverse', { str: m + 'a' }])` evaluates to
+  `"a" + m`, one character, but its `count` was `2`. The `count` of
+  `Reverse`, `RotateLeft` and `RotateRight` of a string is now the count of
+  the source only when the reordered string has the same count, and
+  `undefined` otherwise; `Reverse("héllo").count` is still `5`. The `count`
+  of `Sort` and `RandomShuffle` of a string is `undefined` before the
+  evaluation. A view over such a string, such as `Reverse(Reverse(m + "a"))`,
+  now evaluates over its value: `"a" + m`, where it gave `m + "a"`.
+  `Rest(Unique("cab"))` gives `"ab"` (it gave `""`), and
+  `Join(Take(Unique("abc"), 2), "z")` gives `"abz"` (it gave `"z"`).
+
 - **In a scope with a user function named `Divide`, an exact radical
   number keeps its value under `subs()`** (CE-1785). After
   `ce.declare('Divide', 'function')` and
