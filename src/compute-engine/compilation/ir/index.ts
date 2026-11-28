@@ -438,10 +438,7 @@ function stringListRefusal(p: Program): Refusal | undefined {
       const held =
         (i.k === 'list' && p.types[i.out].lane === 'record') ||
         (i.k === 'op' && isHostCallOp(i.op));
-      if (
-        !held &&
-        argsOf(i).some((v, k) => listOf(v) && !(read && k === 0))
-      )
+      if (!held && argsOf(i).some((v, k) => listOf(v) && !(read && k === 0)))
         return refusal;
       if (
         argsOf(i).some(

@@ -3099,17 +3099,16 @@ conditions. Every other held value is lowered as written in place, and of its
 effects only the draws of a random frame that it holds are accepted, when the
 frame has one draw site evaluated once (a frame of the next paragraph that has
 no warning): `H := WithRandomSeed(139128, RandomChoice([0, 1), 4N))`, a seeded
-list whose length reads the input `N`, is a function of `N`
-(`drawSites()` of `lower.ts`). On JavaScript, a literal-seeded frame around
-one built-in choice can share its list at a second read in the same region
-when its inputs and the effect count are unchanged. The frame starts at its
-seed, so the seed can read an input too (`WithRandomSeed(N, Random())`). A held
-value still declines when it draws outside a frame (`L := Random() + N`), draws
-its seed, reads a name of `vars`, calls a user function that draws, or holds a
-frame of the warning `seeded-draw-order`
-(`WithRandomSeed(5, Random() + Random())`), whose draws can differ from the
-interpreter's. On GLSL, which has no random frame, the frame declines.
-Otherwise:
+list whose length reads the input `N`, is a function of `N` (`drawSites()` of
+`lower.ts`). On JavaScript, a literal-seeded frame around one built-in choice
+can share its list at a second read in the same region when its inputs and the
+effect count are unchanged. The frame starts at its seed, so the seed can read
+an input too (`WithRandomSeed(N, Random())`). A held value still declines when
+it draws outside a frame (`L := Random() + N`), draws its seed, reads a name of
+`vars`, calls a user function that draws, or holds a frame of the warning
+`seeded-draw-order` (`WithRandomSeed(5, Random() + Random())`), whose draws can
+differ from the interpreter's. On GLSL, which has no random frame, the frame
+declines. Otherwise:
 
 A `WithRandomSeed` frame whose body has one draw site evaluated once (not under
 a loop, a `Map`, `Filter`, `Sum` or `Product` body, or a call of an effectful
@@ -3526,8 +3525,8 @@ where the code builds the argument first: the frame has several draw sites and
 carries the `seeded-draw-order` warning (as for one parameter before). Another
 list or tuple argument of such a literal declines: a nested list (the
 interpreter maps to the leaves), a tuple and a list of points (atomic), a list
-of booleans or of complex numbers. A literal whose signature is not scalar
-binds a list or a tuple argument at a parameter of no stated type where the
+of booleans or of complex numbers. A literal whose signature is not scalar binds
+a list or a tuple argument at a parameter of no stated type where the
 interpreter does not map (`literalMappedParameters()`) whole, with the shape of
 the argument, as the interpreter does (CE-1909); at an `unknown` parameter
 beside one that binds whole, a list argument still declines:
@@ -3535,15 +3534,14 @@ beside one that binds whole, a list argument still declines:
 `Apply(v ↦ PointList(v.x + 1, 2 v.y), PointList(p, q))` is a list of points. A
 declared type that settles no shape (`settlesNoShape()`: a type of no settled
 shape as R3 of `docs/COMPILATION-MODEL.md` lists them, or a union of such types
-and tuples, such as
-`collection<any> | tuple`, which the document preparation writes for a
-parameter read as a point) is read as no stated type; another union (`real |
-list`, `collection<number> | value`) still declines (R4 of
-`docs/COMPILATION-MODEL.md`). A typed parameter
-has the type that it declares, which settles the shape of its argument: a
-parameter declared a list or a tuple of numbers binds its argument whole, as the
-interpreter does, and the argument must have that type (a list of the declared
-lane, the same tuple mark, a stated length where the type states one), so
+and tuples, such as `collection<any> | tuple`, which the document preparation
+writes for a parameter read as a point) is read as no stated type; another union
+(`real | list`, `collection<number> | value`) still declines (R4 of
+`docs/COMPILATION-MODEL.md`). A typed parameter has the type that it declares,
+which settles the shape of its argument: a parameter declared a list or a tuple
+of numbers binds its argument whole, as the interpreter does, and the argument
+must have that type (a list of the declared lane, the same tuple mark, a stated
+length where the type states one), so
 `Apply(((H: list<real>), (n: integer)) ↦ H[1] + n, L, 5)` is `7` at
 `L = [2, 3, 4]`. A list of reals at a list parameter of integers (not of tuples)
 is bound whole on its own lane, since the interpreter checks no element
@@ -3562,12 +3560,11 @@ declines an argument of another lane. Another argument declines (`L` of no
 stated length at a parameter `list<real^3>`, which the interpreter reads whole
 with no check; a tuple at a tuple parameter whose type it does not prove; a
 complex at `real`), and so does a declared type that is not a scalar, a list or
-a tuple of numbers (a union of settled shapes, `real | list<real>`). A
-parameter with a
-default and another count of arguments decline too; `Apply(g, x)` of a name is
-the call `g(x)` in the canonical form. `Apply(Derivative(g, n…), a1, …)` is the
-application of the function literal that the engine gives for the derivative at
-compile time, and `D(f, x, …)` the expression it gives
+a tuple of numbers (a union of settled shapes, `real | list<real>`). A parameter
+with a default and another count of arguments decline too; `Apply(g, x)` of a
+name is the call `g(x)` in the canonical form. `Apply(Derivative(g, n…), a1, …)`
+is the application of the function literal that the engine gives for the
+derivative at compile time, and `D(f, x, …)` the expression it gives
 (`derivativeClosedForm()`; `closedForm()` of `lower.ts`): `D(Abs(x), x)` is
 `Sign(x)`, `Apply(Derivative(Sin), x)` is `Cos(x)`. That expression can hold the
 derivative of another function (`Apply(Derivative(f, 2), t)` in the derivative
@@ -4054,9 +4051,9 @@ tuple, the discharges of `absent()`.
   literal. The function, and each function value that it reads or calls, must
   read only names that the engine holds; one that reads a parameter or a local
   of the program, or an input of the compilation (a name with no value),
-  declines. A name of the engine that the literal reads is read when the host calls
-  the function; the code publishes an assigned variable before the call. The
-  value is of the lane `nothing` with `IRType.engine`, the index of its
+  declines. A name of the engine that the literal reads is read when the host
+  calls the function; the code publishes an assigned variable before the call.
+  The value is of the lane `nothing` with `IRType.engine`, the index of its
   expression: the code holds nothing at run time. A parameter of no stated type
   or `any` of a user function or of a protocol method holds it, one IR function
   per value (`held()`, `laneKey()`), and passes it on to the host or to another
