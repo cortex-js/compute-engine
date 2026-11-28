@@ -92,6 +92,24 @@ describe('TIMEOUT', () => {
         )
       ).toThrow(CancellationError);
     });
+
+    // CE-1934: with an `Element` clause, each `Limits` clause was turned into
+    // a list of its terms before the first term, so a range of 10⁸ terms
+    // filled the heap before the deadline was checked.
+    it('a long range next to an Element clause throws CancellationError', () => {
+      expect(() =>
+        limited(() =>
+          ce
+            .expr([
+              'Sum',
+              ['Multiply', 'j', 'k'],
+              ['Element', 'k', ['List', 1, 2]],
+              ['Limits', 'j', 1, 1e8],
+            ])
+            .evaluate()
+        )
+      ).toThrow(CancellationError);
+    });
   });
 
   describe('Product', () => {

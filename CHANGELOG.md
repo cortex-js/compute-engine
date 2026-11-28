@@ -20,6 +20,14 @@
   ("argument 2 declares a default value; the requirement declares {}"), and
   the type then implemented no member of the protocol. The implementation
   now matches.
+- **A sum or a product with an `Element` clause and a long range stops at
+  the time limit** (CE-1934). In
+  `["Sum", ["Multiply", "j", "k"], ["Element", "k", ["List", 1, 2]],
+  ["Limits", "j", 1, 1e8]]`, the range was turned into a list of its
+  10⁸ terms before the first term, and the process ran out of memory, also
+  inside `ce.withTimeLimit()`. The terms of the range are now made one at a
+  time, and the evaluation throws a `CancellationError` at the time limit,
+  as the same sum with only `Limits` clauses does.
 
 ## 0.204.3 _2026-11-28_
 

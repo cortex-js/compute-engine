@@ -5663,8 +5663,15 @@ function* reduceElementIndexingSets<T>(
 > {
   const ce = body.engine;
 
-  // Separate Element and Limits indexing sets
-  const elementDomains: Array<{ variable: string; values: Expression[] }> = [];
+  // Separate Element and Limits indexing sets. Each dimension of the product
+  // gives its value at a position: a `Limits` range makes the value when the
+  // position is reached, so a long range (`j` from 1 to 10⁸) allocates no
+  // list before the first term.
+  const elementDomains: Array<{
+    variable: string;
+    length: number;
+    at: (i: number) => Expression;
+  }> = [];
   const limitsSets: IndexingSet[] = [];
 
   for (const idx of indexes) {
@@ -5713,9 +5720,11 @@ function* reduceElementIndexingSets<T>(
       }
 
       // Success - domain was extracted
+      const values = domainResult.values;
       elementDomains.push({
         variable: domainResult.variable,
-        values: domainResult.values,
+        length: values.length,
+        at: (i) => values[i],
       });
     } else {
       limitsSets.push(normalizeIndexingSet(idx));
@@ -5724,9 +5733,9 @@ function* reduceElementIndexingSets<T>(
 
   // If we have mixed Element and Limits sets, we need to handle both
   if (limitsSets.length > 0) {
-    // Above `Number.MAX_SAFE_INTEGER`, `i++` below does not change `i`: the
-    // loop never ends and the list grows until the heap is full. Report the
-    // bounds as the path with only `Limits` clauses does.
+    // Above `Number.MAX_SAFE_INTEGER`, `lower + i` does not give distinct
+    // integers. Report the bounds as the path with only `Limits` clauses
+    // does.
     if (nonEnumerableIndexingSet(limitsSets)) {
       if (returnReason)
         return {
@@ -5734,23 +5743,23 @@ function* reduceElementIndexingSets<T>(
         } as ReduceElementResult<T>;
       return undefined;
     }
-    // Mixed case: combine Element domains with Limits ranges
-    // Convert Limits to a similar format
-    for (const limits of limitsSets) {
-      const values: Expression[] = [];
-      for (let i = limits.lower; i <= limits.upper; i++) {
-        values.push(ce.number(i));
-        // A one-term range above the safe-integer range (`2^60..2^60`)
-        // passes the check above, and `i++` does not leave it.
-        if (i === limits.upper) break;
-      }
-      elementDomains.push({ variable: limits.index!, values });
+    // Mixed case: combine Element domains with Limits ranges. The bounds
+    // are finite (`normalizeIndexingSet` caps an infinite bound at
+    // `MAX_ITERATION` terms; an empty range has an upper bound below its
+    // lower bound). A one-term range above the safe-integer range
+    // (`2^60..2^60`) passes the check above and has length 1.
+    for (const { index, lower, upper } of limitsSets) {
+      elementDomains.push({
+        variable: index!,
+        length: upper < lower ? 0 : upper - lower + 1,
+        at: (i) => ce.number(lower + i),
+      });
     }
   }
 
   // Generate Cartesian product indices
   const indices = elementDomains.map(() => 0);
-  const lengths = elementDomains.map((d) => d.values.length);
+  const lengths = elementDomains.map((d) => d.length);
 
   // Check for empty domains
   if (lengths.some((l) => l === 0)) {
@@ -5762,11 +5771,16 @@ function* reduceElementIndexingSets<T>(
 
   let result: T | undefined = initial;
 
+  let count = 0;
   while (true) {
+    // A driver checks the deadline between yields, but `reduceBigOp`, which
+    // delegates to this generator, is also driven directly, so check it here
+    // too, with a stride (as the path with only `Limits` clauses does).
+    if ((++count & 0xff) === 0) checkDeadline(ce._deadlineFrame);
     // Apply current combination of assignments
     const bindings: Array<readonly [string, Expression]> = [];
     for (let i = 0; i < elementDomains.length; i++) {
-      const value = elementDomains[i].values[indices[i]];
+      const value = elementDomains[i].at(indices[i]);
       assignLoopIndex(ce, elementDomains[i].variable, value);
       bindings.push([elementDomains[i].variable, value]);
     }
