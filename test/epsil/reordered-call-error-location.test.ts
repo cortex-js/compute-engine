@@ -49,6 +49,9 @@ describe('an error in an operand of a sum or product', () => {
     // `Xor(Not(w), B)` is `Xor(B, Not(w))` in canonical form, and its error
     // has the frames `Not argument 1, Xor argument 2`.
     ['let v = Xor(Not(w), B)', 'w'],
+    // The canonical operand of `--ln(w)` is `Ln(w)`, which has the source
+    // range of the `ln(w)` inside the written negations.
+    ['let v = ln(2) + --ln(w)', 'w'],
   ])('%s underlines %s', (stmt, expected) => {
     expect(underlines(`${prefix}${stmt}\n0`)).toEqual([expected]);
   });
@@ -557,6 +560,30 @@ describe('the frames of an error in the second operand of a subtraction', () => 
     ['let v = 1 - (2 + ln(w))', 'in Ln argument 1, in Subtract argument 2'],
     ['let v = 1 - (ln(w) + 2)', 'in Ln argument 1, in Subtract argument 2'],
     ['let v = 1 - (2 - ln(w))', 'in Ln argument 1, in Subtract argument 2'],
+    // A written unary minus in the second operand: the canonical operand
+    // has the source range of `ln(w)`. In `2 - -ln(w)` the two negations
+    // cancel, and the subtraction distributes a new `Negate`, whose frame
+    // names the written `-`. In `2 + -ln(w)` and `1 - -ln(w)` the negations
+    // cancel, and no `Negate` frame is recorded.
+    [
+      'let v = 1 - (2 - -ln(w))',
+      'in Ln argument 1, in Negate argument 1, in Subtract argument 2',
+    ],
+    ['let v = 1 - (2 + -ln(w))', 'in Ln argument 1, in Subtract argument 2'],
+    ['let v = 1 - (-ln(w) + 2)', 'in Ln argument 1, in Subtract argument 2'],
+    ['let v = 1 - -ln(w)', 'in Ln argument 1, in Subtract argument 2'],
+    [
+      'let v = 1 - -(-ln(w))',
+      'in Ln argument 1, in Negate argument 1, in Subtract argument 2',
+    ],
+    [
+      'let v = 3 - (1 - (2 - -ln(w)))',
+      'in Ln argument 1, in Subtract argument 2',
+    ],
+    [
+      'let v = 1 - (-ln(2) + -ln(w))',
+      'in Ln argument 1, in Subtract argument 2',
+    ],
     [
       'let v = 1 - (2 + 2*ln(w))',
       'in Ln argument 1, in Multiply argument 2, in Subtract argument 2',

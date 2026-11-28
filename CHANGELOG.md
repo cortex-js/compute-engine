@@ -143,6 +143,14 @@
 
 ### Resolved Issues
 
+- **In Epsil, the message of an error in a unary minus in the second
+  operand of a subtraction names the subtraction** (CE-1783). With `w`
+  holding `"s"`, the runtime error of `1 - (2 - -ln(w))` said "in Ln
+  argument 1, in Negate argument 1, in Add argument 1", and that of
+  `1 - (2 + -ln(w))` said "in Ln argument 1, in Add argument 1": they name
+  a sum at an operand that the program does not have. They now say "in Ln
+  argument 1, in Negate argument 1, in Subtract argument 2" and "in Ln
+  argument 1, in Subtract argument 2".
 - **A convergent infinite sum whose first term is 0 has a numeric value.**
   At machine precision, `.N()` of `\sum_{n=0}^\infty n 2^{-n}` stayed
   unevaluated, while the same sum from `n=1` gave 2. It now gives 2 to

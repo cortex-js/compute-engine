@@ -696,8 +696,9 @@ function rejectFramesOutsideScope(
     // `Exp(u)^y` is `Power(ExponentialE, u·y)`: the canonical operand 2 is
     // not the written `y`. The frame as recorded names the canonical call: the
     // frame `Exp argument 1` of a written `Exp(w)` was `Power argument 2`.
+    // A written `-t` in the second operand of a subtraction can be the
+    // operand that has the range of `t` (see `isNegationAt`).
     const callRange = nodeOffsets(selected.call);
-    const argRange = nodeOffsets(selected.arg);
     const canonicalRange =
       callRange === undefined
         ? undefined
@@ -707,10 +708,12 @@ function rejectFramesOutsideScope(
             canonicalFrames[j].index
           );
     if (
-      argRange === undefined ||
       canonicalRange === undefined ||
-      argRange[0] !== canonicalRange[0] ||
-      argRange[1] !== canonicalRange[1]
+      !(
+        hasRange(selected.arg, canonicalRange) ||
+        (isNegationAt(selected.arg, canonicalRange) &&
+          isInSubtrahend(selected.call, selected.arg))
+      )
     )
       return;
 
@@ -1223,6 +1226,11 @@ function clusterLeaves(
  * `x`. `null` when no written operand, or more than one, is found
  * (`Ln(w) + Ln(w)`): the caller then uses the whole call, which contains the
  * error.
+ *
+ * When no written operand has the range, the written operand is the one
+ * written unary minus around a node that has it ({@link isNegationAt}): the
+ * `-ln(w)` of `1 - (2 + -ln(w))`, whose canonical operand is `Ln(w)`, and the
+ * `--ln(w)` of `ln(2) + --ln(w)`.
  */
 function writtenOperandAt(
   top: MathJsonExpression,
@@ -1240,12 +1248,44 @@ function writtenOperandAt(
     );
     return failing.length === 1 ? failing[0] : null;
   }
-  const candidates = new Set([...operands(top), ...clusterLeaves(top, name)]);
-  const found = [...candidates].filter((node) => {
-    const o = nodeOffsets(node);
-    return o !== undefined && o[0] === range[0] && o[1] === range[1];
-  });
-  return found.length === 1 ? found[0] : null;
+  const candidates = [
+    ...new Set([...operands(top), ...clusterLeaves(top, name)]),
+  ];
+  const found = candidates.filter((node) => hasRange(node, range));
+  if (found.length > 0) return found.length === 1 ? found[0] : null;
+  const negated = candidates.filter((node) => isNegationAt(node, range));
+  return negated.length === 1 ? negated[0] : null;
+}
+
+/** Whether the source range of `node` is `range`. */
+function hasRange(node: MathJsonExpression, range: [number, number]): boolean {
+  const o = nodeOffsets(node);
+  return o !== undefined && o[0] === range[0] && o[1] === range[1];
+}
+
+/**
+ * Whether `node` is a written unary minus, or a chain of them, around a node
+ * whose source range is `range`. The canonical operand of a sum made from a
+ * written `-t` in the second operand of a subtraction has the source range of
+ * `t`: the two negations cancel in `1 - (2 + -ln(w))`, which is
+ * `Add(Ln(w), -1)`, and in `1 - (2 - -ln(w))`, which is
+ * `Add(Negate(Ln(w)), -1)`, the `Negate` that canonicalization made has no
+ * source range, and {@link CanonicalOrder.argumentOffsets} gives that of
+ * `Ln(w)`.
+ */
+function isNegationAt(
+  node: MathJsonExpression,
+  range: [number, number]
+): boolean {
+  let inner = node;
+  let negated = false;
+  while (operator(inner) === 'Negate') {
+    const ops = [...operands(inner)];
+    if (ops.length !== 1) return false;
+    inner = ops[0];
+    negated = true;
+  }
+  return negated && hasRange(inner, range);
 }
 
 /** Fill `path` with the nodes from `root` down to `node` (found by
