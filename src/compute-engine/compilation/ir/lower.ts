@@ -107,6 +107,8 @@ import {
   type Assigned,
   type HostCall,
   type Constant,
+  type FieldType,
+  fieldValueType,
   type IRType,
   type Instr,
   type Lane,
@@ -2609,8 +2611,10 @@ function lowerOnce(
       // The raw arm of the constructor of a declared record type
       // (`Fig({…})`): the payload, of that type. Its other calls are calls
       // of a user function (`userBinding()`).
+      // The raw arm of a nominal tuple type with its own constructor
+      // function (`V2(x, y)`) is its constructor, below.
       const d = declaredRecord(e);
-      if (d !== undefined) {
+      if (d !== undefined && d.def.kind === 'record') {
         if (!javascript)
           decline(
             e,
@@ -2618,6 +2622,8 @@ function lowerOnce(
           );
         return records.payload(e, d);
       }
+      if (d !== undefined && recordConstructor(e) !== undefined)
+        return records.construct(e);
       if (isHostDefinition(e)) return hostCall(e, want);
       // The constructor of a named tuple type: a record.
       if (recordConstructor(e) !== undefined) return records.construct(e);
@@ -3564,10 +3570,14 @@ function lowerOnce(
           // `lower-records.ts`).
           if (t.fields!.some((f) => f.shape.includes(0)))
             decline(e, 'ListFrom of arguments with an empty list');
+          // A field of a carried length (`FieldLength`): no rest record
+          // holds one (`restRecord()` declines a run-time length).
+          if (t.fields!.some((f) => f.shape[0] === 'carried'))
+            decline(e, 'ListFrom of arguments with a list of a carried length');
           const l = b.list(
             t.fields!.map((f, k) =>
               b.op('field', [v!, b.constant(k, 'integer')], {
-                ...f,
+                ...fieldValueType(f),
                 constant: undefined,
               })
             ),
@@ -9018,7 +9028,7 @@ function lowerOnce(
    *  literal declines: its type does not say which one made it, so the
    *  engine's value is not known. */
   const unboxable = (
-    t: IRType,
+    t: FieldType,
     mark: number | undefined
   ): string | undefined => {
     const scalars = ['real', 'integer', 'boolean', 'string'];

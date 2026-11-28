@@ -78,6 +78,7 @@ import {
   typeToString,
   useIndex,
   vectorRecord,
+  fieldValueType,
   type IRType,
   type Instr,
   nativeVectorArithmetic,
@@ -836,7 +837,7 @@ function splitRecords(p: Program): string | undefined {
         return;
       }
       const own = t.fields!.map((x, j) => ({
-        v: p.types.push(x) - 1,
+        v: p.types.push(fieldValueType(x)) - 1,
         name: `${name}_${t.names![j]}`,
       }));
       parts.set(

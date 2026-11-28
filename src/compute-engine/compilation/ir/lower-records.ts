@@ -9,6 +9,7 @@
 
 import {
   isOptionalField,
+  type TupleType,
   type Type,
   type TypeReference,
 } from '../../../common/type/types.js';
@@ -29,6 +30,8 @@ import {
   listedOf,
   recordNames,
   tupleBody,
+  declaredRecord,
+  rawPayloadCall,
   type DeclaredRecord,
   type Fn,
   type Lowering,
@@ -38,10 +41,17 @@ import { inputType, tupleAxis, tupleOrInputType } from './lower-functions.js';
 import {
   elementIndex,
   isSubType,
+  fieldValueType,
+  isSubLane,
   joinType,
   lengthValues,
+  sameShape,
+  scalarType,
   typeToString,
+  type FieldLength,
+  type FieldType,
   type IRType,
+  type Length,
   type V,
 } from './ir.js';
 
@@ -52,10 +62,15 @@ import {
 export function recordConstructor(
   e: Fn
 ): { nominal: string; types: Type[]; names?: string[] } | undefined {
-  // The marker that `mintTypeConstructor()` sets on the definition.
+  // The marker that `mintTypeConstructor()` sets on the definition. The
+  // raw arm of a nominal tuple type with its own constructor function
+  // (`V2(x, y)`, `rawPayloadCall()`) is the same constructor.
   const od = e.operatorDefinition as
     { _mintedTypeConstructor?: string } | undefined;
-  if (od?._mintedTypeConstructor !== 'nominal') return undefined;
+  if (od?._mintedTypeConstructor !== 'nominal') {
+    const d = declaredRecord(e);
+    if (d?.def.kind !== 'tuple' || !rawPayloadCall(e, d)) return undefined;
+  }
   // A variant of a sum declared with `|`: its tag is a value at run time
   // (`sum-representation.ts`), which a record does not hold.
   if (sumVariantInfo(e.engine, e.operator) !== undefined) return undefined;
@@ -160,10 +175,35 @@ function settledType(d: Type, wide: 'real' | 'complex'): IRType | undefined {
   return { lane: t.lane, shape: t.shape as number[] };
 }
 
+/** The lane and the inner lengths that the declared type `d` of a field
+ *  settles for a list of no stated length (`list<real>`,
+ *  `list<tuple<real, real>>`) of numbers or booleans: the field has that
+ *  lane and the length of its operand, carried when it is not a constant
+ *  (`make()`). `undefined` for any other type. */
+function settledList(
+  d: Type,
+  wide: 'real' | 'complex'
+): { lane: IRType['lane']; inner: number[] } | undefined {
+  if (hasUnsettledShape(d)) return undefined;
+  const t = inputType(d, wide);
+  if (
+    t === undefined ||
+    t.shape[0] !== 'run-time' ||
+    t.shape.slice(1).some((n) => n === 'run-time') ||
+    !['integer', 'real', 'boolean'].includes(t.lane)
+  )
+    return undefined;
+  return { lane: t.lane, inner: t.shape.slice(1) as number[] };
+}
+
 /** The scalar of the IR type `t` (no tuple mark when `!marked`) is of the
  *  engine type `d`: its lane names an engine type that is a subtype of
  *  `d`. A list, a tuple and a record do not prove a type here. */
-export function laneProves(t: IRType, marked: boolean, d: Type): boolean {
+export function laneProves(
+  t: FieldType,
+  marked: boolean,
+  d: Type
+): boolean {
   if (t.shape.length > 0 || marked) return false;
   // An array: its type, of its cells (`lower-arrays.ts`).
   if (t.array !== undefined)
@@ -200,9 +240,13 @@ export function recordLowering(
 
   /** The record of the values `values`, of the field types `fields` (the
    *  types of the values when absent), of a nominal type and its field
-   *  names. A field of a
-   *  run-time length declines: the length is a value of the function that
-   *  makes the record, which a reader in another function cannot name. */
+   *  names. A first-axis length of a field that is not a constant is
+   *  carried (`FieldLength`; D1 of
+   *  `docs/plans/2026-11-27-records-objects-and-held-lengths.md`): the
+   *  length is a value of the function that makes the record, which a
+   *  reader in another function cannot name, so the reader reads it from
+   *  the array (`field()`). An inner length that is not a constant declines
+   *  (D3), and so does a field of the lane `rows`. */
   const make = (
     e: Expression,
     values: V[],
@@ -220,20 +264,32 @@ export function recordLowering(
           ? 'a dictionary with the key __proto__'
           : `a value of the type ${nominal.nominal}, a record with the field __proto__`
       );
-    const types = values.map((v, k): IRType => {
+    const types = values.map((v, k): FieldType => {
       const place = `${nominal?.nominal ?? 'record'}.${k}`;
       const t = fields[k] ?? type(v);
       if (t.lane === 'rows')
         decline(e, 'a record with a field of lists of rows of two lengths');
       // An output object keeps the rank of each field. Its source value
       // holds the lengths, which can be local to a comprehension.
-      const shape = resultRecord
+      const shape: FieldLength[] = resultRecord
         ? t.shape.map(() => 0)
         : t.shape.map((n) =>
             typeof n === 'number' ? n : (cx.constant(n.v) ?? n)
           );
-      if (!resultRecord && shape.some((n) => typeof n !== 'number'))
-        decline(e, 'a record with a field of a run-time length');
+      if (!resultRecord && typeof shape[0] === 'object') {
+        // A tuple has a static length.
+        if (tuples.get(v) === 0)
+          decline(
+            e,
+            'a record with a field that is a tuple of a run-time length'
+          );
+        shape[0] = 'carried';
+      }
+      if (!resultRecord && shape.some((n) => typeof n === 'object'))
+        decline(
+          e,
+          'a record with a field of lists of a run-time length (a run-time length of an inner axis)'
+        );
       // A string of a known value: the field's type holds it (CE-1652,
       // step 4c).
       const known =
@@ -368,6 +424,33 @@ export function recordLowering(
           op,
           `${what}: a value of type ${engineTypeToString(op.type.type)}, which does not prove ${engineTypeToString(d)}`
         );
+      // A list of a settled lane and no stated length (`list<real>`): the
+      // field has the lane, and the length of the operand (`make()`); an
+      // empty list is the empty list of the lane.
+      const list = open ? undefined : settledList(d, cx.wide);
+      if (list !== undefined) {
+        if (
+          isFunction(op, 'List') &&
+          op.nops === 0 &&
+          list.inner.length === 0
+        ) {
+          fields.push(undefined);
+          return cx.emptyList(op, list.lane);
+        }
+        const w = cx.value(op)!;
+        const t = type(w);
+        if (
+          !isSubLane(t.lane, list.lane) ||
+          !sameShape(t.shape.slice(1), list.inner, cx.constant) ||
+          tuples.get(w) !== tupleAxis(d)
+        )
+          decline(
+            op,
+            `${what}: a value of ${typeToString(t)}, not ${engineTypeToString(d)}`
+          );
+        fields.push({ lane: list.lane, shape: t.shape });
+        return w;
+      }
       const v = cx.value(op)!;
       if (open && !laneProves(type(v), tuples.has(v), d))
         decline(
@@ -439,13 +522,15 @@ export function recordLowering(
    *  against the type when the value is made, so the static type of
    *  `payload` must prove it, with no key that the type does not have and
    *  every key that it requires; otherwise the value declines. `e` is the
-   *  site of a decline. */
+   *  site of a decline. Of a nominal tuple type, `declaredTuple()`. */
   const declared = (
     e: Expression,
     payload: Expression,
     v: V,
     d: DeclaredRecord
   ): V => {
+    const def = d.def;
+    if (def.kind === 'tuple') return declaredTuple(e, payload, v, d, def);
     const t = type(v);
     const what = `a value of the type ${d.nominal}`;
     if (
@@ -454,14 +539,14 @@ export function recordLowering(
       t.nominal !== undefined
     )
       decline(e, `${what} whose payload is not a dictionary`);
-    const keys = Object.keys(d.def.elements);
+    const keys = Object.keys(def.elements);
     const names = t.names!;
     // Each field is proven by its static type, or, when that type is wider
     // (a local inferred as `number`), by its lane, as in `construct()`: the
     // interpreter checks the value, which the lane holds.
     const pt = payload.type.type;
     const proves = (n: string, k: number): boolean => {
-      const want = d.def.elements[n];
+      const want = def.elements[n];
       const have =
         typeof pt === 'object' && pt.kind === 'record'
           ? pt.elements[n]
@@ -473,12 +558,12 @@ export function recordLowering(
     };
     if (
       names.some((n) => !keys.includes(n)) ||
-      keys.some((k) => !isOptionalField(d.def, k) && !names.includes(k)) ||
-      !(isSubtype(pt, d.def) || names.every(proves))
+      keys.some((k) => !isOptionalField(def, k) && !names.includes(k)) ||
+      !(isSubtype(pt, def) || names.every(proves))
     )
       decline(
         e,
-        `${what} whose payload, of type ${engineTypeToString(payload.type.type)}, does not prove ${engineTypeToString(d.def)}`
+        `${what} whose payload, of type ${engineTypeToString(payload.type.type)}, does not prove ${engineTypeToString(def)}`
       );
     return make(
       e,
@@ -486,6 +571,92 @@ export function recordLowering(
       { nominal: d.nominal, names },
       [],
       'Dictionary'
+    );
+  };
+
+  /** The value of the nominal tuple type `d` (`type V2 = tuple<…>` with its
+   *  constructor function) whose payload is `v`, the value of the
+   *  expression `payload`, a `Tuple`: the record of its elements, of the
+   *  nominal type and its field names, as the constructor of the type
+   *  makes it (`construct()`), whose engine value is `V2(x, y)` (the
+   *  interpreter spreads a tuple payload). The payload is a tuple of
+   *  numbers of one lane (the axis of its tuple mark) or a record of no
+   *  names (a `Tuple` of several lanes); its static type must be a tuple
+   *  of as many elements, and each element must prove the type of its
+   *  field, by its static type or by its lane, as the interpreter checks
+   *  it; otherwise the value declines. */
+  const declaredTuple = (
+    e: Expression,
+    payload: Expression,
+    v: V,
+    d: DeclaredRecord,
+    def: TupleType
+  ): V => {
+    const what = `a value of the type ${d.nominal}`;
+    if (!javascript)
+      decline(e, `${what}, a record: records compile on javascript only`);
+    if (sumVariantInfo(e.engine, d.nominal) !== undefined)
+      decline(e, `${what}, a variant of a sum`);
+    const t = type(v);
+    const n = def.elements.length;
+    const pt = payload.type.type;
+    const values: V[] | undefined =
+      typeof pt !== 'object' ||
+      pt.kind !== 'tuple' ||
+      pt.elements.length !== n
+        ? undefined
+        : t.lane === 'record' &&
+            t.names === undefined &&
+            t.nominal === undefined &&
+            t.head !== 'Dictionary' &&
+            t.fields!.length === n
+          ? t.fields!.map((_, k) => field(e, v, k))
+          : t.lane !== 'record' &&
+              t.shape.length === 1 &&
+              t.shape[0] === n &&
+              tuples.get(v) === 0
+            ? def.elements.map((_, k) =>
+                b.op(
+                  'elem',
+                  [v, b.constant(k, 'integer')],
+                  scalarType(t.lane)
+                )
+              )
+            : undefined;
+    const proves = (x: V, k: number): boolean => {
+      const want = def.elements[k].type;
+      const have = (pt as TupleType).elements[k].type;
+      return (
+        isSubtype(have, want) || laneProves(type(x), tuples.has(x), want)
+      );
+    };
+    if (values === undefined || !values.every(proves))
+      decline(
+        e,
+        `${what} whose payload, of type ${engineTypeToString(pt)}, does not prove ${engineTypeToString(def)}`
+      );
+    // Where the declared type settles an IR type the field has it, as in
+    // `construct()`.
+    const fields = def.elements.map((x) => settledType(x.type, cx.wide));
+    const widened = values.map((x, k) => {
+      const settled = fields[k];
+      if (settled === undefined) return x;
+      const w = cx.widen(x, settled.lane);
+      if (!isSubType(type(w), settled, cx.constant))
+        decline(
+          e,
+          `${what} whose element ${k + 1} is ${typeToString(type(w))}, not ${engineTypeToString(def.elements[k].type)}`
+        );
+      return w;
+    });
+    const names = def.elements.every((x) => x.name !== undefined)
+      ? def.elements.map((x) => x.name!)
+      : undefined;
+    return make(
+      e,
+      widened,
+      { nominal: d.nominal, ...(names === undefined ? {} : { names }) },
+      fields
     );
   };
 
@@ -504,8 +675,10 @@ export function recordLowering(
   };
 
   /** The field `k` (from 0) of the record `r`: the value it was made of,
-   *  or its read. The read of a string field of a known value is that
-   *  value (`Lowering.known()`); its type does not hold it. A field whose
+   *  with its own length, or its read. The read of a field of a carried
+   *  length reads the length first (`field.len`) and has that length. The
+   *  read of a string field of a known value is that value
+   *  (`Lowering.known()`); its type does not hold it. A field whose
    *  length is the constant 0 (the empty list of an outer variable,
    *  `Figure("circle", [])`) is read as the empty list of its lane, a build
    *  of no element: no value has a stated length of 0. `e` is the read. */
@@ -513,16 +686,29 @@ export function recordLowering(
     const known = parts.get(r)?.[k];
     if (known !== undefined) return known;
     const t = type(r);
-    const { constant, ...f } = t.fields![k];
-    if (f.shape.includes(0)) {
-      if (f.shape.length !== 1 || t.marks?.[k] !== undefined)
+    const { constant, ...g } = t.fields![k];
+    if (g.shape.includes(0)) {
+      if (g.shape.length !== 1 || t.marks?.[k] !== undefined)
         decline(
           e,
           'a read of a field that is an empty list of lists or points'
         );
-      return cx.emptyList(e, f.lane);
+      return cx.emptyList(e, g.lane);
     }
-    const v = b.op('field', [r, b.constant(k, 'integer')], f);
+    const index = b.constant(k, 'integer');
+    // A carried length: the length of the field's array, read first, that
+    // the type of the read names (`field.len`).
+    const f: IRType =
+      g.shape[0] === 'carried'
+        ? {
+            ...g,
+            shape: [
+              { v: b.op('field.len', [r, index], scalarType('integer')) },
+              ...(g.shape.slice(1) as Length[]),
+            ],
+          }
+        : fieldValueType(g);
+    const v = b.op('field', [r, index], f);
     const listed = listedOf(cx, r);
     if (Array.isArray(listed)) cx.listed.set(v, listed[k] ?? false);
     if (constant !== undefined)

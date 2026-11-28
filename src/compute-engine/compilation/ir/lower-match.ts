@@ -30,6 +30,7 @@ import {
   isSubLane,
   scalarType,
   typeToString as irTypeToString,
+  type FieldType,
   type IRType,
   type V,
 } from './ir.js';
@@ -74,7 +75,7 @@ function engineTypeOf(
  *  Otherwise `undefined`. */
 function valueTypeOf(
   e: Expression,
-  t: IRType,
+  t: FieldType,
   mark: number | undefined
 ): Type | undefined {
   if (t.lane === 'record') {

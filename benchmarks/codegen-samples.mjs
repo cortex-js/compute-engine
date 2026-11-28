@@ -19,14 +19,21 @@ const epsil = await Promise.all(
   )
 );
 // The record cases: a field read in a loop (a record made and passed to a
-// function at each pass), a named tuple input read field by field, and a
-// record result.
+// function at each pass), a named tuple input read field by field, a
+// record result, and a field of a carried length read in a loop (`geom`,
+// the length of the list `g`). A checkout that declines a case runs its
+// `alternative`, the same values with no record (`sumList(g)`).
 const RECORDS = `
   type P = tuple<x: real, y: real>
   function dot(q: P) { q.x * q.y }
   function loopRec(t: real) { let s = 0; for i in 1..100 { s = s + dot(P(t + i, i)) }; s }
   function readP(q: P) { q.x + 2 * q.y + q.x * q.y }
   function mk(t: real) { P(cos(t), sin(t)) }
+  type T = tuple<kind: string, geom: list<real>>
+  function sumGeom(r: T) { let s = 0; for i in 1..length(r.geom) { s = s + r.geom[i] * i }; s }
+  function loopCarried(t: real, g: list<real>) { let s = 0; for k in 1..20 { s = s + sumGeom(T("a", g)) * (t + k) }; s }
+  function sumList(h: list<real>) { let s = 0; for i in 1..length(h) { s = s + h[i] * i }; s }
+  function loopList(t: real, g: list<real>) { let s = 0; for k in 1..20 { s = s + sumList(g) * (t + k) }; s }
 `;
 const cases = [
   ['compound square', ['Power', ['Add', 'x', 1], 2], 100000],
@@ -55,11 +62,19 @@ const cases = [
   ['record field read in a loop', ['loopRec', 'x'], 10000, RECORDS],
   ['record input read by field', ['readP', 'p'], 100000, RECORDS],
   ['record result', ['mk', 'x'], 100000, RECORDS],
+  [
+    'record carried field read in a loop',
+    ['loopCarried', 'x', 'g'],
+    10000,
+    RECORDS,
+    ['loopList', 'x', 'g'],
+  ],
 ];
 let checksum = 0;
 const median = (xs) => [...xs].sort((a, b) => a - b)[Math.floor(xs.length / 2)];
 const results = [];
-for (const [name, json, iterations, prelude] of cases) {
+for (const [name, json, iterations, prelude, alternative] of cases) {
+  const alternatives = [false, false];
   const fns = modules.map(({ ComputeEngine, compile }, k) => {
     const ce = new ComputeEngine();
     ce.assign('f', ce.expr(['Function', ['Add', 't', 1], 't']));
@@ -67,16 +82,27 @@ for (const [name, json, iterations, prelude] of cases) {
       ce.declare('x', 'real');
       epsil[k].executeEpsil(ce, prelude);
       ce.declare('p', 'P');
+      ce.declare('g', 'list<real>');
     }
-    const result = compile(ce.expr(json), {
-      to: 'javascript',
-      constantFold: false,
-    });
+    const options = { to: 'javascript', constantFold: false, fallback: false };
+    let result;
+    try {
+      result = compile(ce.expr(json), options);
+    } catch (e) {
+      if (alternative === undefined) throw e;
+      alternatives[k] = true;
+      result = compile(ce.expr(alternative), options);
+    }
     assert.equal(result.success, true);
     return result;
   });
   const evaluate = (fn, count) => {
-    const vars = { x: 0, n: 1000, p: { x: 0, y: 2 } };
+    const vars = {
+      x: 0,
+      n: 1000,
+      p: { x: 0, y: 2 },
+      g: [1, 2.5, 3, -4, 5, 6.25, 7, 8],
+    };
     let acc = 0;
     for (let i = 0; i < count; i++) {
       vars.x = (i % 1000) / 100 - 5;
@@ -111,6 +137,7 @@ for (const [name, json, iterations, prelude] of cases) {
     candidateNs: median(times[1]),
     ratio: median(times[0]) / median(times[1]),
     codeLengths: fns.map((fn) => fn.code.length),
+    ...(alternatives.some((x) => x) ? { alternatives } : {}),
   });
 }
 console.log(

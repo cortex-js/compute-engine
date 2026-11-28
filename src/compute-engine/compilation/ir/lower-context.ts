@@ -12,6 +12,7 @@ import type {
 } from '../../global-types.js';
 import type {
   RecordType,
+  TupleType,
   Type,
   TypeReference,
 } from '../../../common/type/types.js';
@@ -624,20 +625,35 @@ export function tupleBody(t: Type) {
   return t.def.elements;
 }
 
-/** A record type that `type Fig = record{…}` declares, with the
- *  constructor function `function Fig(…) { {…} }` (`installConstructorFunction()`
- *  of `type-constructors.ts`): the name of the type, its definition, and the
+/** `t` refers to a record type that `type Fig = record{…}` declares (not
+ *  a parameterized one, not an alias): a parameter of that type holds a
+ *  record of that nominal type (`held()` of `lower-functions.ts`). */
+export function isDeclaredRecordType(t: Type): boolean {
+  return (
+    typeof t === 'object' &&
+    t.kind === 'reference' &&
+    !t.alias &&
+    t.args === undefined &&
+    typeof t.def === 'object' &&
+    t.def.kind === 'record'
+  );
+}
+
+/** A record type that `type Fig = record{…}` declares, or a nominal tuple
+ *  type that `type V2 = tuple<…>` declares, with the constructor function
+ *  `function Fig(…) { {…} }` (`installConstructorFunction()` of
+ *  `type-constructors.ts`): the name of the type, its definition, and the
  *  literal of the constructor, whose body computes the payload. */
 export type DeclaredRecord = {
   readonly key: object;
   readonly literal: Fn;
   readonly nominal: string;
-  readonly def: RecordType;
+  readonly def: RecordType | TupleType;
 };
 
-/** The declared record type whose constructor function the head of `e`
- *  resolves to (`DeclaredRecord`), not a parameterized one; else
- *  `undefined`. */
+/** The declared record or nominal tuple type whose constructor function
+ *  the head of `e` resolves to (`DeclaredRecord`), not a parameterized
+ *  one; else `undefined`. */
 export function declaredRecord(e: Fn): DeclaredRecord | undefined {
   const od = e.operatorDefinition as
     | {
@@ -653,19 +669,26 @@ export function declaredRecord(e: Fn): DeclaredRecord | undefined {
     !isFunction(literal, 'Function') ||
     type.typeParams !== undefined ||
     typeof type.def !== 'object' ||
-    type.def.kind !== 'record'
+    (type.def.kind !== 'record' && type.def.kind !== 'tuple')
   )
     return undefined;
   return { key: od, literal: literal as Fn, nominal: type.name, def: type.def };
 }
 
-/** The call `e` of the constructor of the declared record type `d` takes
- *  the raw arm, the payload itself (`Fig({…})`; the raw arm of
- *  `installConstructorFunction()`): one operand that can be a value of the
- *  record type. The two arms do not overlap, so any other call runs the
- *  body. */
+/** The call `e` of the constructor of the declared type `d` takes the raw
+ *  arm, the payload itself (the raw arm of `installConstructorFunction()`):
+ *  of a record type, one operand that can be a value of the record type
+ *  (`Fig({…})`); of a tuple type, one operand per element, each of which
+ *  can be a value of its element (`V2(x, y)`). The two arms do not
+ *  overlap, so any other call runs the body. */
 export function rawPayloadCall(e: Fn, d: DeclaredRecord): boolean {
-  return e.ops?.length === 1 && typesOverlap(e.ops[0].type.type, d.def);
+  if (d.def.kind === 'record')
+    return e.ops?.length === 1 && typesOverlap(e.ops[0].type.type, d.def);
+  const elements = d.def.elements;
+  return (
+    e.ops?.length === elements.length &&
+    e.ops.every((op, k) => typesOverlap(op.type.type, elements[k].type))
+  );
 }
 
 /** The definition that the head of the call `e` resolves to, when it is a

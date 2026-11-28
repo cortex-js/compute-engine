@@ -638,7 +638,7 @@ describe('A point parameter called with a list of points maps over the points', 
       // when it is boxed: `tuple<list<real>, real>` is disjoint from
       // `tuple<real, real>`, so the compiler sees an invalid expression. At a
       // `broadcastable` component, the call is admitted, and the compiler
-      // refuses the tuple with a list coordinate.
+      // refuses the parameter, whose type settles no shape.
       expect(() =>
         compile(
           pointEngine(param, result, false).box(['k', ['Tuple', 'x', 'y']]),
@@ -649,9 +649,7 @@ describe('A point parameter called with a list of points maps over the points', 
         )
       ).toThrow(
         param.startsWith('tuple<broadcastable')
-          ? // A tuple of a list and a scalar is a record (CE-1652), whose
-            // list field has a run-time length.
-            /a record with a field of a run-time length/
+          ? /the parameter P of k is not a scalar/
           : /incompatible-type/
       );
     }

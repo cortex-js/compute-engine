@@ -54,6 +54,7 @@ import {
   type ArrayCells,
   type ArrayMaker,
   type ArrayUse,
+  type FieldType,
   type IRType,
   type V,
 } from './ir.js';
@@ -134,7 +135,7 @@ export function arrayIRType(t: Type): IRType | undefined {
 
 /** Whether a value of the IR type `t` is, or holds, an array (a field of a
  *  record). */
-export function holdsArray(t: IRType): boolean {
+export function holdsArray(t: FieldType): boolean {
   return t.lane === 'array' || (t.fields ?? []).some(holdsArray);
 }
 

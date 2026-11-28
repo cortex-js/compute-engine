@@ -93,8 +93,8 @@ export type Syntax = {
   entry?(body: string[]): string[];
   list(elements: string[], type: IRType): string;
   /** The read of the field `index` (from 0) of the record `record` of the
-   *  type `type` (the operation `field`). Absent: the spelling of the
-   *  operation. */
+   *  type `type` (the operation `field`, and of `field.len`, the `length()`
+   *  of that read). Absent: the spelling of the operation. */
   field?(record: string, index: number, type: IRType): string;
   /** An operation applied to each element: `lengths` are the texts of the
    *  lengths, `body` gives the text of one element from its index
@@ -508,13 +508,21 @@ export function printProgram(
         return syntax.call(i.fn, i.args.map(use), i.args.map(type));
       case 'op': {
         const shape = type(i.out);
-        if (i.op === 'field' && syntax.field !== undefined) {
+        if (
+          (i.op === 'field' || i.op === 'field.len') &&
+          syntax.field !== undefined
+        ) {
           const k = index.def.get(i.args[1]);
           if (k?.k !== 'const' || typeof k.value.value !== 'number')
             throw new Error(
               'slice printer: a field at an index that is not a constant'
             );
-          return syntax.field(use(i.args[0]), k.value.value, type(i.args[0]));
+          const read = syntax.field(
+            use(i.args[0]),
+            k.value.value,
+            type(i.args[0])
+          );
+          return i.op === 'field' ? read : syntax.length(read);
         }
         // A read of a list in storage is spelled `<op>.<storage kind>`.
         const held = i.args.length > 0 ? type(i.args[0]).storage : undefined;

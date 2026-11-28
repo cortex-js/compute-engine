@@ -162,13 +162,22 @@ describe('host-declared tagged JavaScript results', () => {
     );
   });
 
-  test('an ordinary consumer cannot read the return-only representation', () => {
+  test('a field of a run-time length is read where the record is not the result', () => {
+    // The dictionary is a record whose field carries its length (README,
+    // "Records"); its value is the interpreter's `Take(coords, n)`.
     const ce = engine();
-    expect(() =>
-      compile(ce.expr(['At', ['HostPath', ['Take', coords, 'n']], "'coordinates'"]), {
-        fallback: false,
-      })
-    ).toThrow();
+    for (const optimize of [true, false]) {
+      const result = compile(
+        ce.expr(['At', ['HostPath', ['Take', coords, 'n']], "'coordinates'"]),
+        { fallback: false, optimize }
+      );
+      for (const n of [0, 4]) {
+        const expected = [
+          ...ce.box(['Take', coords, n]).evaluate().each(),
+        ].map((x) => x.re);
+        expect(result.run!({ n })).toEqual(expected);
+      }
+    }
   });
 
   test.each(['glsl', 'interval-js'] as const)('declines on %s', (to) => {

@@ -51,7 +51,7 @@ import {
   type Assigned,
   type HostCall,
   type Instr,
-  type IRType,
+  type FieldType,
   type Program,
   type Region,
   type V,
@@ -247,7 +247,7 @@ const key = (name: string) =>
 /** The read of the field `k` of the record `record` of the type `t`: by
  *  its name for a record with names, an object (`p.x`, `d["a b"]`), by its
  *  index for one with none, an array (README, "Records"). */
-function fieldOf(record: string, k: number, t: IRType): string {
+function fieldOf(record: string, k: number, t: FieldType): string {
   const name = t.names?.[k];
   // An object literal is not read as a block.
   const r = record.startsWith('{') ? `(${record})` : record;
@@ -263,7 +263,7 @@ function fieldOf(record: string, k: number, t: IRType): string {
  *  none) with the result convention (`_SYS.ir.normalize`) applied to that
  *  field, which the boundary does not apply inside an object. `undefined`
  *  when no field can hold one: the record is the result as it is. */
-function recordResult(value: string, t: IRType): string | undefined {
+function recordResult(value: string, t: FieldType): string | undefined {
   if (t.lane !== 'record' || t.resultRecord || !holdsComplex(t))
     return undefined;
   const fields = (t.fields ?? []).map((f, k) => {
@@ -278,7 +278,7 @@ function recordResult(value: string, t: IRType): string | undefined {
 }
 
 /** Whether a value of the type `t` can hold a complex number. */
-function holdsComplex(t: IRType): boolean {
+function holdsComplex(t: FieldType): boolean {
   return t.lane === 'complex' || (t.fields ?? []).some(holdsComplex);
 }
 
@@ -315,6 +315,7 @@ export const JS: Syntax = deepFreeze({
     // syntax, by its name for a record with names; this spelling names the
     // operands that it reads.
     'field': '$0[$1]',
+    'field.len': '$0[$1].length',
     'nothing': 'null',
     'at': { text: '_at($0, $1)', helpers: ['_at'] },
     'atu': { text: '_atu($0, $1)', helpers: ['_atu'] },
@@ -992,7 +993,7 @@ function arraySync(ce: ComputeEngine, p: Program): ArraySync | undefined {
 /** The field `k` of the record `x` of the IR type `t`: by its name for a
  *  record with names, an object, by its index for one with none, an
  *  array (README, "Records"). */
-function recordField(t: IRType, x: unknown, k: number): unknown {
+function recordField(t: FieldType, x: unknown, k: number): unknown {
   const name = t.names?.[k];
   return name === undefined
     ? (x as readonly unknown[])[k]
@@ -1001,7 +1002,7 @@ function recordField(t: IRType, x: unknown, k: number): unknown {
 
 /** Whether a value of the IR type `t` holds an array of the engine: an
  *  array, or a record with such a field. */
-function holdsArray(t: IRType): boolean {
+function holdsArray(t: FieldType): boolean {
   return (
     t.lane === 'array' ||
     (t.lane === 'record' && (t.fields ?? []).some(holdsArray))
@@ -1010,7 +1011,7 @@ function holdsArray(t: IRType): boolean {
 
 /** The fetch of each array that the value `x` of the IR type `t` holds
  *  (`holdsArray()`), as `boxValue()` gives them to the engine. */
-function syncValue(t: IRType, x: unknown): void {
+function syncValue(t: FieldType, x: unknown): void {
   if (t.lane === 'array') return syncArray(x);
   if (t.lane !== 'record') return;
   (t.fields ?? []).forEach((f, k) => syncValue(f, recordField(t, x, k)));
@@ -1113,7 +1114,7 @@ function arrayMaker(
  */
 function boxValue(
   ce: ComputeEngine,
-  t: IRType,
+  t: FieldType,
   mark: number | undefined,
   x: unknown
 ): Expression {
@@ -1138,7 +1139,7 @@ function boxValue(
     return ce.function(t.nominal ?? t.head!, fields);
   }
   if (t.shape.length > 0) {
-    const inner: IRType = { lane: t.lane, shape: t.shape.slice(1) };
+    const inner: FieldType = { lane: t.lane, shape: t.shape.slice(1) };
     const m = mark === undefined || mark === 0 ? undefined : mark - 1;
     return ce.function(
       mark === 0 ? 'Tuple' : 'List',

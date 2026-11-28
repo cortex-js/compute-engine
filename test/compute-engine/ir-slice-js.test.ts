@@ -1884,3 +1884,134 @@ describe('the checks of the passes', () => {
     expect(passChecksOn()).toBe(true);
   });
 });
+
+describe('IR slice: a carried field length (malformed IR)', () => {
+  // main(r, g) = (Length(r.geom), the record {geom: g}): `r` of the record
+  // type `{geom: list<real^*>}`, whose field length is carried
+  // (`FieldLength` of `ir.ts`); `g` a list of 3 reals; `v6` the integer
+  // 3.
+  const record = (shape: unknown[] = ['carried'], mark?: number) =>
+    ({
+      lane: 'record',
+      shape: [],
+      names: ['geom'],
+      fields: [{ lane: 'real', shape }],
+      ...(mark === undefined ? {} : { marks: [mark] }),
+    }) as never;
+  const program = (change: {
+    read?: unknown;
+    lengthOf?: number;
+    made?: unknown[];
+    field?: unknown[];
+    mark?: number;
+  }): Program => ({
+    types: [
+      record(change.field, change.mark),
+      { lane: 'integer', shape: [] },
+      { lane: 'integer', shape: [] },
+      (change.read ?? { lane: 'real', shape: [{ v: 2 }] }) as never,
+      { lane: 'real', shape: (change.made ?? [3]) as never },
+      record(change.field),
+      { lane: 'integer', shape: [] },
+    ],
+    functions: [
+      {
+        name: 'main',
+        paramNames: ['r', 'g'],
+        lengthOf: [false, false],
+        body: {
+          params: [0, 4],
+          body: [
+            { k: 'const', out: 1, value: { lane: 'integer', value: 0 } },
+            { k: 'const', out: 6, value: { lane: 'integer', value: 3 } },
+            {
+              k: 'op',
+              out: 2,
+              op: 'field.len',
+              args: [0, change.lengthOf ?? 1],
+            },
+            { k: 'op', out: 3, op: 'field', args: [0, 1] },
+            { k: 'list', out: 5, args: [4] },
+          ],
+          yields: [2, 5],
+        },
+        results: [{ lane: 'integer', shape: [] }, record(change.field)],
+      },
+    ],
+    entry: 'main',
+  });
+
+  test('a read typed with the length of its field.len verifies', () => {
+    verify(program({}), OPERATORS);
+  });
+
+  test('a read of a carried field typed with another length fails', () => {
+    // `v6` is an integer, not the field.len of `r`, and `3` no length
+    // value.
+    expect(() =>
+      verify(program({ read: { lane: 'real', shape: [{ v: 6 }] } }), OPERATORS)
+    ).toThrow(/a carried length that is not the field.len of v0/);
+    expect(() =>
+      verify(program({ read: { lane: 'real', shape: [3] } }), OPERATORS)
+    ).toThrow(/a carried length that is not the field.len of v0/);
+  });
+
+  test('a field.len of a field of a static length is that length', () => {
+    // A pass can put a record of a static field length where a carried one
+    // was read (a call inlined with a decided `if`).
+    verify(program({ field: [3] }), OPERATORS);
+    verify(
+      program({ field: [3], read: { lane: 'real', shape: [3] } }),
+      OPERATORS
+    );
+  });
+
+  test('a field.len of a field that is not a list fails', () => {
+    expect(() =>
+      verify(
+        program({
+          field: [],
+          read: { lane: 'real', shape: [] },
+          made: [],
+        }),
+        OPERATORS
+      )
+    ).toThrow(/field.len v2: a field that is not a list/);
+    // The index `v6` is 3: no field.
+    expect(() => verify(program({ lengthOf: 6 }), OPERATORS)).toThrow(
+      /field.len v2: not a field of a record/
+    );
+  });
+
+  test('a record takes a field of any first length, of the inner lengths of its type', () => {
+    expect(() =>
+      verify(
+        program({
+          field: ['carried', 2],
+          read: { lane: 'real', shape: [{ v: 2 }, 2] },
+          made: [3, 3],
+        }),
+        OPERATORS
+      )
+    ).toThrow(/record v5: v4 is list<list<real\^3>\^3>/);
+  });
+
+  test('a carried length is only the first axis of a field', () => {
+    expect(() =>
+      verify(
+        program({
+          field: [2, 'carried'],
+          read: { lane: 'real', shape: [2, 3] },
+          made: [2, 3],
+        }),
+        OPERATORS
+      )
+    ).toThrow(/the fields of/);
+  });
+
+  test('a tuple axis is not carried', () => {
+    expect(() => verify(program({ mark: 0 }), OPERATORS)).toThrow(
+      /the fields of/
+    );
+  });
+});

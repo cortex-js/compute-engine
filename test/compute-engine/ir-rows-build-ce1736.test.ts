@@ -304,6 +304,12 @@ describe('CE-1736: rows made by a List literal, Join and Append', () => {
     expect(r.rows).toBe(rows ? true : undefined);
   });
 
+  test('a List literal of a row of run-time length and a scalar is a record', () => {
+    // A record of no names, whose list field has a carried length
+    // (README, "Records").
+    expect(check(['List', count, 'n']).rows).toBeUndefined();
+  });
+
   test('a List literal of rows of constant lengths keeps its code', () => {
     const r = check(['List', ['List', 'n', 1], ['List', 2]]);
     expect(r.rows).toBeUndefined();
@@ -316,7 +322,6 @@ describe('CE-1736: what declines', () => {
   test.each([
     ['a Fold from the rows whose step is not rows', ['Fold', F(['Length', 'a'], 'a', 'i'), 'g', count], /Reduce from a list of lists of run-time length by a function whose value is not one/],
     ['Scan of the rows', ['Scan', count, F(['Map', F('r', 'r'), 'a'], 'a', 'i'), 'g'], /g of type list<list<integer>> other than/],
-    ['a List literal of a row of run-time length and a scalar', ['List', count, 'n'], /a record with a field of a run-time length/],
     ['a List literal of rows of booleans', ['List', count, ['List', 'c']], /a list of lists of run-time length of booleans/],
     ['a List literal of an absent row', ['List', ['At', 'g', 'n'], ['List', 1]], /a row at an index known at run time as an element of a list/],
     ['a Join of the rows and a flat list', ['Join', 'g', 'P'], /an operand of Join of a list of lists of run-time length that is not a list of lists of numbers/],

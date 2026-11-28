@@ -10,6 +10,25 @@
   ("k with 1 arguments"), where the same parameters of a `function`
   declaration compiled. Both now compile: `k(3)` gives 5. A default that is
   a constant of the program still declines (CE-1911).
+- **JavaScript compiles a record whose list field has a run-time length.**
+  With `type T = tuple<kind: string, geom: list<real>>` and `g` declared
+  `list<real>`, `T("a", g)` declined ("a record with a field of a run-time
+  length"), and so did a method that stores such a list in a record
+  (`circle((0, 0), 1).dash([t, 2])`). It now compiles: the record is a
+  parameter and a result of a function, a local, an arm of an `if` or a
+  `match` and the `self` of a method, and a function that reads `r.geom`
+  reads its length when the code runs. `if t > 1 { T("a", [1, 2]) } else
+  { T("b", [1, 2, 3]) }` compiles too. `f.geom + h.geom` of two fields of
+  different lengths throws `incompatible-dimensions`, as the interpreter's
+  error. A field whose inner length is known only when the code runs (a
+  matrix of run-time size) still declines.
+- **JavaScript compiles a parameter of a declared record type, and a
+  nominal tuple type with its own constructor function.** With
+  `type Fig = record{…}` and its constructor function,
+  `function g(f: Fig) { f.geom[1] }` declined ("the parameter f of g is not
+  a scalar (Fig)"); it now compiles. With `type V2 = tuple<x: real, y: real>`
+  and `function V2(r: real) { (r, 2 * r) }`, `V2(t)` declined ("a call of
+  the function V2 of the host"); it now gives `{ x: 1, y: 2 }` at `t = 1`.
 - **JavaScript compiles values of a declared record type.** With
   `type Fig = record{__tag: string, kind: string, geom: tuple<real, real>}`
   and its constructor function

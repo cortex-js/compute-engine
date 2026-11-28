@@ -3264,11 +3264,36 @@ records of one engine type whose fields have different shapes (a filled and
 an unfilled `Figure`) are two shapes, so an `If` with a run-time condition
 whose arms give them declines (R3). `interval-js` and the `bigint` mode
 decline a record (user decision), and so does GLSL, but for a vector ("On
-GLSL" below). These decline too:
+GLSL" below).
 
-- a field of a run-time length (user decision): Tycho's
-  `dash(self, pattern: list<real>)` stores `N(pattern, 15)`, so
-  `circle((0, 0), 1).dash([t, 2])` declines;
+A list field whose length is not a constant has a carried length (approved
+by the user on 2026-11-27, plan
+`docs/plans/2026-11-27-records-objects-and-held-lengths.md`): the array of
+the field holds the length, and a read of the field in any function reads
+it with `.length` first. Tycho's `dash(self, pattern: list<real>)` stores
+`N(pattern, 15)`, so `circle((0, 0), 1).dash([t, 2])` compiles. With
+`type T = tuple<kind: string, geom: list<real>>` and
+`function first(r: T) { r.geom[1] + length(r.geom) }`, `first(T("a", g))`
+of `g: list<real>` compiles, and the code of `first` reads
+`r.geom.length`. Such a
+record is a parameter and a result of a user function, a local, an arm of
+an `if` or a `match` and the `self` of a protocol method. Two records that
+differ only in the first length of a list field are one record type where
+they meet: `if c { T("a", [1, 2]) } else { T("b", [1, 2, 3]) }` compiles.
+An operation on two such fields checks their lengths once, as for two
+lists of run-time lengths: `f.geom + h.geom` throws a `RangeError`
+(`incompatible-dimensions`) where the lengths differ, where the
+interpreter gives that error. A field declared `list<real>` holds reals,
+also of an operand of integers. The lane and the rank of a field stay
+settled at compile time; only the first length is read at run time, and
+that read is not a test of a type. These decline:
+
+- a field whose inner length is not a constant (a matrix of run-time
+  size `M: matrix<real>` in a field declared `list`), and a field of the
+  lane `rows` (`(chunk(L, 2), t)`, whose rows can have two lengths);
+- a record in a local that a statement writes, a record that is an element
+  of a build, a filter or a random frame (`[T("a", g) for k in 1..3]`), and
+  the arguments of a rest parameter of a run-time length;
 - a record or a list of several lanes given to a parameter declared `list`:
   Tycho's `label` (the geometry `[x, y, text]`) and `group` (a list of
   figures) decline at `figureOf(kind: string, geom: list)`;
@@ -3299,7 +3324,14 @@ dictionary literal that proves the type. A host function receives the
 interpreter's value, `Fig(Dictionary(…))`. A `Fig` and a dictionary of no
 declared type are two types, so an `if` with a run-time condition whose arms
 give one of each declines. The spread copy `{...f, kind -> "x"}` of a `Fig`
-declines (the interpreter gives an error there, CE-1913).
+declines (the interpreter gives an error there, CE-1913). A parameter
+declared `f: Fig` takes a `Fig` (`function g(f: Fig) { f.geom[1] }`), and
+another record declines there. A nominal tuple type with its own
+constructor function (`type V2 = tuple<x: real, y: real>` with
+`function V2(r: real) { (r, 2 * r) }`) compiles the same way: the call is a
+call of a user function whose body is the tuple of the fields, which must
+prove their declared types, and the raw arm `V2(x, y)` is the constructor
+of the named tuple.
 
 A named tuple of two to four fields declared as real or integer numbers
 can also be a host input. On JavaScript, the input is an object keyed by

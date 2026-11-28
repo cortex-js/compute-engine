@@ -3930,7 +3930,8 @@ its field names (`names`); `joinType()`, the type equality of the verifier and
 two records of one engine type whose fields have different shapes are two IR
 types, and so are records of two nominal types of the same fields. A field is a
 scalar of a lane (a colour, a string), a list or a tuple of stated lengths, a
-record, or the unit type `nothing`: a field whose value is `Nothing`. On
+list whose first length is carried (below), a record, or the unit type
+`nothing`: a field whose value is `Nothing`. On
 JavaScript a record with names (of a named tuple type, a dictionary, a
 declared record type) is an object of its fields in the order of its names,
 a name that is not an identifier quoted (`{ x: v1, "a b": v2 }`, the `list`
@@ -3977,9 +3978,40 @@ tuple, the discharges of `absent()`.
   `Tuple` or `List` of one lane stays the tuple or the list of "Tuples" and
   "Lists". On JavaScript a `List` of flat lists of numbers, one of them of a
   run-time length, is a list of lists of the lane `rows` ("The rows lane"), not
-  a record. A field of a run-time length declines (its length is a value of the
-  function that makes the record), and so does a field of the lane `rows`. A
-  list of records (an element of a build, a filter or a random frame) declines.
+  a record. A field declared a list of numbers or booleans of no stated length
+  (`list<real>`, `list<tuple<real, real>>`; `settledList()`) has the declared
+  lane and the length of its operand, and `List()` there is the empty list of
+  the lane.
+- **Carried lengths** (approved by the user on 2026-11-27, stage 2 of
+  `docs/plans/2026-11-27-records-objects-and-held-lengths.md`). The first
+  length of a list field that is not a constant is `'carried'`
+  (`FieldLength` of `ir.ts`, in `IRType.fields[k].shape[0]` only; `make()`):
+  the length is a value of the function that makes the record, which a reader
+  in another function cannot name, so the array of the field holds it. A read
+  of such a field (`field()`) is the operation `field.len` (`r.geom.length` on
+  JavaScript, through the `field` of the `Syntax`), then the `field` read
+  typed with that value as its first length, `{ v: n }`; from there the field
+  is a list of a run-time length, so `f.geom + h.geom` checks the two lengths
+  once (`_agree`). The read of a field of a record made in the same body is
+  still the value it was made of, with its own length. `verify()` admits a
+  field value of any first length for a carried field type in the `list` of a
+  record, a `field` of a carried field only with the length of a `field.len`
+  of the same record and index before it, and `'carried'` nowhere but at the
+  first axis of a field (not a tuple axis). A pass can put a record of a
+  static field length where a carried one was read (a call inlined with a
+  decided `if`): `field.len` of a list field of a static length is that
+  length, and the `field` read keeps it. `isSubType()` takes a static or a run-time length
+  where a carried one is read, and `joinType()` (`sameFields(…, 'join')`)
+  joins two fields of one lane and rank whose first lengths differ, with no
+  tuple mark at that axis, to a carried length (an `if`, a `match`), so
+  `if c { T("a", [1, 2]) } else { T("b", [1, 2, 3]) }` is one record type.
+  `typeToString()` spells a carried length `^*`; two calls of a user function
+  with records whose field lengths are 2 and 3 lower two functions (the lane
+  key holds the type). An inner length that is not a constant declines (a
+  matrix of run-time size in a field declared `list`), and so does a field
+  of the lane `rows`. A list of records (an element
+  of a build, a filter or a random frame) declines, and so does a record in a
+  local that a statement writes.
 - **Reading a record.** `Field(r, name)` of a record of a named tuple type and
   `At(r, k)` (`First`, `Last`) of a constant `k` in range give the field (the
   operation `field`, with the field's tuple mark; on JavaScript `field` of the
@@ -3998,7 +4030,8 @@ tuple, the discharges of `absent()`.
   of a `Match` does not take a value of a named tuple type (the interpreter's),
   and declines on a record with no names. Every other reader declines:
   arithmetic, `Equal`, `Length` (but of the arguments of a rest parameter,
-  below), `Map`.
+  below), `Map`. A field of a carried length is read with its length first
+  (above).
 - **User functions.** A function whose result type is not a scalar (a named
   tuple type, `list<real | string>`) returns the record of its body; a body that
   is not a record declines as before ("the result of f is not a scalar"), and a
@@ -4012,9 +4045,10 @@ tuple, the discharges of `absent()`.
   calls of records of one IR type call one function and two calls of records of
   two types (`fill` of an unfilled and of a filled `Figure`) two. Such a
   parameter's arguments are lowered before the function is chosen at each call.
-  A parameter of a nominal tuple type takes a record of that nominal type only,
-  or of a nominal type that the static type of the argument proves a subtype of
-  it; any other record declines (R5). A parameter declared `list` takes no
+  A parameter of a nominal tuple type or of a declared record type
+  (`isDeclaredRecordType()`, `f: Fig`) takes a record of that nominal type
+  only, or of a nominal type that the static type of the argument proves a
+  subtype of it; any other record declines (R5). A parameter declared `list` takes no
   record: Tycho's `label` (the geometry `[x, y, text]`) and `group` (a list of
   figures) decline at `figureOf(kind: string, geom: list)` ("the parameter geom
   of figureOf is not a scalar"). In a constructor, an operand of no stated type
@@ -4070,7 +4104,18 @@ tuple, the discharges of `absent()`.
   so an `If` whose arms give them declines, as the interpreter's value has
   two types. At a function of the host the value is `Fig(Dictionary(…))`
   (`boxValue()`). The spread of a `Fig` (`{...f, kind -> "x"}`) declines,
-  as `DictionaryFrom` does (the interpreter gives an error, CE-1913).
+  as `DictionaryFrom` does (the interpreter gives an error, CE-1913). A
+  nominal tuple type with its own constructor function (`type V2 =
+  tuple<x: real, y: real>`, `function V2(r: real) { (r, 2 * r) }`) is a
+  `DeclaredRecord` too: a call of the constructor function is a call of a
+  user function whose result is the record of the elements of its body, a
+  `Tuple` (`declaredTuple()`: a tuple of numbers of one lane or a record of
+  no names, whose static type is a tuple of as many elements that each
+  prove the type of their field, else it declines), of the nominal name and
+  the field names, as `construct()` makes it; the raw arm (`V2(x, y)`,
+  `rawPayloadCall()`: one operand per element, each of which can be a
+  value of its element) is `construct()` (`recordConstructor()`). Both
+  compile on JavaScript only.
 - **Function values given to the host** (CE-1911). On JavaScript, an argument of
   a call of a function of the host that is a function value is passed as an
   expression of the engine, which the call evaluates as the interpreter
@@ -4170,7 +4215,7 @@ tuple, the discharges of `absent()`.
   or by its IR type when the static type is `any` or `unknown`) is `x`; in the
   interval and the `bigint` mode it declines. A record field from a list
   parameter of a run-time length (`N(pattern, 15)` of `pattern: list<real>`)
-  still declines ("a record with a field of a run-time length").
+  has a carried length ("Carried lengths").
 - **String constants** (CE-1652, step 4c). `lower()` lowers a program up to
   three times. The first lowering keeps no string constant, so a program that
   compiles there keeps its code. When it declines and the constants could decide

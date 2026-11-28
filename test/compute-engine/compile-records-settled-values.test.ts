@@ -517,13 +517,9 @@ describe('N(x, p) of a list or a tuple of reals', () => {
   });
 
   test("Tycho's dash: a list<real> parameter has a run-time length", () => {
-    // The field of a record has a settled shape; a `list<real>` parameter
-    // on JavaScript has the length of its argument at run time.
-    expectDeclines(
-      ce,
-      '(t: real) => circle((1, 0), 1).dash([t, 2])',
-      /a record with a field of a run-time length/
-    );
+    // A `list<real>` parameter on JavaScript has the length of its argument
+    // at run time, which the record's field carries.
+    expectAgrees(ce, '(t: real) => circle((1, 0), 1).dash([t, 2])');
   });
 });
 

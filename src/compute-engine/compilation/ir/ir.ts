@@ -72,6 +72,19 @@ export type V = number;
 /** A static length, or the integer value that holds a run-time length. */
 export type Length = number | { readonly v: V };
 
+/** The length of the first axis of a list field of a record
+ *  (`IRType.fields[k].shape[0]`, nowhere else): a static length, or
+ *  `'carried'`, the length of the field's array, which the type does not
+ *  name (`README.md`, "Records"). A read of such a field reads the length
+ *  first (`field.len`) and is typed with it. Inner axes are static. */
+export type FieldLength = Length | 'carried';
+
+/** The IR type of a field of a record: the first axis of a list field can
+ *  be carried (`FieldLength`). An `IRType` is a `FieldType`. */
+export type FieldType = Omit<IRType, 'shape'> & {
+  readonly shape: readonly FieldLength[];
+};
+
 /** `storage`: a list that the host holds in a storage of that kind (the
  *  option `storage` of `compile()`), set after the passes; it is read only
  *  by `elem` and `at` and passed to calls (`holdStorage()` of `index.ts`).
@@ -89,7 +102,7 @@ export type IRType = {
   readonly lane: Lane;
   readonly shape: readonly Length[];
   readonly storage?: 'sampler2D' | 'isampler2D';
-  readonly fields?: readonly IRType[];
+  readonly fields?: readonly FieldType[];
   readonly marks?: readonly (number | undefined)[];
   readonly nominal?: string;
   readonly names?: readonly string[];
@@ -456,17 +469,43 @@ export function mapDirectArgs(i: Instr, f: (v: V) => V): void {
   } else if (i.k !== 'const') i.args = i.args.map(f);
 }
 
-/** The length values that the type `t` names. */
-export function lengthValues(t: IRType): V[] {
-  return t.shape.flatMap((n) => (typeof n === 'number' ? [] : [n.v]));
+/** A carried length (`FieldLength`) is only in the field types of a
+ *  record, which `lengthValues()` and `mapLengths()` do not read: they read
+ *  a value's own shape. */
+function notCarried(n: Length): { readonly v: V } {
+  if (typeof n !== 'object')
+    throw new Error(
+      'IR: a carried length outside the field types of a record'
+    );
+  return n;
 }
 
-/** `t` with each length value `v` replaced with `f(v)`. */
+/** The field type `f` as the type of a value: a field whose first axis
+ *  is not carried (a carried length is read with `field.len` first,
+ *  `field()` of `lower-records.ts`). */
+export function fieldValueType(f: FieldType): IRType {
+  if (f.shape[0] === 'carried')
+    throw new Error('IR: a field of a carried length read as a value');
+  return f as IRType;
+}
+
+/** The length values that the type `t` names (its own shape, not its
+ *  fields: `notCarried()`). */
+export function lengthValues(t: IRType): V[] {
+  return t.shape.flatMap((n) =>
+    typeof n === 'number' ? [] : [notCarried(n).v]
+  );
+}
+
+/** `t` with each length value `v` of its own shape replaced with `f(v)`
+ *  (`notCarried()`). */
 export function mapLengths(t: IRType, f: (v: V) => V): IRType {
   if (t.shape.every((n) => typeof n === 'number')) return t;
   return {
     lane: t.lane,
-    shape: t.shape.map((n) => (typeof n === 'number' ? n : { v: f(n.v) })),
+    shape: t.shape.map((n) =>
+      typeof n === 'number' ? n : { v: f(notCarried(n).v) }
+    ),
   };
 }
 
@@ -483,30 +522,65 @@ export function widensTo(a: Lane, b: Lane): boolean {
   return isSubLane(a, b) || (b === 'complex' && isSubLane(a, 'real'));
 }
 
-/** Two shapes are one shape: the same numbers and the same length values
- *  (`constant` reads a length value that is a constant as its number). */
+/** Two shapes are one shape: the same numbers, the same length values
+ *  (`constant` reads a length value that is a constant as its number) and
+ *  carried lengths at the same axes. */
 export function sameShape(
-  a: readonly Length[],
-  b: readonly Length[],
+  a: readonly FieldLength[],
+  b: readonly FieldLength[],
   constant: (v: V) => number | undefined = () => undefined
 ): boolean {
-  const n = (x: Length) =>
-    typeof x === 'number' ? x : (constant(x.v) ?? `v${x.v}`);
+  const n = (x: FieldLength) =>
+    typeof x === 'number' || x === 'carried'
+      ? x
+      : (constant(x.v) ?? `v${x.v}`);
   return a.length === b.length && a.every((x, i) => n(x) === n(b[i]));
 }
 
-/** A value of type `a` can stand where `b` is read: the same shape, and a
- *  sub-lane; two records are one record type, or `b` the type of `a` with
- *  fewer constant fields (`sameFields()`). */
+/** A value of the shape `a` can stand where `b` is read: one shape, or `b`
+ *  carries a length where `a` has any (the array holds it). */
+function subShape(
+  a: readonly FieldLength[],
+  b: readonly FieldLength[],
+  constant?: (v: V) => number | undefined
+): boolean {
+  if (!b.includes('carried')) return sameShape(a, b, constant);
+  return (
+    a.length === b.length &&
+    a.every((x, i) => b[i] === 'carried' || sameShape([x], [b[i]], constant))
+  );
+}
+
+/** A value of type `a` can stand where `b` is read: the same shape (or a
+ *  carried length in `b`, `subShape()`), and a sub-lane; two records are
+ *  one record type, or `b` the type of `a` with fewer constant fields or
+ *  with carried lengths for some of its field lengths (`sameFields()`). */
 export function isSubType(
-  a: IRType,
-  b: IRType,
+  a: FieldType,
+  b: FieldType,
   constant?: (v: V) => number | undefined
 ): boolean {
   return (
-    sameShape(a.shape, b.shape, constant) &&
+    subShape(a.shape, b.shape, constant) &&
     isSubLane(a.lane, b.lane) &&
     sameFields(a, b, 'sub')
+  );
+}
+
+/** The fields `x` and `y` of records join with a carried first axis
+ *  (D2 of `docs/plans/2026-11-27-records-objects-and-held-lengths.md`):
+ *  a list (no tuple mark at the first axis, `mark`) of one rank whose
+ *  inner axes are equal. */
+function widens(
+  x: FieldType,
+  y: FieldType,
+  mark: number | undefined
+): boolean {
+  return (
+    mark !== 0 &&
+    x.shape.length > 0 &&
+    x.shape.length === y.shape.length &&
+    sameShape(x.shape.slice(1), y.shape.slice(1))
   );
 }
 
@@ -515,11 +589,13 @@ export function isSubType(
  *  record. The constant of a string field (`IRType.constant`; CE-1652,
  *  step 4c): the same in `a` and `b` (`same`), the same or absent in `b`
  *  (`sub`: a value of type `a` stands where `b` is read), or not compared
- *  (`loose`). */
+ *  (`loose`, and `join`). The first-axis length of a list field: the same
+ *  in `a` and `b`, or carried in `b` (`sub`), or any where the two fields
+ *  widen to a carried length (`join`, `widens()`). */
 export function sameFields(
-  a: IRType,
-  b: IRType,
-  constants: 'same' | 'sub' | 'loose' = 'same'
+  a: FieldType,
+  b: FieldType,
+  constants: 'same' | 'sub' | 'loose' | 'join' = 'same'
 ): boolean {
   if (a.resultRecord !== b.resultRecord) return false;
   // Two arrays are one type when their cell types are (an array type is
@@ -539,8 +615,12 @@ export function sameFields(
       (x, k) =>
         m[k] === n[k] &&
         x.lane === g[k].lane &&
-        sameShape(x.shape, g[k].shape) &&
+        (constants === 'sub'
+          ? subShape(x.shape, g[k].shape)
+          : sameShape(x.shape, g[k].shape) ||
+            (constants === 'join' && widens(x, g[k], m[k]))) &&
         (constants === 'loose' ||
+          constants === 'join' ||
           x.constant === g[k].constant ||
           (constants === 'sub' && g[k].constant === undefined)) &&
         sameFields(x, g[k], constants)
@@ -548,13 +628,29 @@ export function sameFields(
   );
 }
 
-/** The record type `a` (of the fields of `b`, `sameFields(a, b, 'loose')`)
- *  with the constant of each string field that `b` does not have. */
-function commonConstants(a: IRType, b: IRType): IRType {
+/** The record type `a` (of the fields of `b`, `sameFields(a, b, 'join')`)
+ *  without the constant of each string field that `b` does not have, and
+ *  with a carried first axis of each list field whose length differs in
+ *  `b`. */
+function commonConstants<T extends FieldType>(a: T, b: FieldType): T {
   if (a.lane !== 'record') {
-    if (a.constant === undefined || a.constant === b.constant) return a;
-    const { constant: _, ...rest } = a;
-    return rest;
+    const shape =
+      a.shape.length > 0 && !sameShape(a.shape, b.shape)
+        ? (['carried', ...a.shape.slice(1)] as const)
+        : a.shape;
+    if (
+      shape === a.shape &&
+      (a.constant === undefined || a.constant === b.constant)
+    )
+      return a;
+    const { constant, ...rest } = a;
+    return {
+      ...rest,
+      shape,
+      ...(constant === undefined || constant !== b.constant
+        ? {}
+        : { constant }),
+    } as T;
   }
   return {
     ...a,
@@ -565,13 +661,15 @@ function commonConstants(a: IRType, b: IRType): IRType {
 /** The type of a value that is either `a` or `b` (converted to the
  *  complex lane when the other is complex), or `undefined`. Two records
  *  join only when they are one record type, but for their constant
- *  fields: a field whose constants differ is a string (CE-1652, step 4c). */
+ *  fields, a field whose constants differ is a string (CE-1652, step 4c),
+ *  and for the first-axis lengths of their list fields, which widen to a
+ *  carried length where they differ (`widens()`). */
 export function joinType(a: IRType, b: IRType): IRType | undefined {
   if (!sameShape(a.shape, b.shape)) return undefined;
   if (a.lane === 'array' || b.lane === 'array')
     return sameFields(a, b) ? a : undefined;
   if (a.lane === 'record' || b.lane === 'record')
-    return sameFields(a, b, 'loose') ? commonConstants(a, b) : undefined;
+    return sameFields(a, b, 'join') ? commonConstants(a, b) : undefined;
   if (widensTo(a.lane, b.lane)) return b;
   return widensTo(b.lane, a.lane) ? a : undefined;
 }
@@ -623,7 +721,7 @@ export function elementType(t: IRType): IRType {
 }
 
 export function typeToString(
-  t: IRType,
+  t: FieldType,
   /** For a message to the user: the axis of the tuple mark of the value
    *  (`tuple<real, real>`) or -1, and a run-time length without its value. */
   axis: number | false = false
@@ -648,7 +746,7 @@ export function typeToString(
     (s, n, i) =>
       i === k && typeof n === 'number'
         ? `tuple<${Array(n).fill(s).join(', ')}>`
-        : `list<${s}${typeof n === 'number' ? `^${n}` : axis === false ? `^v${n.v}` : ''}>`,
+        : `list<${s}${typeof n === 'number' ? `^${n}` : axis !== false ? '' : n === 'carried' ? '^*' : `^v${n.v}`}>`,
     t.lane
   );
 }

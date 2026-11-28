@@ -24,6 +24,8 @@ import {
   scalarType,
   typeToString,
   vectorRecord,
+  type FieldLength,
+  type FieldType,
   type IRFunction,
   type IRType,
   type Instr,
@@ -72,6 +74,8 @@ export function passChecksOn(): boolean {
 export function verify(p: Program, rows: readonly OperatorRow[]): void {
   const defined = new Set<V>();
   const constants = new Map<V, number>();
+  /** The record and the field index of each `field.len`. */
+  const fieldLengths = new Map<V, readonly [V, number]>();
   const fail = (what: string): never => {
     throw new SliceInternalError(`IR verifier: ${what}`);
   };
@@ -79,7 +83,7 @@ export function verify(p: Program, rows: readonly OperatorRow[]): void {
   const constant = (v: V) => constants.get(v);
   const same = (a: IRType['shape'], b: IRType['shape']) =>
     sameShape(a, b, constant);
-  const sub = (a: V, t: IRType, where: string) => {
+  const sub = (a: V, t: FieldType, where: string) => {
     if (!isSubType(type(a), t, constant))
       fail(
         `${where}: v${a} is ${typeToString(type(a))}, not ${typeToString(t)}`
@@ -117,9 +121,25 @@ export function verify(p: Program, rows: readonly OperatorRow[]): void {
         (t.lane === 'array' && t.shape.length > 0)
       )
         fail(`v${v}: an array of no cells, or a list of arrays`);
-      for (const n of t.shape)
-        if (typeof n === 'number' ? !(Number.isInteger(n) && n > 0) : false)
+      for (const n of t.shape as readonly FieldLength[])
+        if (
+          typeof n === 'number'
+            ? !(Number.isInteger(n) && n > 0)
+            : n === 'carried'
+        )
           fail(`v${v}: shape ${JSON.stringify(t.shape)}`);
+      // The field types of a record: static lengths, and a carried length
+      // at the first axis of a field only (`FieldLength`).
+      const fieldShapes = (x: FieldType): boolean =>
+        (x.fields ?? []).every(
+          (f, j) =>
+            f.shape.every(
+              (n, k) =>
+                typeof n === 'number' ||
+                (n === 'carried' && k === 0 && x.marks?.[j] !== 0)
+            ) && fieldShapes(f)
+        );
+      if (!fieldShapes(t)) fail(`v${v}: the fields of ${typeToString(t)}`);
       for (const n of lengthValues(t)) {
         if (!scope.has(n)) fail(`v${v}: the length v${n} is not visible`);
         sub(n, scalarType('integer'), `the length of v${v}`);
@@ -174,13 +194,40 @@ export function verify(p: Program, rows: readonly OperatorRow[]): void {
       }
       case 'op': {
         // The field at a constant index of a record: the type of that
-        // field.
-        if (i.op === 'field') {
+        // field. A field whose first-axis length is carried is read with
+        // the length that a `field.len` of the same record and index gave
+        // before it (`field()` of `lower-records.ts`). A pass can replace
+        // the record with one of a static length there (a call inlined
+        // with a decided `if`): the `field.len` is then that length.
+        if (i.op === 'field' || i.op === 'field.len') {
           const [r, k] = i.args;
           const f = type(r).fields?.[constant(k) ?? -1];
           if (type(r).lane !== 'record' || f === undefined)
-            fail(`field v${i.out}: not a field of a record`);
-          if (!equal(type(i.out), f!))
+            fail(`${i.op} v${i.out}: not a field of a record`);
+          if (i.op === 'field.len') {
+            if (f!.shape.length === 0)
+              fail(`field.len v${i.out}: a field that is not a list`);
+            if (!equal(type(i.out), scalarType('integer')))
+              fail(`field.len v${i.out}: the result is not an integer`);
+            fieldLengths.set(i.out, [r, constant(k)!]);
+            return;
+          }
+          const out = type(i.out);
+          const n = out.shape[0];
+          const carried = f!.shape[0] === 'carried';
+          const read =
+            typeof n === 'object' ? fieldLengths.get(n.v) : undefined;
+          const measured = read?.[0] === r && read[1] === constant(k);
+          if (carried && !measured)
+            fail(
+              `field v${i.out}: a carried length that is not the field.len of v${r} at ${constant(k)}`
+            );
+          const want: FieldType = measured
+            ? { ...f!, shape: [n, ...f!.shape.slice(1)] }
+            : f!;
+          if (
+            !(isSubType(out, want, constant) && isSubType(want, out, constant))
+          )
             fail(`field v${i.out}: the result is not ${typeToString(f!)}`);
           return;
         }

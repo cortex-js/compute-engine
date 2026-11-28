@@ -526,11 +526,8 @@ describe('CE-1652 acceptance: declines', () => {
       );
   });
 
-  test('a dash of a list of a run-time length (user decision)', () => {
-    expectDeclines(
-      '(t: real) => draw(circle((0, 0), 1).dash([t, 2]))',
-      /a record with a field of a run-time length/
-    );
+  test('a dash of a list of a run-time length, carried by the record', () => {
+    expectHostAgrees('(t: real) => draw(circle((0, 0), 1).dash([t, 2]))');
   });
 
   test('the Game of Life callback that draws (user decision: Tycho splits it)', () => {

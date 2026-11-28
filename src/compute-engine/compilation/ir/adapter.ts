@@ -69,7 +69,7 @@ import {
   regionsOf,
   scalarType,
   type Assigned,
-  type IRType,
+  type FieldType,
   type Lane,
   type Program,
   type Region,
@@ -265,7 +265,7 @@ export function inputReport(
 }
 
 /** `t` is, or holds, a record whose fields include `re` and `im`. */
-function complexLike(t: IRType): boolean {
+function complexLike(t: FieldType): boolean {
   return (
     t.lane === 'record' &&
     ((t.names?.includes('re') === true && t.names.includes('im')) ||

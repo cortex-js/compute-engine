@@ -409,8 +409,11 @@ export const OPERATORS: readonly OperatorRow[] = Object.freeze([
   row(undefined,      2,          [[['list', I], 'element', 'text.elem']], list),
   // A record (`README.md`, "Records"): the field at a constant index from
   // 0, of the type of that field (the verifier reads it, not this
-  // signature), and `Nothing`, the value of a field of the lane `nothing`.
+  // signature); the length of the array of a field whose first-axis length
+  // is carried (`FieldLength` of `ir.ts`), which the type of the `field`
+  // read names; and `Nothing`, the value of a field of the lane `nothing`.
   row(undefined,      2,          [[['record', I], 'record', 'field']], { threads: false }),
+  row(undefined,      2,          [[['record', I], I, 'field.len']], { threads: false }),
   row(undefined,      0,          [[[], 'nothing', 'nothing']], { threads: false }),
   // A list local written in place (`lower.ts`, `README.md`, "Lists"): the
   // array that the local owns, a copy of its value (`copy`); the index from

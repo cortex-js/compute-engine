@@ -155,8 +155,10 @@ describe('a part of a tuple literal of a number and a list', () => {
     ['at a run-time index', ['At', pair, 'n']],
     ['out of range', ['At', pair, 3]],
   ] as [string, MathJsonExpression][])('declines %s', (_, expr) =>
+    // A record is read at a constant index in range (its list field has a
+    // carried length).
     expect(() => compile(ce2.box(expr), { fallback: false })).toThrow(
-      /a record with a field of a run-time length/
+      /At of a record at an index that is not a constant in range/
     )
   );
 });

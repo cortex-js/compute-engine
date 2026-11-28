@@ -492,9 +492,13 @@ npm run test compute-engine/compile-performance
 `codegen-samples.mjs` compares generated JavaScript runners from two source
 checkouts. It verifies numeric agreement, warms both implementations, alternates
 measurement order, and reports median nanoseconds per call. Cases cover small
-powers, exponentials, repeated trigonometry, range comprehensions, and calls
-whose arguments are loop counters. Hold the shared-box lock and run without
-competing tests; these timings do not measure GPU execution.
+powers, exponentials, repeated trigonometry, range comprehensions, calls
+whose arguments are loop counters, and records (a field read in a loop, a
+named tuple input, a record result, a field of a carried length read in a
+loop). A checkout that declines a case with an `alternative` runs that
+expression instead, the same values with no record; the result then lists
+`alternatives`. Hold the shared-box lock and run without competing tests;
+these timings do not measure GPU execution.
 
 ```bash
 node --import tsx benchmarks/codegen-samples.mjs /path/to/baseline /path/to/candidate
