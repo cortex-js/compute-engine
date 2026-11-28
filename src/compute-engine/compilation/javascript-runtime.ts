@@ -2107,6 +2107,8 @@ export const REAL_FUNCTIONS = Object.freeze({
     orthogonalPolynomial('HermiteH', n, x),
   laguerrel: (n: number, x: number): number =>
     orthogonalPolynomial('LaguerreL', n, x),
+  laguerrela: (n: number, a: number, x: number): number =>
+    orthogonalPolynomial('LaguerreL', n, x, a),
   // The principal branch, and the branch `k` (an integer).
   lambertw: (x: number): number => lambertW(x),
   lambertwk: (x: number, k: number): number => lambertW(x, k),

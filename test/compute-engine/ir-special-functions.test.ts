@@ -142,6 +142,8 @@ const CASES: [name: string, json: Json, points: Point[], tolerance?: number][] =
   // A negative degree has no value: NaN, the interpreter is unevaluated.
   ['HermiteH', ['HermiteH', 'n', 'x'], grid('n', [0, 1, 2, 5, 20, -1], 'x', [-2.5, -1, -0.5, 0, 0.3, 1, 1.5, 10])],
   ['LaguerreL', ['LaguerreL', 'n', 'x'], grid('n', [0, 1, 2, 5, 20, -2], 'x', [-2.5, -1, 0, 0.3, 1, 1.5, 10, 30.5])],
+  // `y` is the parameter a: a < -1 is the interpreter's explicit sum.
+  ['LaguerreL of three operands', ['LaguerreL', 'n', 'y', 'x'], [0, 1, 2, 5, 20].flatMap((n) => grid('y', [-5.5, -3, -1.5, 0, 0.5, 2.5], 'x', [-2.5, 0, 0.3, 1.5, 10, 30.5]).map((p) => ({ n, ...p })))],
   ['Fibonacci', ['Fibonacci', 'n'], [0, 1, 2, 5, 10, 20, 50, 78, 79, 100, 500, 1000, 1476, 1477, -1, -2, -7, -80].map((n) => ({ n })), 1e-14],
   ['IsPrime', ['IsPrime', 'n'], [0, 1, 2, 3, 4, 97, 91, -7, 1e15 + 37, 2 ** 53 + 2].map((n) => ({ n }))],
   ['Binomial of reals', ['Binomial', 'x', 'y'], grid('x', [5, 10, 7, 6, 20, 2.5, -3, 0.5, -2.5], 'y', [2, 3, 0, 6, 10, 1.5, -1, -2])],

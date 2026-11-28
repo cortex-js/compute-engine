@@ -78,9 +78,9 @@ N(barnesG(1/2))
 
 ### chebyshevT
 
-MathJSON `ChebyshevT` · `(degree: integer, x: complex) -> number`
+MathJSON `ChebyshevT` · `(degree: real, x: complex) -> number`
 
-- `degree` — The degree n; a negative degree gives T₋ₙ = Tₙ. Sample: `3`.
+- `degree` — The degree n; a negative degree gives T₋ₙ = Tₙ. A non-integer degree stays unevaluated. Sample: `3`.
 - `x` — The point; a number gives the value, a symbol or an expression the expanded polynomial in it. Sample: `1/2`.
 
 Chebyshev polynomial of the first kind Tₙ(x), with Tₙ(cos θ) = cos(nθ). T₋ₙ = Tₙ.
@@ -97,9 +97,9 @@ chebyshevT(3, 1/2)
 
 ### chebyshevU
 
-MathJSON `ChebyshevU` · `(degree: integer, x: complex) -> number`
+MathJSON `ChebyshevU` · `(degree: real, x: complex) -> number`
 
-- `degree` — The degree n; a negative degree gives U₋₁ = 0 and U₋ₙ = −Uₙ₋₂. Sample: `3`.
+- `degree` — The degree n; a negative degree gives U₋₁ = 0 and U₋ₙ = −Uₙ₋₂. A non-integer degree stays unevaluated. Sample: `3`.
 - `x` — The point; a number gives the value, a symbol or an expression the expanded polynomial in it. Sample: `1/2`.
 
 Chebyshev polynomial of the second kind Uₙ(x), with Uₙ(cos θ) = sin((n+1)θ)/sin θ. U₋₁ = 0 and U₋ₙ = −Uₙ₋₂.
@@ -241,12 +241,12 @@ expIntegralEi(0)
 
 ### hermiteH
 
-MathJSON `HermiteH` · `(degree: integer, x: complex) -> number`
+MathJSON `HermiteH` · `(degree: real, x: complex) -> number`
 
-- `degree` — The degree n, at least 0; a negative degree stays unevaluated. Sample: `3`.
+- `degree` — The degree n, at least 0; a negative or non-integer degree stays unevaluated. Sample: `3`.
 - `x` — The point; a number gives the value, a symbol or an expression the expanded polynomial in it. Sample: `1/2`.
 
-Hermite polynomial Hₙ(x) of the physicists' convention, with H₀ = 1, H₁ = 2x and Hₙ₊₁ = 2x Hₙ − 2n Hₙ₋₁. A negative degree stays unevaluated.
+Hermite polynomial Hₙ(x) of the physicists' convention, with H₀ = 1, H₁ = 2x and Hₙ₊₁ = 2x Hₙ − 2n Hₙ₋₁. A negative or non-integer degree stays unevaluated.
 
 ```epsil
 hermiteH(2, x)
@@ -312,23 +312,34 @@ N(jacobiTheta(3, 0, i))
 
 ### laguerreL
 
-MathJSON `LaguerreL` · `(degree: integer, x: complex) -> number`
+MathJSON `LaguerreL` · `(degree: real, complex, complex?) -> number`
 
-- `degree` — The degree n, at least 0; a negative degree stays unevaluated. Sample: `3`.
-- `x` — The point; a number gives the value, a symbol or an expression the expanded polynomial in it. Sample: `1/2`.
+- `degree` — The degree n, at least 0; a negative or non-integer degree stays unevaluated. Sample: `3`.
+- argument 2 — With two arguments, the point x; with three, the parameter a of the generalized polynomial Lₙ⁽ᵃ⁾. Sample: `1/2`.
+- argument 3 — The point; a number gives the value, a symbol or an expression the expanded polynomial in it. Sample: `1/2`.
 
-Laguerre polynomial Lₙ(x) = Σₖ (−1)ᵏ C(n, k) xᵏ/k!. A negative degree stays unevaluated.
+Laguerre polynomial Lₙ(x) = Σₖ (−1)ᵏ C(n, k) xᵏ/k!; with three arguments, the generalized Laguerre polynomial Lₙ⁽ᵃ⁾(x) = Σₖ (−1)ᵏ C(n+a, n−k) xᵏ/k!, with LaguerreL(n, 0, x) = LaguerreL(n, x). A negative or non-integer degree stays unevaluated.
 
 ```epsil
 laguerreL(2, x)
 // ➔ 1/2 * x^2 - 2x + 1
 ```
 
+```epsil
+laguerreL(2, a, x)
+// ➔ 1/2 * a^2 + 1/2 * x^2 - a * x + 3/2 * a - 2x + 1
+```
+
+```epsil
+laguerreL(3, 1/2, 2)
+// ➔ -43/48
+```
+
 ### legendreP
 
-MathJSON `LegendreP` · `(degree: integer, x: complex) -> number`
+MathJSON `LegendreP` · `(degree: real, x: complex) -> number`
 
-- `degree` — The degree n; a negative degree gives P₋ₙ = Pₙ₋₁. Sample: `3`.
+- `degree` — The degree n; a negative degree gives P₋ₙ = Pₙ₋₁. A non-integer degree stays unevaluated. Sample: `3`.
 - `x` — The point; a number gives the value, a symbol or an expression the expanded polynomial in it. Sample: `1/2`.
 
 Legendre polynomial Pₙ(x), with P₀ = 1, P₁ = x and (n+1)Pₙ₊₁ = (2n+1)x Pₙ − n Pₙ₋₁. P₋ₙ = Pₙ₋₁.

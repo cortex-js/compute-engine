@@ -347,12 +347,17 @@ export const OPERATORS: readonly OperatorRow[] = Object.freeze([
   row('StieltjesGamma', 1,        [[[I], R, 'stieltjes']],       { fold: F.stieltjes }),
   row('StieltjesGamma', 2,        [[[I, R], R, 'stieltjesa']],   { fold: F.stieltjesa, ...domain }),
   row('ClausenCl',    2,          [[[I, R], R, 'clausen']],      { fold: F.clausen }),
-  // The orthogonal polynomials, of an integer degree and a real x.
-  row('ChebyshevT',   2,          [[[I, R], R, 'chebyshevt']],   { fold: F.chebyshevt }),
-  row('ChebyshevU',   2,          [[[I, R], R, 'chebyshevu']],   { fold: F.chebyshevu }),
-  row('LegendreP',    2,          [[[I, R], R, 'legendrep']],    { fold: F.legendrep }),
-  row('HermiteH',     2,          [[[I, R], R, 'hermiteh']],     { fold: F.hermiteh }),
-  row('LaguerreL',    2,          [[[I, R], R, 'laguerrel']],    { fold: F.laguerrel }),
+  // The orthogonal polynomials, of an integer degree and a real x. The
+  // degree is a real (an undeclared symbol is one): NaN where it is not an
+  // integer, as the interpreter leaves the call unevaluated there.
+  // `LaguerreL` of three operands has no GLSL spelling: its recurrence
+  // cancels for a < -1, where the interpreter sums explicitly.
+  row('ChebyshevT',   2,          [[[R, R], R, 'chebyshevt']],   { fold: F.chebyshevt }),
+  row('ChebyshevU',   2,          [[[R, R], R, 'chebyshevu']],   { fold: F.chebyshevu }),
+  row('LegendreP',    2,          [[[R, R], R, 'legendrep']],    { fold: F.legendrep }),
+  row('HermiteH',     2,          [[[R, R], R, 'hermiteh']],     { fold: F.hermiteh }),
+  row('LaguerreL',    2,          [[[R, R], R, 'laguerrel']],    { fold: F.laguerrel }),
+  row('LaguerreL',    3,          [[[R, R, R], R, 'laguerrela']], { fold: F.laguerrela }),
   row('LambertW',     1,          rc('lambertw', 1),             { fold: F.lambertw, ...domain }),
   row('LambertW',     2,          [[[R, I], R, 'lambertwk']],    { fold: F.lambertwk, ...domain }),
   row('Fibonacci',    1,          [[[I], I, 'fibonacci.int'], [[R], R, 'fibonacci']], { fold: F.fibonacci }),

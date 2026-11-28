@@ -2,6 +2,20 @@
 
 ### Improvements
 
+- **`LaguerreL(n, a, x)` is the generalized Laguerre polynomial Lₙ⁽ᵃ⁾(x)**
+  (#668, contributed by [enumeratio](https://github.com/enumeratio)), as in
+  Mathematica's `LaguerreL[n, λ, x]` and mpmath's `laguerre(n, a, x)`. It was
+  an `unexpected-argument` error. A literal degree gives the expanded
+  polynomial (`LaguerreL(2, a, x)` is `a²/2 + x²/2 − a·x + 3a/2 − 2x + 1`),
+  an exact rational `a` and `x` the exact value (`LaguerreL(3, 1/2, 2)` is
+  `−43/48`), and a float, or `N()`, the three-term recurrence
+  (DLMF 18.9.13). `LaguerreL(n, 0, x)` is `LaguerreL(n, x)`. For `a < −1`
+  the recurrence cancels (`L₅₀⁽⁻³⁰·⁵⁾(0.1)` had a relative error of 10⁷ in
+  doubles), and the value is the explicit sum (DLMF 18.5.12) with guard
+  digits, or the call stays unevaluated. JavaScript compiles it (the explicit
+  sum for `a < −1`, within 1e-14); GLSL and interval-js decline, as the
+  recurrence there is not reliable in single precision.
+
 - **JavaScript compiles a figure with options, then transformed.** With
   Tycho's drawing prelude, `polygon(pts, {fill -> "red"}).rotate(t)` and
   `circle(c, r, {fill -> "red"}).rotate(t)` declined ("the parameter x of
@@ -13,6 +27,15 @@
   the field is then read at run time.
 
 ### Bug Fixes
+
+- **A non-integer degree leaves `ChebyshevT`, `ChebyshevU`, `LegendreP`,
+  `HermiteH` and `LaguerreL` unevaluated,** as documented (CE-1592, #668,
+  contributed by [enumeratio](https://github.com/enumeratio)).
+  `HermiteH(2.5, x)` was
+  `Error(ErrorCode('incompatible-type', 'integer', '2.5'), 2.5)`, and so
+  were `HermiteH(5/2, x)` and `HermiteH(π, x)`; they are now the call, for
+  `evaluate()`, `N()` and the parse route. Compiled code is NaN there, as for a
+  negative degree of `HermiteH`.
 
 - **A protocol member with the default `{}` can be implemented.** An
   implementation that repeated the default of

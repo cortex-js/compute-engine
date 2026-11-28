@@ -1548,8 +1548,9 @@ export const GLSL: Syntax = deepFreeze({
     // Hermite or Laguerre polynomial, and a degree past
     // `MAX_NUMERIC_DEGREE`, it is NaN.
     _gpu_ir_orthopoly: `float _gpu_ir_orthopoly(int kind, float order, float x) {
-  // A float outside the range of an int has no defined conversion.
-  if (abs(order) > ${MAX_NUMERIC_DEGREE + 2}.0) return ${NAN};
+  // A float outside the range of an int has no defined conversion, and a
+  // degree that is not an integer has no value.
+  if (abs(order) > ${MAX_NUMERIC_DEGREE + 2}.0 || order != floor(order)) return ${NAN};
   int n = int(order);
   float sgn = 1.0;
   if (n < 0) {

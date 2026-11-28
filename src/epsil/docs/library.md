@@ -764,8 +764,8 @@ The [Special functions reference](/epsil/reference/special-functions/) has the f
 | `agm` | `AGM` | `(complex \| infinity, (complex \| infinity)?) -> number` | Arithmetic-geometric mean. |
 | `appellF1` | `AppellF1` | `(a: complex \| infinity, b1: complex \| infinity, b2: complex \| infinity, c: complex \| infinity, x: complex \| infinity, y: complex \| infinity) -> number` | Appell hypergeometric function F₁(a; b₁, b₂; c; x, y), double series for \|x\|, \|y\| &lt; 1. |
 | `barnesG` | `BarnesG` | `(complex \| infinity) -> number` | The Barnes G-function, the double gamma function G(z+1) = Γ(z)·G(z), G(1) = 1. |
-| `chebyshevT` | `ChebyshevT` | `(degree: integer, x: complex) -> number` | Chebyshev polynomial of the first kind Tₙ(x), with Tₙ(cos θ) = cos(nθ). |
-| `chebyshevU` | `ChebyshevU` | `(degree: integer, x: complex) -> number` | Chebyshev polynomial of the second kind Uₙ(x), with Uₙ(cos θ) = sin((n+1)θ)/sin θ. |
+| `chebyshevT` | `ChebyshevT` | `(degree: real, x: complex) -> number` | Chebyshev polynomial of the first kind Tₙ(x), with Tₙ(cos θ) = cos(nθ). |
+| `chebyshevU` | `ChebyshevU` | `(degree: real, x: complex) -> number` | Chebyshev polynomial of the second kind Uₙ(x), with Uₙ(cos θ) = sin((n+1)θ)/sin θ. |
 | `clausenCl` | `ClausenCl` | `(n: integer, theta: real) -> number` | Clausen function Clₙ(θ) of integer order n ≥ 1 and real θ: Im Liₙ(e^&#123;iθ&#125;) = Σ sin(kθ)/kⁿ for even n, Re Liₙ(e^&#123;iθ&#125;) = Σ cos(kθ)/kⁿ for odd n. |
 | `dedekindEta` | `DedekindEta` | `(complex \| infinity) -> number` | Dedekind eta function η(τ), Im(τ) &gt; 0. |
 | `eisensteinE` | `EisensteinE` | `(s: number, tau: complex \| infinity) -> number` | Normalized Eisenstein series Eₛ(τ) of even weight s ≥ 2, Im(τ) &gt; 0. |
@@ -774,12 +774,12 @@ The [Special functions reference](/epsil/reference/special-functions/) has the f
 | `ellipticK` | `EllipticK` | `(complex \| infinity) -> number` | Complete elliptic integral of the first kind K(m), parameter convention m = k². |
 | `ellipticPi` | `EllipticPi` | `(complex \| infinity, complex \| infinity, (complex \| infinity)?) -> number` | Elliptic integral of the third kind: complete Π(n\|m) with two arguments, incomplete Π(n; φ\|m) with three (characteristic first, amplitude second, parameter convention m = k², as in Mathematica). |
 | `expIntegralEi` | `ExpIntegralEi` | `(complex \| infinity) -> number` | Exponential integral Ei(x) = PV ∫_&#123;−∞&#125;^x eᵗ/t dt. |
-| `hermiteH` | `HermiteH` | `(degree: integer, x: complex) -> number` | Hermite polynomial Hₙ(x) of the physicists' convention, with H₀ = 1, H₁ = 2x and Hₙ₊₁ = 2x Hₙ − 2n Hₙ₋₁. |
+| `hermiteH` | `HermiteH` | `(degree: real, x: complex) -> number` | Hermite polynomial Hₙ(x) of the physicists' convention, with H₀ = 1, H₁ = 2x and Hₙ₊₁ = 2x Hₙ − 2n Hₙ₋₁. |
 | `hypergeometric1F1` | `Hypergeometric1F1` | `(a: complex \| infinity, b: complex \| infinity, z: complex \| infinity) -> number` | Kummer confluent hypergeometric function ₁F₁(a; b; z) = M(a, b, z). |
 | `hypergeometric2F1` | `Hypergeometric2F1` | `(a: complex \| infinity, b: complex \| infinity, c: complex \| infinity, z: complex \| infinity) -> number` | Gauss hypergeometric function ₂F₁(a, b; c; z). |
 | `jacobiTheta` | `JacobiTheta` | `(j: number, z: complex \| infinity, tau: complex \| infinity, r: number?) -> number` | Jacobi theta function θⱼ(z, τ), j ∈ &#123;1,2,3,4&#125;, nome q = e^&#123;iπτ&#125; (Fungrim convention). |
-| `laguerreL` | `LaguerreL` | `(degree: integer, x: complex) -> number` | Laguerre polynomial Lₙ(x) = Σₖ (−1)ᵏ C(n, k) xᵏ/k!. |
-| `legendreP` | `LegendreP` | `(degree: integer, x: complex) -> number` | Legendre polynomial Pₙ(x), with P₀ = 1, P₁ = x and (n+1)Pₙ₊₁ = (2n+1)x Pₙ − n Pₙ₋₁. |
+| `laguerreL` | `LaguerreL` | `(degree: real, complex, complex?) -> number` | Laguerre polynomial Lₙ(x) = Σₖ (−1)ᵏ C(n, k) xᵏ/k!; with three arguments, the generalized Laguerre polynomial Lₙ⁽ᵃ⁾(x) = Σₖ (−1)ᵏ C(n+a, n−k) xᵏ/k!, with LaguerreL(n, 0, x) = LaguerreL(n, x). |
+| `legendreP` | `LegendreP` | `(degree: real, x: complex) -> number` | Legendre polynomial Pₙ(x), with P₀ = 1, P₁ = x and (n+1)Pₙ₊₁ = (2n+1)x Pₙ − n Pₙ₋₁. |
 | `logBarnesG` | `LogBarnesG` | `(complex \| infinity) -> number` | The logarithm of the Barnes G-function, continued analytically with `logGamma`: its imaginary part is not principal on the negative axis. −∞ at the zeros of G, the non-positive integers. |
 | `logGamma` | `LogGamma` | `(complex \| infinity) -> number` | The analytic continuation of ln Γ(z), with its branch cut on (−∞, 0]; not `gammaLn`, the principal logarithm of Γ(z), which jumps by 2πi across the zeros of Im Γ. |
 | `logIntegral` | `LogIntegral` | `(complex \| infinity) -> number` | Logarithmic integral li(x) = PV ∫₀ˣ dt/ln t = Ei(ln x). |

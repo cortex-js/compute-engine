@@ -46,8 +46,9 @@ describe('the polynomial of a symbolic x', () => {
     expect(evaluate(['ChebyshevT', 'n', 'x'])).toBe('ChebyshevT(n, x)');
   });
 
-  test('a degree that is not an integer is a type error', () => {
-    expect(ce.box(['ChebyshevT', 1.5, 'x']).isValid).toBe(false);
+  test('a degree that is not an integer stays unevaluated', () => {
+    expect(ce.box(['ChebyshevT', 1.5, 'x']).isValid).toBe(true);
+    expect(evaluate(['ChebyshevT', 1.5, 'x'])).toBe('ChebyshevT(1.5, x)');
   });
 
   test('N() of a symbolic x is the polynomial with numeric coefficients', () => {

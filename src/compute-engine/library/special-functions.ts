@@ -138,7 +138,9 @@ import {
 import {
   MAX_EXACT_DEGREE,
   MAX_NUMERIC_DEGREE,
+  MAX_SYMBOLIC_PARAMETER_DEGREE,
   bigOrthogonalPolynomial,
+  generalizedLaguerreInAlpha,
   normalizedDegree,
   orthogonalPolynomial,
   orthogonalPolynomialCoefficients,
@@ -1814,7 +1816,7 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
       'Chebyshev polynomial of the first kind Tₙ(x), with Tₙ(cos θ) = cos(nθ). ' +
         'T₋ₙ = Tₙ.',
       'Q620196',
-      'The degree n; a negative degree gives T₋ₙ = Tₙ.',
+      'The degree n; a negative degree gives T₋ₙ = Tₙ. A non-integer degree stays unevaluated.',
       ['ChebyshevT(3, x)', 'ChebyshevT(3, 1/2)']
     ),
     ChebyshevU: orthogonalPolynomialDefinition(
@@ -1822,7 +1824,7 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
       'Chebyshev polynomial of the second kind Uₙ(x), with Uₙ(cos θ) = sin((n+1)θ)/sin θ. ' +
         'U₋₁ = 0 and U₋ₙ = −Uₙ₋₂.',
       'Q620196',
-      'The degree n; a negative degree gives U₋₁ = 0 and U₋ₙ = −Uₙ₋₂.',
+      'The degree n; a negative degree gives U₋₁ = 0 and U₋ₙ = −Uₙ₋₂. A non-integer degree stays unevaluated.',
       ['ChebyshevU(2, x)']
     ),
     LegendreP: orthogonalPolynomialDefinition(
@@ -1830,39 +1832,46 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
       'Legendre polynomial Pₙ(x), with P₀ = 1, P₁ = x and (n+1)Pₙ₊₁ = (2n+1)x Pₙ − n Pₙ₋₁. ' +
         'P₋ₙ = Pₙ₋₁.',
       'Q215405',
-      'The degree n; a negative degree gives P₋ₙ = Pₙ₋₁.',
+      'The degree n; a negative degree gives P₋ₙ = Pₙ₋₁. A non-integer degree stays unevaluated.',
       ['LegendreP(2, x)']
     ),
     HermiteH: orthogonalPolynomialDefinition(
       'HermiteH',
       "Hermite polynomial Hₙ(x) of the physicists' convention, with H₀ = 1, H₁ = 2x and Hₙ₊₁ = 2x Hₙ − 2n Hₙ₋₁. " +
-        'A negative degree stays unevaluated.',
+        'A negative or non-integer degree stays unevaluated.',
       'Q1047256',
-      'The degree n, at least 0; a negative degree stays unevaluated.',
+      'The degree n, at least 0; a negative or non-integer degree stays unevaluated.',
       ['HermiteH(2, x)']
     ),
     LaguerreL: orthogonalPolynomialDefinition(
       'LaguerreL',
-      'Laguerre polynomial Lₙ(x) = Σₖ (−1)ᵏ C(n, k) xᵏ/k!. ' +
-        'A negative degree stays unevaluated.',
+      'Laguerre polynomial Lₙ(x) = Σₖ (−1)ᵏ C(n, k) xᵏ/k!; with three arguments, ' +
+        'the generalized Laguerre polynomial Lₙ⁽ᵃ⁾(x) = Σₖ (−1)ᵏ C(n+a, n−k) xᵏ/k!, ' +
+        'with LaguerreL(n, 0, x) = LaguerreL(n, x). ' +
+        'A negative or non-integer degree stays unevaluated.',
       'Q1366960',
-      'The degree n, at least 0; a negative degree stays unevaluated.',
-      ['LaguerreL(2, x)']
+      'The degree n, at least 0; a negative or non-integer degree stays unevaluated.',
+      ['LaguerreL(2, x)', 'LaguerreL(2, a, x)', 'LaguerreL(3, 1/2, 2)']
     ),
   },
 ];
 
 /**
  * The definition of an orthogonal polynomial `kind(n, x)` of an integer
- * degree n (`numerics/orthogonal-polynomials.ts`).
+ * degree n (`numerics/orthogonal-polynomials.ts`); `LaguerreL(n, a, x)` is
+ * the generalized Laguerre polynomial Lₙ⁽ᵃ⁾(x), and `LaguerreL(n, 0, x)` is
+ * `LaguerreL(n, x)`.
  *
- * - A number x that is a float, or any number x under `N()`, gives the value
- *   of the three-term recurrence.
- * - An exact rational x gives the exact rational value.
- * - Any other x (a symbol, an expression, an exact constant) gives the
- *   expanded polynomial in x, up to the degree `MAX_EXACT_DEGREE`; under
- *   `N()` with numeric coefficients.
- * - A degree that is not an integer literal, or that has no value
+ * - A number x (and a number a) that is a float, or any number under `N()`,
+ *   gives the value of the three-term recurrence.
+ * - An exact rational x (and an exact rational a) gives the exact rational
+ *   value.
+ * - Any other x gives the expanded polynomial in x, up to the degree
+ *   `MAX_EXACT_DEGREE`; under `N()` with numeric coefficients. A parameter a
+ *   that is not an exact rational makes the coefficients polynomials in a,
+ *   expanded up to the degree `MAX_SYMBOLIC_PARAMETER_DEGREE`.
+ * - A degree that is not an integer (`HermiteH(5/2, x)`, which is not a
+ *   polynomial), that is not a literal, or that has no value
  *   (`normalizedDegree()`), leaves the call unevaluated.
  */
 function orthogonalPolynomialDefinition(
@@ -1872,36 +1881,81 @@ function orthogonalPolynomialDefinition(
   degreeDescription: string,
   examples: string[]
 ): OperatorDefinition {
+  const generalized = kind === 'LaguerreL';
+  const xDescription =
+    'The point; a number gives the value, a symbol or an expression the expanded polynomial in it.';
   return {
     description,
     wikidata,
     complexity: 8000,
     broadcastable: true,
-    signature: '(degree: integer, x: complex) -> number',
-    parameters: {
-      degree: { description: degreeDescription, sample: '3' },
-      x: {
-        description:
-          'The point; a number gives the value, a symbol or an expression the expanded polynomial in it.',
-        sample: '1/2',
-      },
-    },
+    // The degree is a real so that a non-integer degree boxes and the call
+    // stays unevaluated, rather than being a type error.
+    signature: generalized
+      ? '(degree: real, complex, complex?) -> number'
+      : '(degree: real, x: complex) -> number',
+    parameters: generalized
+      ? [
+          { description: degreeDescription, sample: '3' },
+          {
+            description:
+              'With two arguments, the point x; with three, the parameter a of the generalized polynomial Lₙ⁽ᵃ⁾.',
+            sample: '1/2',
+          },
+          { description: xDescription, sample: '1/2' },
+        ]
+      : {
+          degree: { description: degreeDescription, sample: '3' },
+          x: { description: xDescription, sample: '1/2' },
+        },
     examples,
-    nanBehavior: ['reject', 'propagate'],
+    nanBehavior: generalized
+      ? ['reject', 'propagate', 'propagate']
+      : ['reject', 'propagate'],
     type: (ops, context) =>
       BoxedType.forResult(
         numericTypeHandlerOnTypes(ops),
         context.engine._typeResolver
       ),
-    evaluate: guardDigitsN(([n, x], { numericApproximation, engine: ce }) => {
-      if (!isNumber(n)) return undefined;
+    evaluate: guardDigitsN((ops, { numericApproximation, engine: ce }) => {
+      const n = ops[0];
+      const x = ops[ops.length - 1];
+      const a = ops.length === 3 ? ops[1] : undefined;
+      if (!isNumber(n)) {
+        // Lₙ⁽⁰⁾ = Lₙ for a symbolic degree too; a literal degree takes the
+        // exact path below.
+        if (a !== undefined && isNumber(a) && a.isExact && a.isSame(0))
+          return ce.function(kind, [n, x]);
+        return undefined;
+      }
       const degree = asSmallInteger(n);
       if (degree === null) return undefined;
       const normal = normalizedDegree(kind, degree);
       if (normal === undefined) return undefined;
 
-      if (isNumber(x) && shouldNumericize(numericApproximation, n, x)) {
+      if (
+        ops.every(isNumber) &&
+        shouldNumericize(numericApproximation, ...ops)
+      ) {
         if (normal.degree > MAX_NUMERIC_DEGREE) return undefined;
+        if (a !== undefined)
+          return applyN(
+            [n, a, x],
+            (n, a, x) => orthogonalPolynomial(kind, n, x, a),
+            // `null`: a value that cannot be vouched for (the explicit sum of
+            // a < −1 cancels past its guard digits) stays unevaluated.
+            (n, a, x) => {
+              const v = bigOrthogonalPolynomial(
+                kind,
+                n.toNumber(),
+                x,
+                ce.precision,
+                a
+              );
+              return v.isNaN() ? null : v;
+            },
+            (n, a, z) => orthogonalPolynomialComplex(kind, n.re, z, a)
+          );
         return applyN(
           [n, x],
           (n, x) => orthogonalPolynomial(kind, n, x),
@@ -1911,13 +1965,58 @@ function orthogonalPolynomialDefinition(
         );
       }
 
+      const rationalA =
+        a !== undefined && isNumber(a) && a.isExact ? asRational(a) : undefined;
+      const symbolicA = a !== undefined && rationalA === undefined;
+      if (symbolicA && normal.degree > MAX_SYMBOLIC_PARAMETER_DEGREE)
+        return undefined;
       if (normal.degree > MAX_EXACT_DEGREE) return undefined;
       if (normal.sign === 0) return floatIfFloatOperand([n, x], ce.Zero);
+      const sign = BigInt(normal.sign);
+      const operands = a === undefined ? [n] : [n, a];
+
+      if (symbolicA) {
+        // Σₖ Σᵢ (aₖᵢ/n!) aⁱ xᵏ: the coefficients of xᵏ are polynomials in a.
+        const { numerators, denominator } = generalizedLaguerreInAlpha(
+          normal.degree
+        );
+        const terms: Expression[] = [];
+        numerators.forEach((poly, k) =>
+          poly.forEach((c, i) => {
+            if (c === 0n) return;
+            const factors: Expression[] = [
+              floatIfFloatOperand(
+                [...operands, x],
+                ce.number([c, denominator])
+              )!,
+            ];
+            if (i > 0)
+              factors.push(
+                i === 1 ? a! : ce.function('Power', [a!, ce.number(i)])
+              );
+            if (k > 0)
+              factors.push(
+                k === 1 ? x : ce.function('Power', [x, ce.number(k)])
+              );
+            terms.push(
+              factors.length === 1
+                ? factors[0]
+                : ce.function('Multiply', factors)
+            );
+          })
+        );
+        const polynomial = ce.function('Add', terms);
+        if (numericApproximation) return polynomial.N();
+        return isNumber(x) || isNumber(a!) ? polynomial.evaluate() : polynomial;
+      }
+
       const { numerators, denominator } = orthogonalPolynomialCoefficients(
         kind,
-        normal.degree
+        normal.degree,
+        rationalA === undefined
+          ? undefined
+          : [BigInt(rationalA[0]), BigInt(rationalA[1])]
       );
-      const sign = BigInt(normal.sign);
 
       // An exact rational x = p/q: Σₖ aₖ pᵏ qⁿ⁻ᵏ / (D qⁿ), by Horner's rule
       // in p.
@@ -1937,15 +2036,18 @@ function orthogonalPolynomialDefinition(
 
       // Any other x: the polynomial Σₖ (aₖ/D) xᵏ.
       const terms: Expression[] = [];
-      numerators.forEach((a, k) => {
-        if (a === 0n) return;
+      numerators.forEach((c, k) => {
+        if (c === 0n) return;
         // A float degree makes the coefficients floats.
-        const c = floatIfFloatOperand([n], ce.number([sign * a, denominator]))!;
-        if (k === 0) terms.push(c);
+        const coefficient = floatIfFloatOperand(
+          operands,
+          ce.number([sign * c, denominator])
+        )!;
+        if (k === 0) terms.push(coefficient);
         else
           terms.push(
             ce.function('Multiply', [
-              c,
+              coefficient,
               k === 1 ? x : ce.function('Power', [x, ce.number(k)]),
             ])
           );
