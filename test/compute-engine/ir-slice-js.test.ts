@@ -302,7 +302,7 @@ describe('IR slice: the forms of a declaration', () => {
     expect(js(write).run({ x: -1.25 })).toBe(-1.25);
     expect(interpret(ce, ce.box(write as never), { x: -1.25 })).toBe(-1.25);
   });
-  test('an attribute other than the value, a list type, a function type decline', () => {
+  test('an attribute other than the value declines', () => {
     for (const [json, cause] of [
       [
         [
@@ -312,12 +312,17 @@ describe('IR slice: the forms of a declaration', () => {
         ],
         /attributes/,
       ],
-      [
-        ['Block', ['Declare', 't', "'list<real>'", 'D'], ['At', 't', 1]],
-        /a local of type list<real>/,
-      ],
     ] as [unknown, RegExp][])
       expect(declineOf(() => js(json)).cause).toMatch(cause);
+  });
+  test('a list local of a stated list type that no statement writes is its value (CE-1922)', () => {
+    const read = [
+      'Block',
+      ['Declare', 't', "'list<real>'", 'D'],
+      ['At', 't', 1],
+    ];
+    expect(js(read).run({ D: [2.5, 3] })).toBe(2.5);
+    expect(interpret(ce, ce.box(read as never), { D: [2.5, 3] })).toBe(2.5);
   });
   test('a list local of no stated type written whole is its value (CE-1481)', () => {
     const write = [

@@ -431,7 +431,10 @@ refuses it. Another attribute declines. A local of no stated type whose value is
 a list or a tuple (`Declare(H, {value: Comprehension(…)})`) is that value; an
 `Assign` to it declines, and so does a list value for a local of a stated type,
 except for a list local that its block writes in place ("Lists"), which can also
-be declared with a list type (`Declare(L, 'list<real>', …)`).
+be declared with a list type (`Declare(L, 'list<real>', …)`). A local of a list
+type that no later statement writes (`let b: list<real> = [1]`) is a local of no
+stated type whose value must be of the stated type; a `List()` in the value
+takes the lane of its place in the stated type (CE-1922).
 
 A destructuring `Declare`, whose name is a pattern
 (`Declare(Tuple(a, b), {value: p})`, `let (a, b) = p`), binds its names as the

@@ -6958,6 +6958,26 @@ function lowerOnce(
             bindLocal(s, i, name.symbol, v, value, 'unknown', constant);
             return;
           }
+          // A local of a list type that no later statement writes
+          // (`let b: list<real> = [1]`): a local of no stated type, whose
+          // value proves the stated type (CE-1922). A `List()` in the value
+          // has the lane of its place in the stated type (CE-1918).
+          if (
+            stated !== undefined &&
+            !written &&
+            isSubtype(stated, 'list')
+          ) {
+            if (!isSubtype(value.type.type, stated))
+              decline(
+                s,
+                `a value of type ${value.type.toString()} for a local declared ${typeName}`
+              );
+            const v = withPlacedEmptyLists(value, stated, () =>
+              wholeRows(value)
+            );
+            bindLocal(s, i, name.symbol, v, value, 'unknown', constant);
+            return;
+          }
           if (!scalarLocal && listType === undefined && wholeType === undefined)
             decline(s, `a local of type ${typeName}`);
           // A constant list that a later statement writes declines (the

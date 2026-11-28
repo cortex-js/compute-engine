@@ -1586,7 +1586,10 @@ make a local simple to compile, and compiled code adds three declines:
 The lane of a local follows its declaration: a local declared `real`,
 `integer` or `boolean`, or with no stated type, holds that lane, and a local
 declared with another type (`number`, `tuple<real, real>`, `function`)
-declines (`compilation/ir/README.md`, "The contracts"). With `c: real` and
+declines (`compilation/ir/README.md`, "The contracts"). A local declared with
+a list type that no later statement writes (`let b: list<real> = [1]`,
+`let b: list<string> = []`) is its value, as a local of no stated type, and the
+type of the value must be a subtype of the declared one (CE-1922). With `c: real` and
 `x: real`, `Block(Declare(a, "unknown", 1); If(c > 0, a ≔ √(-x)); a)`
 compiles in mode `strict` (the local is a real, NaN for `x > 0`), and
 declines with `lane-mismatch` in mode `complex`, where `√(-x)` is complex.

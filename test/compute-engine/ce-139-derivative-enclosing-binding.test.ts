@@ -213,16 +213,23 @@ describe('CE-139: compiled D and Integrate over a variable with a list binding',
     ).toThrow(/Could not compile/);
   });
 
-  test('a block local of a list type declines', () => {
+  test('a block local of a list type: D compiles to a broadcast, Integrate declines', () => {
+    // The local is its value, as a local of no stated type (CE-1922).
     const ce = new ComputeEngine();
-    const expr = ce.box([
-      'Block',
-      ['Declare', 'b', "'list<real>'", ['List', 1, 2]],
-      ['D', ['Power', 'b', 2], 'b'],
-    ]);
-    expect(() => compile(expr, { to: 'javascript', fallback: false })).toThrow(
-      /Could not compile/
-    );
+    const block = (op: string) =>
+      ce.box([
+        'Block',
+        ['Declare', 'b', "'list<real>'", ['List', 1, 2]],
+        [op, ['Power', 'b', 2], 'b'],
+      ]);
+    const d = block('D');
+    expect(d.evaluate().N().toString()).toBe('[2,4]');
+    expect(
+      compile(d, { to: 'javascript', fallback: false }).run!({} as never)
+    ).toEqual([2, 4]);
+    expect(() =>
+      compile(block('Integrate'), { to: 'javascript', fallback: false })
+    ).toThrow(/Could not compile/);
   });
 
   test('D over a global of a list type compiles to a broadcast', () => {

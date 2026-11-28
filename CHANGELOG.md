@@ -13,6 +13,15 @@
 
 ### Improvements
 
+- **A list local declared with its type that no statement changes
+  compiles.** In `(t: real) => do { let b: list<real> = [1];
+  length(b) + t }`, the declaration declined ("a local of type
+  list<real>"), also for `let b: list<string> = []`. It now compiles as the
+  same local with no stated type: JavaScript gives the interpreter's value,
+  `2` at `t = 1`, and GLSL and the interval mode compile it where they
+  compile the local with no stated type. A value that is not of the stated
+  type (`let b: list<integer> = [1.5]`) still declines, as the interpreter
+  gives an error there.
 - **JavaScript compiles a call of a protocol method in a function that
   assigns a variable of the engine.** With a method
   `function touch(self: Box) -> nothing { hostTouch(self.cells) }`, the
