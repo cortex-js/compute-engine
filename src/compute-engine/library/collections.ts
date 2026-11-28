@@ -342,6 +342,8 @@ import {
   freeBinding,
 } from '../boxed-expression/type-guards.js';
 import type { BoxedArray } from '../boxed-expression/boxed-array.js';
+import { isRecordKey } from '../boxed-expression/boxed-dictionary.js';
+import { widenValueTypes } from '../../common/type/widen-value.js';
 import { recordObjectRead } from '../boxed-expression/object-deps.js';
 import { widenLocalType } from '../boxed-expression/boxed-value-definition.js';
 import {
@@ -373,6 +375,7 @@ import {
   describeBoundSymbol,
   describeType,
   describe as describeOperand,
+  resolvesToSystemBinding,
   typeFact,
 } from '../boxed-expression/operand-descriptor.js';
 import { deriveApplicationType } from '../boxed-expression/derive-application-type.js';
@@ -9251,6 +9254,33 @@ function innerNominalValue(value: Expression): Expression {
     t = def;
   }
   return value;
+}
+
+/**
+ * The entries of a value of a declared record type, as positional
+ * `(key, value)` pairs: the payload of `Fig({…})` for `type Fig =
+ * record{…}`, read through the layers of a nominal type defined as another
+ * one, as `Field` reads them. `undefined` for every other value, also for a
+ * call typed `Fig` that is not the tagged application of `Fig`.
+ */
+function declaredRecordEntries(value: Expression): Expression[] | undefined {
+  if (!isFunction(value) || value.nops !== 1) return undefined;
+  const holder = innerNominalValue(value);
+  const t = holder.type.type;
+  if (
+    typeof t !== 'object' ||
+    t.kind !== 'reference' ||
+    t.alias ||
+    !isFunction(holder) ||
+    holder.operator !== t.name ||
+    holder.nops !== 1
+  )
+    return undefined;
+  const payload = holder.ops[0];
+  if (!isDictionary(payload)) return undefined;
+  const body = resolveTypeReference(t);
+  if (typeof body !== 'object' || body.kind !== 'record') return undefined;
+  return [...payload.each()];
 }
 
 function fieldBearingType(
@@ -23972,10 +24002,22 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // `dictionary<any>`, which states the absent value. The source comes
     // with its `missing` arm (`ABSENT_CELLS_PASS_THROUGH`,
     // `broadcast-lift-type.ts`).
-    type: ([xs], context) =>
-      xs !== undefined && typeCouldHoldMissing(xs.type)
-        ? BoxedType.forResult('dictionary<any>', context.engine._typeResolver)
-        : undefined,
+    // The dictionary merge `{...f, kind -> "x"}` has a record type when each
+    // of its segments has known fields (`mergedRecordType`), so that the
+    // copy of a value of a declared record type matches the record argument
+    // of the constructor of the type: `Fig({...f, kind -> "x"})` (CE-1913).
+    type: ([xs], context) => {
+      if (xs === undefined) return undefined;
+      if (typeCouldHoldMissing(xs.type))
+        return BoxedType.forResult(
+          'dictionary<any>',
+          context.engine._typeResolver
+        );
+      const t = mergedRecordType(context.engine, xs);
+      return t === undefined
+        ? undefined
+        : BoxedType.forResult(t, context.engine._typeResolver);
+    },
     // Provable declines only (the source must be a finite, walkable
     // collection); success also depends on every element being a
     // string-keyed pair, so never `true` — see `canEnumerateFiniteSource`.
@@ -23992,7 +24034,21 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       if (!isWalkableFiniteCollection(xs)) return undefined;
 
       const entries: Expression[] = [];
-      for (const keyValue of xs.each()) {
+      // A value of a declared record type (`Fig({…})`) gives its entries:
+      // the spread `{...f, kind -> "x"}` is `DictionaryFrom(Join(ListFrom(f),
+      // …))`, and `ListFrom` of such a value is the list of the value itself.
+      // The copy is a plain record, not a `Fig`: only the constructor of the
+      // type makes a value of the type (CE-1913).
+      // The source is walked lazily, so a malformed first element is
+      // refused before the rest of the source is made.
+      function* elements(): Generator<Expression> {
+        for (const x of xs.each()) {
+          const fields = declaredRecordEntries(x);
+          if (fields === undefined) yield x;
+          else yield* fields;
+        }
+      }
+      for (const keyValue of elements()) {
         // A malformed element is a boxed error, not a raw `throw`: a throw
         // here escapes `evaluate()` as an uncaught JS exception (the engine
         // does not catch handler throws on the plain evaluate route).
@@ -24024,6 +24080,89 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     },
   },
 };
+
+/**
+ * The record type of the dictionary merge `{...a, k -> v, ...b}`, which the
+ * `Dictionary` literal lowers to `DictionaryFrom(Join(segments))`, or
+ * `undefined` when a segment does not have known fields.
+ *
+ * - A spread segment `ListFrom(x)` has the fields of the type of `x` when
+ *   that type is a record type or a declared record type (`type Fig =
+ *   record{…}`); the evaluation of `DictionaryFrom` reads the entries of a
+ *   value of a declared record type.
+ * - A run `List((k, v), …)` of literal pairs has one field per pair, typed
+ *   as the cell of a dictionary literal (`storedCellType` in
+ *   `boxed-dictionary.ts`), when each key is a string that a record type
+ *   can hold (`isRecordKey`).
+ *
+ * A later field replaces an earlier one, as the merge does. Record types are
+ * closed, so the value has exactly these fields. An optional field of a
+ * later segment does not replace a field of an earlier one: the value can
+ * hold either, so the type is left to the declared result.
+ *
+ * Only a merge with a spread of a value of a declared record type gets the
+ * record type. Any other merge keeps the declared result, `dictionary`, so
+ * that a local made with a spread (`let opts = {...defaults, b -> 2}`) can
+ * be given a copy with more fields later, as before.
+ */
+function mergedRecordType(
+  engine: TypeHandlerContext['engine'],
+  xs: OperandDescriptor
+): RecordType | undefined {
+  // `Join` and `ListFrom` are read as the library operators only: a user
+  // definition with one of these names can give any value.
+  const isLibrary = (s: { head: string; callee?: OperandDescriptor }) =>
+    s.callee === undefined && resolvesToSystemBinding(engine, s.head);
+  const s = xs.structureOf?.();
+  const segments =
+    s?.kind === 'application' && s.head === 'Join' && isLibrary(s)
+      ? s.children
+      : [xs];
+  const elements: Record<string, Type> = Object.create(null);
+  const optional = new Set<string>();
+  let hasDeclaredRecord = false;
+  for (const segment of segments) {
+    const ss = segment.structureOf?.();
+    if (ss?.kind === 'list-literal') {
+      for (const pair of ss.elements) {
+        const ps = pair.structureOf?.();
+        if (ps?.kind !== 'tuple' || ps.elements.length !== 2) return undefined;
+        const [key, value] = ps.elements;
+        const ks = key.structureOf?.();
+        if (ks?.kind !== 'string' || !isRecordKey(ks.text)) return undefined;
+        // The type of the cell of a dictionary literal: the tier of a
+        // number literal, the stored type of any other value.
+        const vs = value.structureOf?.();
+        elements[ks.text] =
+          vs?.kind === 'number' ? vs.tier : widenValueTypes(value.type);
+        optional.delete(ks.text);
+      }
+      continue;
+    }
+    if (
+      ss?.kind !== 'application' ||
+      ss.head !== 'ListFrom' ||
+      !isLibrary(ss) ||
+      ss.children.length !== 1
+    )
+      return undefined;
+    // A transparent alias of a declared record type is read through.
+    // `resolveTypeAlias` stops on an alias cycle and returns the alias.
+    const own = resolveTypeAlias(ss.children[0].type);
+    if (typeof own === 'object' && own.kind === 'reference' && !own.alias)
+      hasDeclaredRecord = true;
+    const t = resolveTypeReference(own);
+    if (typeof t !== 'object' || t.kind !== 'record') return undefined;
+    for (const [key, fieldType] of Object.entries(t.elements)) {
+      const isOptional = t.optional?.includes(key) ?? false;
+      if (isOptional && key in elements) return undefined;
+      elements[key] = fieldType;
+      if (isOptional) optional.add(key);
+      else optional.delete(key);
+    }
+  }
+  return hasDeclaredRecord ? makeRecordType(elements, optional) : undefined;
+}
 
 /**
  * The type of `DeleteAt(xs, key)` when `t`, the type of `xs`, is a record

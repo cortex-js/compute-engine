@@ -14,6 +14,15 @@
 
 ### Bug Fixes
 
+- **The spread copies a value of a declared record type** (CE-1913). With
+  `type Fig = record{kind: string, size: integer}`, a constructor function
+  `Fig` and `f = Fig(…)`, `{...f, kind -> "x"}` was an `incompatible-type`
+  error. It is now a plain
+  record with the fields of `f` and the new `kind`. It is not a `Fig`: give
+  it to the constructor, `Fig({...f, kind -> "x"})`, to get one: such a
+  spread literal has a record type when the fields of each part are known,
+  so the constructor accepts the copy. A spread literal with no part of a
+  declared record type keeps the type `dictionary`.
 - **A protocol member with the default `{}` can be implemented.** An
   implementation that repeated the default of
   `function f(self: Self, opts: dictionary = {}) -> integer` was refused
