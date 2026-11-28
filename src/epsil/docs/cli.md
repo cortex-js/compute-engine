@@ -320,7 +320,10 @@ client from a non-local origin.
 | `compile`   | Compile a program to a target's source code without running it; a decline is reported, not replaced by an interpreter fallback |
 
 The server also exposes the agent-facing language card
-(`/epsil/for-agents/`) as the resource `epsil://docs/for-agents`.
+(`/epsil/for-agents/`) as the resource `epsil://docs/for-agents`. A host that
+puts the card in a prompt of its own reads the file that the package exports as
+`@cortex-js/compute-engine/for-agents.md`; the Compute Engine card is
+`@cortex-js/compute-engine/compute-engine-for-agents.md`.
 
 Each `evaluate` call runs in a fresh session: definitions do not persist
 between calls, so every program must be self-contained. The

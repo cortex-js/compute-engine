@@ -154,7 +154,9 @@
     "./cli": {
       "import": "./dist/esm-min/cli/epsil.js",
       "default": "./dist/esm-min/cli/epsil.js"
-    }
+    },
+    "./for-agents.md": "./dist/esm-min/cli/for-agents.md",
+    "./compute-engine-for-agents.md": "./dist/esm-min/cli/compute-engine-for-agents.md"
   },
   "main": "./dist/esm-min/compute-engine.js",
   "module": "./dist/esm-min/compute-engine.js",
