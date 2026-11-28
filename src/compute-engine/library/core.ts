@@ -2619,21 +2619,61 @@ function pipeImplicitTopicCallType(
   const placeholders = new Set<string>();
   collectPlaceholderNames(st, placeholders);
   if (placeholders.size > 0) return undefined;
+  // A call of a library function by its qualified name,
+  // `Apply(Module(Take), 2)`, is the call `Take(2)`, as in
+  // `pipeStageWithImplicitTopic`.
+  const qualified = qualifiedLibraryCall(context, st);
+  if (qualified === null) return undefined;
+  const call = qualified ?? st;
+  const written = qualified?.written ?? st.children;
   const arms = signatureArms(
-    st.callee?.type ??
-      context.engine.lookupDefinition(st.head)?.operator?.signature.type
+    call.callee?.type ??
+      context.engine.lookupDefinition(call.head)?.operator?.signature.type
   );
   if (arms === undefined) return undefined;
-  if (!implicitTopicArityFits(arms, st.children.length)) return undefined;
+  if (!implicitTopicArityFits(arms, written.length)) return undefined;
   const topicType = heldOperandType(context, topic);
   const at = implicitTopicSlot(
     arms,
     context.engine.type(topicType),
-    st.children.map((c) => context.engine.type(c.type))
+    written.map((c) => context.engine.type(c.type))
   );
-  const operands = [...st.children];
+  const operands = [...written];
   operands.splice(at, 0, describeType(topicType));
-  return deriveApplicationOf(st, operands, context);
+  return deriveApplicationOf(call, operands, context);
+}
+
+/**
+ * The library operator and the written arguments of the stage
+ * `Apply(Module(name), …)`, the call of a library function by its qualified
+ * name (`std::take(2)` in Epsil). `undefined` when the stage is not of this
+ * form, and `null` when it is but its type cannot be derived: the name is
+ * not an operator of the library, or the name resolves where the type is
+ * read to another binding, which `context.derive` would read in its place.
+ */
+function qualifiedLibraryCall(
+  context: TypeHandlerContext,
+  st: Extract<OperandStructure, { kind: 'application' }>
+):
+  | { head: string; callee?: undefined; written: OperandDescriptor[] }
+  | null
+  | undefined {
+  if (st.head !== 'Apply' || st.callee !== undefined) return undefined;
+  const [module, ...written] = st.children;
+  const qualified = module?.structureOf?.();
+  if (qualified?.kind !== 'application' || qualified.head !== 'Module')
+    return undefined;
+  const target =
+    qualified.children.length === 1
+      ? qualified.children[0].structureOf?.()
+      : undefined;
+  if (target?.kind !== 'symbol') return null;
+  if (
+    !resolvesToSystemBinding(context.engine, target.name) ||
+    context.engine.lookupDefinition(target.name)?.operator === undefined
+  )
+    return null;
+  return { head: target.name, written };
 }
 
 /**

@@ -402,6 +402,21 @@ describe('EPSIL SIGNATURE HELP: THE PIPED VALUE', () => {
     expect(result).toMatchObject({ activeSignature: 1, activeParameter: 1 });
   });
 
+  test('`std::take` is the library function when the source has a `take`', () => {
+    const result = help(
+      XS + 'function take(a, b, c) { a }\nlet a = xs |> std::take(▮'
+    );
+    expect(result?.signatures.map((s) => s.label)).toEqual([
+      'take(xs: T, count: number) -> T where T: string',
+      'take(xs: indexed_collection<T>, count: number) -> list<T> where T: any',
+    ]);
+    expect(result?.signatures.map(marks)).toEqual([
+      [{}, {}],
+      [{ implicit: 'pipe' }, {}],
+    ]);
+    expect(result).toMatchObject({ activeSignature: 1, activeParameter: 1 });
+  });
+
   test('the piped value fills the collection of `map`', () => {
     const result = help(XS + 'let a = xs |> map(▮');
     expect(marks(result?.signatures[0])).toEqual([

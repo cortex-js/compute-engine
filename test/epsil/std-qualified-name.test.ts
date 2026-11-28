@@ -375,4 +375,32 @@ describe('a pipe into a std:: call', () => {
       )
     ).toBe('[1,2]');
   });
+
+  test('the pipe has the type of the completed library call', () => {
+    const ce = new ComputeEngine();
+    ce.declare('xs', 'list<integer>');
+    const type = (stage: MathJsonExpression): string =>
+      ce.box(['Pipe', 'xs', stage]).type.toString();
+    expect(type(['Apply', ['Module', 'Take'], 2])).toBe(type(['Take', 2]));
+    expect(type(['Apply', ['Module', 'Take'], 2])).toBe('list<integer>');
+    expect(type(['Apply', ['Module', 'Sum']])).toBe('integer');
+    expect(
+      type(['Apply', ['Module', 'Map'], ['Function', ['Add', 'x', 1], 'x']])
+    ).toBe('list<integer>');
+  });
+
+  test('a later stage of a std:: chain is checked before the run', () => {
+    const codes = (source: string): string[] =>
+      checkEpsil(new ComputeEngine(), source).diagnostics.map((d) =>
+        Array.isArray(d.message) ? d.message[0] : d.message
+      );
+    expect(
+      codes('let xs = [1, 2, 3]\nlet a = xs |> std::sum() |> std::take(1)')
+    ).toEqual(['static-type-error']);
+    expect(
+      codes(
+        'function take(a, b) { "mine" }\nlet xs = [1, 2, 3]\nlet a = xs |> std::sum() |> std::take(1)'
+      )
+    ).toEqual(['static-type-error']);
+  });
 });

@@ -263,7 +263,7 @@ export function epsilSignatureHelp(
         context.visible
       ));
   if (candidates === undefined || candidates.length === 0) return null;
-  if (!member && !(std && context.visible.has(head)))
+  if (!member)
     markPipedTopic(
       context,
       candidates,
@@ -433,15 +433,20 @@ function markPipedTopic(
   if (found?.parent === undefined) return;
   const { node, parent, index: position } = found;
   if (operator(parent) !== 'Pipe' || position !== 1) return;
-  const call: MathJsonExpression =
-    operator(node) === 'Apply' ? [head, ...operands(node).slice(1)] : node;
+  const qualified = operator(node) === 'Apply';
+  const call: MathJsonExpression = qualified
+    ? [head, ...operands(node).slice(1)]
+    : node;
   if (underscore !== undefined && symbol(operands(call)[index]) === underscore)
     return;
+  // The callee of a call by the qualified name is the library function,
+  // also when the source has a function of that name.
   const slots = pipedTopicSlots(
     context,
     operand(parent, 1),
     call,
-    index < operands(call).length ? index : undefined
+    index < operands(call).length ? index : undefined,
+    qualified
   );
   if (slots === undefined || slots.length !== candidates.length) return;
   candidates.forEach((candidate, i) => {

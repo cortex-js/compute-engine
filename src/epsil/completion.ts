@@ -3052,13 +3052,18 @@ type CalleeArm = {
  * `topic` whether the callee takes the piped value as an implicit argument
  * after `|>` (the `Pipe` handler does so for an operator only, not for a
  * variable).
+ *
+ * `library` resolves `head` in the library only, as a call by the
+ * qualified name (`std::take(…)`) does: a name of the source does not
+ * shadow it.
  */
 function namedCallee(
   context: Context,
-  head: string
+  head: string,
+  library = false
 ): { arms: CalleeArm[]; broadcastable: boolean; topic: boolean } | undefined {
   const { ce } = context;
-  const group = context.visible.get(head);
+  const group = library ? undefined : context.visible.get(head);
   if (group?.kind === 'function') {
     const arms = group.occurrences
       .filter((o) => o.role === 'definition')
@@ -3631,15 +3636,18 @@ function implicitTopicSlots(
  * `namedCallee` (one per definition of a function of the source, one per
  * arm of a library function) and their slot (`implicitTopicSlots`), with
  * the argument at `hole` fitting any slot. `undefined` when the callee does
- * not take the piped value as an implicit argument there.
+ * not take the piped value as an implicit argument there. `library` names
+ * a call by the qualified name (`std::take(…)`), whose callee is the
+ * library function also when the source has a function of that name.
  */
 export function pipedTopicSlots(
   context: Context,
   topic: MathJsonExpression | null,
   call: MathJsonExpression,
-  hole: number | undefined
+  hole: number | undefined,
+  library = false
 ): (number | null | 'none')[] | undefined {
-  const callee = namedCallee(context, operator(call));
+  const callee = namedCallee(context, operator(call), library);
   if (callee === undefined || !callee.topic) return undefined;
   return implicitTopicSlots(context, callee.arms, topic, operands(call), hole);
 }
