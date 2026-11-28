@@ -230,6 +230,121 @@ describe('THE OTHER FORMS ARE UNCHANGED', () => {
     const sum = ce.parse('\\sum_1^9 k');
     expect(sum.json).toEqual(['Sum', 'k', ['Limits', 'Nothing', 1, 9]]);
   });
+
+  test('a subscript with no index keeps an arithmetic lower bound (CE-1763)', () => {
+    expect(ce.parse('\\sum_{a+1}^5 x').json).toEqual([
+      'Sum',
+      'x',
+      ['Limits', 'Nothing', ['Add', 'a', 1], 5],
+    ]);
+    expect(ce.parse('\\prod_{2a}^{n} x').json).toEqual([
+      'Product',
+      'x',
+      ['Limits', 'Nothing', ['Multiply', 2, 'a'], 'n'],
+    ]);
+  });
+
+  test('a subscript with no index that is a predicate is not a bound', () => {
+    expect(ce.parse('\\sum_{d\\mid n} d').json).toEqual(['Sum', 'd']);
+    expect(ce.parse('\\sum_{i\\notin S} x').json).toEqual(['Sum', 'x']);
+  });
+
+  test('a subscript with no index that holds no number is not a bound', () => {
+    // `ij` names two indexes; it is not the bound `i·j`.
+    expect(ce.parse('\\sum_{ij} a_{ij}').json).toEqual(['Sum', 'a_ij']);
+    expect(ce.parse('\\prod_{\\alpha\\beta} x').json).toEqual(['Product', 'x']);
+  });
+});
+
+describe('THE LATEX OF A SUM WITH NO INDEX AND AN ARITHMETIC LOWER BOUND', () => {
+  const roundTrip = (json: any) => {
+    const latex = ce.box(json, { canonical: false }).latex;
+    return [latex, ce.parse(latex, { canonical: false }).json];
+  };
+
+  test('reads back as the same canonical sum (CE-1763)', () => {
+    for (const json of [
+      ['Sum', 'x', ['Limits', 'Nothing', ['Add', 'a', 1], 5]],
+      ['Product', 'x', ['Limits', 'Nothing', ['Multiply', 2, 'a'], 'n']],
+      ['Sum', 'x', ['Element', 'k', 'S'], ['Limits', 'Nothing', -1, 5]],
+      // `a^{1/2}` is written `\sqrt{a}`.
+      [
+        'Sum',
+        'x',
+        ['Limits', 'Nothing', ['Power', 'a', ['Rational', 1, 2]], 5],
+      ],
+      // `e^{a+1}` is written as `Exp(a+1)`.
+      ['Sum', 'x', ['Limits', 'Nothing', ['Exp', ['Add', 'a', 1]], 5]],
+    ] as const) {
+      const sum = ce.box(json as any);
+      expect(ce.parse(sum.latex).isSame(sum)).toBe(true);
+    }
+  });
+
+  test('a squared bound before a bounded range keeps both ranges', () => {
+    // The serializer writes `Power(a, 2)` as `Square(a)`, `a^2`; the
+    // superscript `3` stays with `i`.
+    const sum = ce.box([
+      'Sum',
+      'x',
+      ['Limits', 'Nothing', ['Power', 'a', 2], 'Nothing'],
+      ['Limits', 'i', 1, 3],
+    ]);
+    expect(sum.latex).toBe('\\sum_{a^2}\\sum_{i=1}^3x');
+    expect(ce.parse(sum.latex).json).toEqual([
+      'Sum',
+      ['Sum', 'x', ['Limits', 'i', 1, 3]],
+      ['Limits', 'Nothing', ['Power', 'a', 2], 'Nothing'],
+    ]);
+  });
+
+  test('reads back with its bounds', () => {
+    expect(
+      roundTrip(['Sum', 'x', ['Limits', 'Nothing', ['Add', 'a', 1], 5]])
+    ).toEqual([
+      '\\sum_{a+1}^5x',
+      ['Sum', 'x', ['Tuple', 'Nothing', ['Add', 'a', 1], 5]],
+    ]);
+  });
+
+  test('after an `Element` clause, is written as a nested operator', () => {
+    // `\sum_{k\in S, a+1}^{5}` would read `a+1` as the condition of
+    // `k\in S`.
+    expect(
+      roundTrip([
+        'Sum',
+        'x',
+        ['Element', 'k', 'S'],
+        ['Limits', 'Nothing', ['Add', 'a', 1], 5],
+      ])
+    ).toEqual([
+      '\\sum_{k\\in S}\\sum_{a+1}^5x',
+      [
+        'Sum',
+        ['Sum', 'x', ['Tuple', 'Nothing', ['Add', 'a', 1], 5]],
+        ['Element', 'k', 'S'],
+      ],
+    ]);
+  });
+
+  test('after an index-less number bound, shares the operator', () => {
+    expect(
+      roundTrip([
+        'Sum',
+        'x',
+        ['Limits', 'Nothing', 1, 3],
+        ['Limits', 'Nothing', ['Add', 'a', 1], 5],
+      ])
+    ).toEqual([
+      '\\sum_{1, a+1}^{3, 5}x',
+      [
+        'Sum',
+        'x',
+        ['Tuple', 'Nothing', 1, 3],
+        ['Tuple', 'Nothing', ['Add', 'a', 1], 5],
+      ],
+    ]);
+  });
 });
 
 describe('A SUM WITH NO INDEX', () => {

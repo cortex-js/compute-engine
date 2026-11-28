@@ -4972,11 +4972,6 @@ function getIndexAssignment(
   // We only have a symbol, e.g. `i`
   if (binderName(expr)) return { index: binderName(expr) ?? 'Nothing' };
 
-  // A bare numeric subscript, e.g. `\sum_1^9`: a bounds pair with no index
-  // symbol. Preserve it (`Limits(Nothing, 1, 9)`) rather than silently
-  // dropping the bounds.
-  if (isNumberExpression(expr)) return { index: 'Nothing', lower: expr };
-
   // We have `i>=1` in the subscript
   if (operator(expr) === 'GreaterEqual') {
     const index = binderName(operand(expr, 1)) ?? 'Nothing';
@@ -5031,7 +5026,72 @@ function getIndexAssignment(
     return { index, element: expr };
   }
 
+  // A number (`\sum_1^9`) or an arithmetic expression (`\sum_{a+1}^5`) is a
+  // lower bound with no index: `Limits(Nothing, a+1, 5)`. It is kept, not
+  // dropped with its superscript.
+  if (isIndexlessLowerBound(expr)) return { index: 'Nothing', lower: expr };
+
   return undefined;
+}
+
+/**
+ * Whether `expr` is a number, or the negation of a number: the parser reads
+ * `-1` in a subscript as `Negate(1)`, and its canonical form is the number
+ * `-1`.
+ */
+function isSignedNumber(expr: MathJsonExpression): boolean {
+  if (isNumberExpression(expr)) return true;
+  const arg = operand(expr, 1);
+  return operator(expr) === 'Negate' && arg !== null && isNumberExpression(arg);
+}
+
+const ARITHMETIC_BOUND_OPERATORS = new Set([
+  'Add',
+  'Subtract',
+  'Negate',
+  'Multiply',
+  'InvisibleOperator',
+  'Divide',
+  'Rational',
+  'Power',
+  'Square',
+  'Sqrt',
+  'Root',
+  'Exp',
+  'Delimiter',
+]);
+
+/**
+ * Whether the subscript item `expr`, which names no index, reads as a lower
+ * bound with no index: a number, or an arithmetic expression of numbers and
+ * symbols that holds at least one number, such as `a+1` or `2a`.
+ *
+ * Any other item is not a bound: a relation or a predicate such as `d\mid n`
+ * or `i\notin S` is a condition, the text of `p\text{ prime}` is a
+ * description, and a product of names such as `ij` in `\sum_{ij} a_{ij}`
+ * names two indexes. `getIndexes()` drops such an item.
+ *
+ * The serializer tests the lower bound of a clause with this function too,
+ * so it also accepts the forms that the serializer writes for a power
+ * (`Square`, `Sqrt`, `Exp`).
+ */
+function isIndexlessLowerBound(expr: MathJsonExpression): boolean {
+  let hasNumber = false;
+  const isArithmetic = (x: MathJsonExpression): boolean => {
+    if (isNumberExpression(x)) {
+      hasNumber = true;
+      return true;
+    }
+    if (symbol(x) !== null) return true;
+    const op = operator(x);
+    if (!ARITHMETIC_BOUND_OPERATORS.has(op)) return false;
+    // `Square(a)` is written `a^2`, which holds the number `2`; `Sqrt(a)`
+    // is the form of `a^{1/2}`, which holds numbers.
+    if (op === 'Square' || op === 'Sqrt') hasNumber = true;
+    return operands(x).every(isArithmetic);
+  };
+  if (symbol(expr) !== null) return false;
+  return isArithmetic(expr) && hasNumber;
 }
 
 /**
@@ -5083,7 +5143,7 @@ function isElementCondition(
   if (isConditionExpression(expr)) return true;
   // A bare number is a bound with no index (`\sum_{k\in S, 1}^{n}` keeps
   // `Limits(Nothing, 1, n)`), not a condition.
-  if (isNumberExpression(expr)) return false;
+  if (isSignedNumber(expr)) return false;
   const assignment = getIndexAssignment(expr, binderName);
   return (
     assignment === undefined ||
@@ -5455,10 +5515,26 @@ function collectIndexingSets(expr: MathJsonExpression): MathJsonExpression[] {
   return result;
 }
 
+/**
+ * The LaTeX of one indexing set, as `serializeIndexingSet()` gives it.
+ * - `takesSup`: `getIndexes()` reads `sub` as a range, and gives it a
+ *   superscript item when it has no upper bound of its own.
+ * - `element`: `sub` is an `Element` clause.
+ * - `condition`: `sub` is read as a condition of an `Element` clause that
+ *   is just before it (`isElementCondition()`).
+ */
+type IndexingSetLatex = {
+  sub?: string;
+  sup?: string;
+  takesSup?: true;
+  element?: true;
+  condition?: true;
+};
+
 function serializeIndexingSet(
   serializer: Serializer,
   indexingSet: MathJsonExpression
-): { sub?: string; sup?: string; takesSup?: true } {
+): IndexingSetLatex {
   // Handle Element expressions: ["Element", "n", "N"] serializes as
   // `n\in N`, and ["Element", "n", "N", condition] as `n\in N, condition`.
   // The condition must be written: without it, the LaTeX parsed again sums
@@ -5474,7 +5550,7 @@ function serializeIndexingSet(
       serializer.serialize(collection);
     const condition = operand(indexingSet, 3);
     if (condition === null)
-      return { sub: `${indexLatex}\\in ${collectionLatex}` };
+      return { sub: `${indexLatex}\\in ${collectionLatex}`, element: true };
     // A condition that the parser could read as a new indexing set is
     // written in parentheses: `x=1` alone reads back as the range `x=1..∞`,
     // and a boolean symbol `p` alone as a new index `p`. The parser reads a
@@ -5485,6 +5561,7 @@ function serializeIndexingSet(
     const bare = isBareElementCondition(condition, index);
     return {
       sub: `${indexLatex}\\in ${collectionLatex}, ${bare ? conditionLatex : `(${conditionLatex})`}`,
+      element: true,
     };
   }
 
@@ -5512,7 +5589,7 @@ function serializeIndexingSet(
   const lowerExpr = sanitizeLimitOperand(operand(indexingSet, 2));
   const upperExpr = sanitizeLimitOperand(operand(indexingSet, 3));
 
-  const result: { sub?: string; sup?: string; takesSup?: true } = {};
+  const result: IndexingSetLatex = {};
   const indexName = indexExpr ? symbol(indexExpr) : null;
   const hasIndex = indexName !== null && indexName !== 'Nothing';
   const indexLatex =
@@ -5523,11 +5600,12 @@ function serializeIndexingSet(
   else if (hasIndex && indexLatex) result.sub = indexLatex;
   else if (lowerExpr !== null) result.sub = serializer.serialize(lowerExpr);
 
-  // `takesSup`: `getIndexAssignment()` reads the `sub` item as a range, so
-  // `getIndexes()` gives it a superscript item. A lower bound with no index
-  // is read as a range only when it is a number.
-  if (hasIndex || (lowerExpr !== null && isNumberExpression(lowerExpr)))
+  if (hasIndex || (lowerExpr !== null && isIndexlessLowerBound(lowerExpr)))
     result.takesSup = true;
+  // `isElementCondition()` reads a lower bound with no index that is not a
+  // number as a condition when it follows an `Element` clause.
+  if (!hasIndex && lowerExpr !== null && !isSignedNumber(lowerExpr))
+    result.condition = true;
 
   if (upperExpr !== null) result.sup = serializer.serialize(upperExpr);
 
@@ -5550,15 +5628,25 @@ function groupIndexingSets(
   serializer: Serializer,
   indexingSets: MathJsonExpression[]
 ): { sub?: string; sup?: string }[][] {
-  type Part = ReturnType<typeof serializeIndexingSet>;
   // The clauses with a `sup` must be the first of the range clauses with a
-  // `sub`, in the same order.
-  const isCorrect = (group: Part[]): boolean => {
+  // `sub`, in the same order. A clause that reads as a condition after an
+  // `Element` clause must not follow one, directly or after other such
+  // clauses: `Element(k, S), Limits(Nothing, a+1, 5)` is written
+  // `\sum_{k\in S}\sum_{a+1}^{5}`, as `\sum_{k\in S, a+1}^{5}` reads `a+1`
+  // as the condition of `k\in S`.
+  const isCorrect = (group: IndexingSetLatex[]): boolean => {
     const ranges = group.filter((p) => p.takesSup);
     const bounded = group.filter((p) => p.sup !== undefined);
-    return bounded.every((p, i) => ranges[i] === p);
+    if (!bounded.every((p, i) => ranges[i] === p)) return false;
+    let afterElement = false;
+    for (const p of group) {
+      if (p.condition) {
+        if (afterElement) return false;
+      } else afterElement = p.element === true;
+    }
+    return true;
   };
-  const groups: Part[][] = [];
+  const groups: IndexingSetLatex[][] = [];
   for (const set of indexingSets) {
     const part = serializeIndexingSet(serializer, set);
     const last = groups.at(-1);

@@ -143,6 +143,18 @@
 
 ### Resolved Issues
 
+- **A sum or product with no index keeps an arithmetic lower bound.**
+  `\sum_{a+1}^5 x` parsed as `["Sum", "x"]`, with no bounds, so the LaTeX of
+  `["Sum", "x", ["Limits", "Nothing", ["Add", "a", 1], 5]]` did not read
+  back as the same sum. It now parses as that sum, as `\sum_1^5 x` keeps
+  its number bounds. The bound is an arithmetic expression of names and
+  numbers that holds at least one number (`a+1`, `2a`). A subscript with no
+  index that is a relation or a predicate (`\sum_{d\mid n} d`), or a product
+  of names (`\sum_{ij} a_{ij}`), is still not a bound. After an
+  `Element` clause, such a range is written as a nested operator,
+  `\sum_{k\in S}\sum_{a+1}^5 x`, because `\sum_{k\in S, a+1}^5 x` reads
+  `a+1` as the condition of `k\in S`.
+
 - **A pipe into a call by a qualified name has the type of the call.** With
   `xs` of type `list<integer>`, `["Pipe", "xs", ["Apply", ["Module",
   "Take"], 2]]` (Epsil `xs |> std::take(2)`) was typed `unknown`; it is now
