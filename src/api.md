@@ -2171,6 +2171,7 @@ declare(arg1, arg2?, arg3?): IComputeEngine
   `evaluate`:   \| [`Expression`](#expression-5)
      \| ((`ops`, `options`) => [`Expression`](#expression-5) \| `undefined`);
   `evaluateAsync`: (`ops`, `options`) => `Promise`\<[`Expression`](#expression-5) \| `undefined`\>;
+  `evaluateMod`: [`EvaluateModHandler`](#evaluatemodhandler);
   `evalDimension`: (`args`, `options`) => [`Expression`](#expression-5);
   `derivative`: [`OperatorDerivative`](#operatorderivative);
   `compile`: [`OperatorCompileHandler`](#operatorcompilehandler);
@@ -2258,6 +2259,7 @@ declare(arg1, arg2?, arg3?): IComputeEngine
   `evaluate`:   \| [`Expression`](#expression-5)
      \| ((`ops`, `options`) => [`Expression`](#expression-5) \| `undefined`);
   `evaluateAsync`: (`ops`, `options`) => `Promise`\<[`Expression`](#expression-5) \| `undefined`\>;
+  `evaluateMod`: [`EvaluateModHandler`](#evaluatemodhandler);
   `evalDimension`: (`args`, `options`) => [`Expression`](#expression-5);
   `derivative`: [`OperatorDerivative`](#operatorderivative);
   `compile`: [`OperatorCompileHandler`](#operatorcompilehandler);
@@ -4259,6 +4261,7 @@ type CompiledExpression = {
 type OperatorCompileContext = {
   language: string;
   typeOf: (expr) => Type;
+  inherited: OperatorCompileHandler;
 };
 ```
 
@@ -7495,6 +7498,16 @@ evaluateAsync?: (ops, options) => Promise<Expression | undefined>;
 
 <MemberCard>
 
+##### BoxedOperatorDefinition.evaluateMod? {#evaluatemod}
+
+```ts
+evaluateMod?: EvaluateModHandler;
+```
+
+</MemberCard>
+
+<MemberCard>
+
 ##### BoxedOperatorDefinition.evalDimension? {#evaldimension}
 
 ```ts
@@ -7814,9 +7827,10 @@ Each list is sorted by name, then by the depth of the scope.
 ### OperatorDefinitionPatch {#operatordefinitionpatch}
 
 ```ts
-type OperatorDefinitionPatch = OperatorDefinition & {
+type OperatorDefinitionPatch = Omit<OperatorDefinition, "compile"> & {
   addSignature:   | Type
      | TypeString;
+  compile: "inherit" | OperatorCompileHandler;
 };
 ```
 
@@ -7848,7 +7862,29 @@ Extending a standard-library operator without replacing its `evaluate`,
 description or a wider signature) keeps it a library operator: `D`,
 compilation and the numeric evaluation of the library still apply to it.
 An extension that replaces one of these handlers is treated as a user
-definition with the same name, as a plain `ce.declare()` is.
+definition with the same name, as a plain `ce.declare()` is. The `compile`
+field of the patch (`'inherit'` or a handler) lets such an extension keep
+the library lowering for compilation.
+
+#### OperatorDefinitionPatch.compile?
+
+```ts
+compile?: "inherit" | OperatorCompileHandler;
+```
+
+How the patch treats the compiled lowering of the operator.
+
+- `'inherit'`: the new `evaluate` agrees with every call that the library
+  lowering compiles, so `compile()` lowers the operator as the library
+  does, as if `evaluate` had not been replaced.
+- a handler ([OperatorCompileHandler](#operatorcompilehandler)): it gets the `compile` of
+  the extended definition as `context.inherited`, and the answer
+  `undefined` keeps the library lowering of that call.
+
+A patch that replaces `evaluate` and states no `compile` declines to
+compile the operator. Only the compiler reads this field: `D` and the
+canonical folds treat a definition with another `evaluate` as a user
+definition.
 
 </MemberCard>
 
@@ -12186,6 +12222,7 @@ type OperatorDefinition = Partial<BaseDefinition> & Partial<OperatorDefinitionFl
   evaluate:   | ((ops, options) => Expression | undefined)
      | Expression;
   evaluateAsync: (ops, options) => Promise<Expression | undefined>;
+  evaluateMod: EvaluateModHandler;
   evalDimension: (args, options) => Expression;
   derivative: OperatorDerivative;
   compile: OperatorCompileHandler;
@@ -12527,6 +12564,48 @@ nested call waits for the evaluation of `node` that is in progress,
 and that evaluation waits for the handler. Otherwise, each nested call
 starts a new evaluation of `node`, which calls the handler again,
 without end. The engine does not detect either case.
+
+#### OperatorDefinition.evaluateMod?
+
+```ts
+evaluateMod?: EvaluateModHandler;
+```
+
+The residue of an application of this operator modulo an integer,
+computed without forming its value.
+
+`Mod(x, m)` calls it, before `x` is evaluated, when `m` is an exact
+integer `>= 2`, the call is not under `.N()` and the operator of `x`
+has the handler; `PowerMod(a, e, m)` calls it for its base `a`. The
+residue it returns, in `[0, m)`, is the answer. `Mod(x, n, d)` reaches
+it through `Mod(x - d, n)`. When the handler returns `undefined`, or
+the operator has none, `x` is evaluated and reduced as usual, so the
+handler must agree with `evaluate`: `Mod(x, m)` has the same value
+with and without it.
+
+- `ops` are the operands of the application, canonical and **not
+  evaluated**. The handler evaluates only what it needs exactly (the
+  index of `Fibonacci`) and reduces the others with `context.mod`.
+- `modulus` is `>= 2`.
+- `context.mod(x)` is the residue of an operand, through its own
+  handler when it has one, so that handlers nest:
+  `Mod(2 * Fibonacci(10^9) + 1, p)`. It never evaluates an operand
+  that has a handler.
+
+Only an operator whose value is always an integer should have one: a
+quotient or a rational literal has none, and `Mod(1/3, 7)` stays `1/3`.
+`Add`, `Multiply`, `Negate`, `Subtract` and `Power` (with an exact
+positive integer exponent) have one.
+
+The handler is read by the interpreter only. Compiled code does not use
+it.
+
+```ts
+ce.declare('Huge', {
+  signature: '(integer) -> integer',
+  evaluateMod: ([n], m) => ...,
+});
+```
 
 #### OperatorDefinition.evalDimension?
 
@@ -15336,6 +15415,7 @@ declare(arg1, arg2?, arg3?): IComputeEngine
   `evaluate`:   \| [`Expression`](#expression-5)
      \| ((`ops`, `options`) => [`Expression`](#expression-5) \| `undefined`);
   `evaluateAsync`: (`ops`, `options`) => `Promise`\<[`Expression`](#expression-5) \| `undefined`\>;
+  `evaluateMod`: [`EvaluateModHandler`](#evaluatemodhandler);
   `evalDimension`: (`args`, `options`) => [`Expression`](#expression-5);
   `derivative`: [`OperatorDerivative`](#operatorderivative);
   `compile`: [`OperatorCompileHandler`](#operatorcompilehandler);
@@ -15423,6 +15503,7 @@ declare(arg1, arg2?, arg3?): IComputeEngine
   `evaluate`:   \| [`Expression`](#expression-5)
      \| ((`ops`, `options`) => [`Expression`](#expression-5) \| `undefined`);
   `evaluateAsync`: (`ops`, `options`) => `Promise`\<[`Expression`](#expression-5) \| `undefined`\>;
+  `evaluateMod`: [`EvaluateModHandler`](#evaluatemodhandler);
   `evalDimension`: (`args`, `options`) => [`Expression`](#expression-5);
   `derivative`: [`OperatorDerivative`](#operatorderivative);
   `compile`: [`OperatorCompileHandler`](#operatorcompilehandler);
@@ -19559,6 +19640,34 @@ never matches a key, because a key is a string, not a symbol. For
 ####### key
 
 `string`
+
+</MemberCard>
+
+<MemberCard>
+
+### EvaluateModContext {#evaluatemodcontext}
+
+```ts
+type EvaluateModContext = {
+  engine: ComputeEngine;
+  mod: (x) => bigint | undefined;
+};
+```
+
+The `context` of an `evaluateMod` handler. See
+`OperatorDefinition.evaluateMod` (types-definitions.ts).
+
+</MemberCard>
+
+<MemberCard>
+
+### EvaluateModHandler {#evaluatemodhandler}
+
+```ts
+type EvaluateModHandler = (ops, modulus, context) => bigint | undefined;
+```
+
+The signature of an `evaluateMod` handler.
 
 </MemberCard>
 
