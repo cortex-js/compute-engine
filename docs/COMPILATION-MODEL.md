@@ -2287,7 +2287,16 @@ An integral calls the quadrature of the runtime (`_SYS.irIntegrate`) and its
 Monte-Carlo fallback. A JavaScript definite integral with real bounds also
 admits a short literal list or a supported call mapped over a short
 fixed-length numeric list. It reads the bounds once and integrates each
-element separately. A sample that is not finite of a product with an exponential
+element separately. An integrand that is a list of a length known only when
+the program runs (`∫₀¹ x/ElementMax(E, x) dx` of `E: list<real>`) is a loop
+over the elements of its lists, one quadrature per element, when the body is
+element by element in lists that do not read the variable: each node of list
+type that reads the variable is a row of the library that threads over its
+operands, a `Block` of one expression, an `If` or a `Which` of scalar
+conditions, or an `Integrate` of such a body (a nested integral). The lists
+and the bounds are read once; lists of different lengths throw, where the
+interpreter leaves the integral unevaluated. A scalar part that reads one of
+the lists (`Sum(E)` beside `Sin(x + E)`) declines. A sample that is not finite of a product with an exponential
 factor of the variable is its value in log space when that is finite, as in
 the interpreter: `∫₀^∞ x^100·e^−x dx` (its integrand is `∞·0` past about
 x = 1,200) is 100!. The fallback's estimate changes between runs, as in the

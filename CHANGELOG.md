@@ -6,6 +6,13 @@
   lists.** A literal list or a supported call that maps over a fixed-length
   list gives one integral per element. For example, integrating
   `[x, 2x, x^2]` from 0 to 2 gives `[2, 4, 8/3]` to quadrature precision.
+- **JavaScript compiles a definite integral whose integrand is a list of a
+  length known only when the program runs.** With `E` declared
+  `list<real>`, `\int_0^1 \frac{x}{\mathrm{ElementMax}(E, x)}\,dx` declined
+  ("a list where a scalar is required"). It now runs one quadrature per
+  element of `E`, and gives the interpreter's value: `[0.75, 0.25]` for
+  `E = [0.5, 2]`. Nested integrals and a restriction (`\keyword{where}`)
+  compile the same way. Lists of different lengths throw (CE-1910).
 - **JavaScript and interval-js compile a function that reads an element of
   a list argument of a run-time length.** With `m(M, i, j) := M[i+3(j-1)]`
   and `A` declared `list<real>`, `\sum_{n=1}^3 m(A, 2, n)` declined ("the

@@ -2161,6 +2161,15 @@ function lowerOnce(
   const heldLiteral = (e: Expression): boolean =>
     readers.has(e) || capturedLiterals.has(e);
 
+  /** The list operands of an integrand integrated element by element, each
+   *  read as its element at the index of the loop, while the loop is
+   *  lowered (`elementIntegral()`). */
+  const elementLeaves = new Map<Expression, V>();
+  /** The integrals of a list integrand lowered as the integral of one
+   *  element (`elementIntegral()`): their integrand is read with
+   *  `elementLeaves`, so neither their closed form nor a split applies. */
+  const elementIntegrals = new Set<Expression>();
+
   /** `v`, the value of `e`. A `List` or a `Tuple` that is not a node of
    *  the program (the elements of a `Range` of constants, as a literal) can
    *  share its value with a literal of the program of the same structure
@@ -2183,6 +2192,10 @@ function lowerOnce(
     want = true,
     entryResult = false
   ): V | undefined => {
+    // A list operand of an integrand integrated element by element: its
+    // element at the index of the loop (`elementIntegral()`).
+    const element = elementLeaves.get(e);
+    if (element !== undefined) return element;
     // A name is admitted by `symbol()`; another node here, and the node
     // that passes its value on (`rowsNode`) by its handler.
     const admitted = !isSymbol(e) && rowsRead === e;
@@ -7376,6 +7389,7 @@ function lowerOnce(
     if (
       options.closedIntegrals &&
       suppliedBounds === undefined &&
+      !elementIntegrals.has(e) &&
       e.operator === 'Integrate' &&
       e.isPure &&
       !quadratureOnly.has(e) &&
@@ -7410,7 +7424,8 @@ function lowerOnce(
         // `a − a·ln(a) − …`): there the quadrature runs. An integral whose
         // quadrature does not lower, or a target with no quadrature (GLSL),
         // keeps the closed form alone, NaN there.
-        if (!options.quadrature) return v;
+        // A list keeps its closed form: its elements need not all be NaN.
+        if (!options.quadrature || type(v).shape.length > 0) return v;
         quadratureOnly.add(e);
         try {
           if (trial(() => integral(e)) === undefined) return v;
@@ -7429,6 +7444,18 @@ function lowerOnce(
       b.captures.clear();
       captures.forEach((n) => b.captures.add(n));
     }
+    // JavaScript: a list integrand of a length known when the program
+    // runs, one quadrature per element (CE-1910).
+    if (
+      suppliedBounds === undefined &&
+      options.javascript &&
+      lists.checks &&
+      e.operator === 'Integrate' &&
+      literal !== undefined &&
+      !elementIntegrals.has(e) &&
+      rankOf(e) === 1
+    )
+      return elementIntegral(e, literal, name, bounds);
     // The interval mode: the pieces of the partition, measured by the
     // outermost integral of a body (`intervalQuadratureSize()`) and taken
     // by every integral in its bounds and its integrand.
@@ -7482,6 +7509,175 @@ function lowerOnce(
     if (b.effects !== effects) decline(e, 'an integrand with an effect');
     quadrature = outer;
     return out;
+  };
+
+  /** The rank of the engine type of `x`: 0 for a scalar, 1 for a flat
+   *  list, `undefined` for another type or one not settled. */
+  const rankOf = (x: Expression): number | undefined => {
+    const n = inputIR(x.type.type)?.shape.length;
+    return n === 0 || n === 1 ? n : undefined;
+  };
+
+  /** Whether the body `x` of an integrand, a list, is element by element
+   *  in its list operands (CE-1910): each node of list type that reads a
+   *  name of `vars` (the variables of the integrals around it) is a `Block`
+   *  of one expression, an `If` or a `Which` of scalar conditions, an
+   *  `Integrate` of a function literal of one parameter (added to
+   *  `integrals`), or a row of the library that threads over its operands.
+   *  A list that reads none of `vars` is a list operand (`leaves`); a
+   *  scalar is kept (`scalars`); an `If` or a `Which` sets
+   *  `arms.conditional`. */
+  const elementPlan = (
+    x: Expression,
+    vars: ReadonlySet<string>,
+    leaves: Expression[],
+    integrals: Fn[],
+    scalars: Expression[],
+    arms: { conditional: boolean }
+  ): boolean => {
+    const rank = rankOf(x);
+    if (rank === undefined) return false;
+    if (rank === 0) {
+      scalars.push(x);
+      return true;
+    }
+    if (![...facts(x).names].some((n) => vars.has(n))) {
+      leaves.push(x);
+      return true;
+    }
+    if (!isFunction(x) || !isLibrary(x)) return false;
+    const each = (ys: readonly Expression[], within = vars) =>
+      ys.every((y) => elementPlan(y, within, leaves, integrals, scalars, arms));
+    const scalar = (y: Expression) => {
+      if (rankOf(y) !== 0) return false;
+      scalars.push(y);
+      return true;
+    };
+    switch (x.operator) {
+      case 'Block':
+        return x.nops === 1 && each(x.ops);
+      case 'If':
+        arms.conditional = true;
+        return x.nops >= 2 && scalar(x.ops[0]) && each(x.ops.slice(1));
+      case 'Which':
+        arms.conditional = true;
+        return (
+          x.nops % 2 === 0 &&
+          x.ops.every((y, j) => (j % 2 === 0 ? scalar(y) : each([y])))
+        );
+      case 'Integrate': {
+        const [f, limits] = x.ops;
+        const name =
+          isFunction(f, 'Function') && f.nops === 2
+            ? parameterName(f.ops[1])
+            : undefined;
+        if (
+          x.nops !== 2 ||
+          name === undefined ||
+          !isFunction(limits, 'Limits') ||
+          limits.nops !== 3 ||
+          !isSymbol(limits.ops[0], name) ||
+          !limits.ops.slice(1).every(scalar)
+        )
+          return false;
+        integrals.push(x);
+        return each([(f as Fn).ops[0]], new Set([...vars, name]));
+      }
+    }
+    const row = rowOfHead(rows, x.operator, x.nops);
+    return (
+      row !== undefined &&
+      row.threads &&
+      row.effect === 'pure' &&
+      row.signatures.every(
+        ([args, result]) => !args.includes('list') && result !== 'element'
+      ) &&
+      each(x.ops)
+    );
+  };
+
+  /** `Integrate(f, Limits(t, a, b))` on JavaScript of a function literal
+   *  whose body is a list of a length known when the program runs, element
+   *  by element in its list operands (`elementPlan()`): a build over the
+   *  index of those lists, whose element is the quadrature of the body
+   *  with each list operand read as its element at the index, as the
+   *  interpreter integrates each element of the evaluated integrand. The
+   *  list operands and the bounds are read once, before the build. Two
+   *  lengths that differ throw (`agree()` of `lower-lists.ts`), as the
+   *  interpreter's value is an error (CE-1910). Under an `If` or a `Which`
+   *  the lists must have one length before the program runs: an arm that
+   *  is not taken does not read its lists, so their lengths need not
+   *  agree. */
+  const elementIntegral = (
+    e: Fn,
+    literal: Fn,
+    name: string,
+    bounds: readonly Expression[]
+  ): V => {
+    const leaves: Expression[] = [];
+    const integrals: Fn[] = [];
+    const scalars: Expression[] = [];
+    const arms = { conditional: false };
+    const body = literal.ops[0];
+    const refuse = () =>
+      decline(
+        e,
+        'a list integrand that is not element by element in lists that do not read the variable'
+      );
+    if (
+      !elementPlan(body, new Set([name]), leaves, integrals, scalars, arms) ||
+      leaves.length === 0
+    )
+      refuse();
+    // A scalar part that reads a list operand would read its element.
+    const names = new Set(leaves.flatMap((l) => [...facts(l).names]));
+    if (scalars.some((s) => [...facts(s).names].some((n) => names.has(n))))
+      refuse();
+    const sources = leaves.map((l) => {
+      const v = value(l);
+      if (v === undefined || !numbers(v) || !isSubLane(type(v).lane, 'real'))
+        decline(l, 'a list integrand whose list is not a list of reals');
+      return lists.listSource(v);
+    });
+    const known = new Set(
+      sources
+        .map((s) => lists.knownLength(s.length))
+        .filter((n) => n !== undefined)
+    );
+    if (known.size > 1) decline(e, 'lists of different lengths');
+    let length = sources[0].length;
+    for (const s of sources.slice(1)) {
+      const fixed = lists.knownLength(length);
+      if (
+        arms.conditional &&
+        s.length !== length &&
+        (fixed === undefined || fixed !== lists.knownLength(s.length))
+      )
+        decline(
+          e,
+          'a list integrand with a condition whose lists can have different lengths'
+        );
+      length = lists.agreedLength(e, length, s.length)!;
+    }
+    const domain = integralBounds(bounds);
+    const k = b.newValue(scalarType('integer'));
+    return region(
+      'build',
+      [length],
+      [k],
+      () => {
+        const marked = integrals.filter((x) => !elementIntegrals.has(x));
+        marked.forEach((x) => elementIntegrals.add(x));
+        leaves.forEach((l, j) => elementLeaves.set(l, sources[j].at(k)));
+        try {
+          return [integral(e, domain)];
+        } finally {
+          leaves.forEach((l) => elementLeaves.delete(l));
+          marked.forEach((x) => elementIntegrals.delete(x));
+        }
+      },
+      e
+    )[0];
   };
 
   /** The parameter and the body of a region of one real parameter, bound to
