@@ -143,6 +143,12 @@
 
 ### Resolved Issues
 
+- **A convergent infinite sum whose first term is 0 has a numeric value.**
+  At machine precision, `.N()` of `\sum_{n=0}^\infty n 2^{-n}` stayed
+  unevaluated, while the same sum from `n=1` gave 2. It now gives 2 to
+  machine precision, also for `\sum_{n=0}^\infty n 2^{-|n|}` at the default
+  precision. A series whose partial sums alternate, such as
+  `\sum_{k=0}^\infty (-1)^k`, still stays unevaluated.
 - **In Epsil, an error that a tuple or a set holds no longer underlines
   another operand of the call around it.** With `let w: any = "s"`,
   `let y = 2` and `let x = y + ln(w)`, `let v = Tuple(x, 1) + ln(y)` and

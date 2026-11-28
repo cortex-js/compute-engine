@@ -3739,8 +3739,10 @@ function extrapolatedInfiniteSum(
   // so every sample has the same parity. A series whose terms do not tend to
   // 0 but alternate with period 2 then looks converged: every sample of
   // `Σ_{k≥1} (−1)^k` is −1, and `.N()` returned −1 for a series that has no
-  // sum. So the partial sums one step later (the other parity) must
-  // extrapolate to the same value. That schedule starts at 2 steps
+  // sum. So the partial sums one step later (the other parity) must not
+  // extrapolate to another value. When their extrapolation does not
+  // converge, the second and third acceptances decide, and each checks the
+  // other parity. That schedule starts at 2 steps
   // (`step: 2`), so its samples are at 3, 5, 9, 17, … steps and all share
   // one parity; starting at 1 would put the first sample (2 steps) at the
   // other parity and spoil the extrapolation of a convergent alternating
@@ -3768,14 +3770,18 @@ function extrapolatedInfiniteSum(
         Math.abs(shifted - val) <= 10 * tol
       )
         return accept(val);
-      if (!overflow && Number.isFinite(shifted))
-        fast.miss = Math.max(
-          shiftedErr / tol,
-          Math.abs(shifted - val) / (10 * tol)
-        );
-      return undefined;
-    }
-    fast.miss = err / tol;
+      if (overflow || declined || !Number.isFinite(shifted)) return undefined;
+      fast.miss = Math.max(
+        shiftedErr / tol,
+        Math.abs(shifted - val) / (10 * tol)
+      );
+      // The extrapolation of the other parity converged to another value:
+      // the partial sums alternate (`Σ_{k≥1} (−1)^k`), and the series has
+      // no sum. When it did not converge, it can have stopped on its
+      // `breaktol` after a few samples, as for `Σ_{n≥0} n·2^−n`, whose
+      // first term is 0: the second acceptance below decides. (CE-1766.)
+      if (shiftedErr <= tol) return undefined;
+    } else fast.miss = err / tol;
   }
 
   // Second acceptance, for OSCILLATING absolutely-convergent series

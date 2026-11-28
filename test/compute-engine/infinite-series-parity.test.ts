@@ -194,3 +194,33 @@ describe('THE EXTRAPOLATION OF AN INFINITE SUM WITH A COMPILED BODY', () => {
       expect(Date.now() - started).toBeLessThan(500);
   });
 });
+
+/**
+ * The extrapolation of the partial sums of the other parity can stop after
+ * a few samples (on its `breaktol`) for a convergent series. For
+ * `Σ_{n≥0} n·2^−n`, whose first term is 0, the sum then declined, while the
+ * sum from 1 gave 2. Now the settled doubling windows decide. (CE-1766.)
+ */
+describe('A CONVERGENT SERIES WHOSE FIRST TERM IS 0 HAS A VALUE UNDER N()', () => {
+  const body = ['Multiply', 'n', ['Power', 2, ['Negate', 'n']]];
+  const absBody = ['Multiply', 'n', ['Power', 2, ['Negate', ['Abs', 'n']]]];
+  test.each([
+    ['n 2^-n from 0, machine precision', body, 0, 'machine'],
+    ['n 2^-|n| from 0, machine precision', absBody, 0, 'machine'],
+    ['n 2^-|n| from 0, default precision', absBody, 0, 'auto'],
+  ])('%s', (_, b, from, precision) => {
+    const engine = new ComputeEngine();
+    if (precision === 'machine') engine.precision = 'machine';
+    const n = engine.box(['Sum', b, ['Limits', 'n', from, INF]] as never).N();
+    expect(n.re).toBeCloseTo(2, 12);
+  });
+
+  test('(-1)^k from 0 still declines at machine precision', () => {
+    const engine = new ComputeEngine();
+    engine.precision = 'machine';
+    const n = engine
+      .box(['Sum', ['Power', -1, 'k'], ['Limits', 'k', 0, INF]] as never)
+      .N();
+    expect(n.operator).toBe('Sum');
+  });
+});
