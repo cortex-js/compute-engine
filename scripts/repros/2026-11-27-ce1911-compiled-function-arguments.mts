@@ -38,6 +38,7 @@ let next = (i: integer) => do { let s = 0; for j in 1..3 { s = s + j + k0 }; s +
 function withOpts(n: integer, opts: dictionary = {->}) { n + 1 }
 function styled(n: integer, opts: dictionary = {->}) -> nothing { hostApply(cells, opts) }
 function plain(n: integer) { n + 1 }
+let withOptsL = (n: integer, opts: dictionary = {->}) => n + 1
 function callsF(f: any) { f(3) }
 function addsF(f: any) { f + 1 }
 `;
@@ -117,6 +118,11 @@ const cases: Array<{ label: string; program: string; expect: Expect }> = [
   {
     label: 'withOpts(t)',
     program: `let frame = (t: integer) => withOpts(t)`,
+    expect: 'compile',
+  },
+  {
+    label: 'withOptsL(t), a function literal bound to a name, its default',
+    program: `let frame = (t: integer) => withOptsL(t)`,
     expect: 'compile',
   },
   {

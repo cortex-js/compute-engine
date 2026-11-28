@@ -12,7 +12,11 @@ import type { TypeReference } from '../../../common/type/types.js';
 import { isSubtype } from '../../../common/type/subtype.js';
 import { typesOverlap } from '../../../common/type/reduce.js';
 import { typeToString as engineTypeToString } from '../../../common/type/serialize.js';
-import { isFunction, isSymbol } from '../../boxed-expression/type-guards.js';
+import {
+  isDictionary,
+  isFunction,
+  isSymbol,
+} from '../../boxed-expression/type-guards.js';
 import { canonicalFunctionLiteral } from '../../function-utils.js';
 import type { ConformanceRecord } from '../../types-engine.js';
 import type { Expression, IComputeEngine } from '../../global-types.js';
@@ -26,6 +30,37 @@ import {
 import { decline, isUntyped, type Fn, type Lowering } from './lower-context.js';
 import { laneProves } from './lower-records.js';
 import { typeToString, type V } from './ir.js';
+
+/** Whether every name of `x`, operator names included, holds the
+ *  definition of the system scope (a literal, `True`, `Pi`, `[]`, `{->}`):
+ *  such a value reads no name of the program, so it can be inlined (a
+ *  default of a protocol member, or of a function literal: `call()` of
+ *  `lower-functions.ts`). */
+export function readsNoProgramName(ce: IComputeEngine, x: Expression): boolean {
+  const system = ce.contextStack[0]?.lexicalScope.bindings;
+  const walk = (x: Expression): boolean => {
+    if (isSymbol(x)) {
+      const d = system?.get(x.symbol);
+      return (
+        d !== undefined &&
+        (('value' in d && d.value === x.valueDefinition) ||
+          ('operator' in d && d.operator === x.operatorDefinition))
+      );
+    }
+    if (isFunction(x)) {
+      const d = system?.get(x.operator);
+      return (
+        d !== undefined &&
+        'operator' in d &&
+        d.operator === x.operatorDefinition &&
+        x.ops.every(walk)
+      );
+    }
+    if (isDictionary(x)) return x.values.every(walk);
+    return true;
+  };
+  return walk(x);
+}
 
 export function protocolLowering(cx: Lowering) {
   const { type } = cx;
@@ -142,30 +177,8 @@ export function protocolLowering(cx: Lowering) {
       typeof own === 'object' && own.kind === 'signature'
         ? [...(own.args ?? []), ...(own.optArgs ?? [])]
         : [];
-    // Whether every name of `x`, operator names included, holds the
-    // definition of the system scope (a literal, `True`, `Pi`, `[]`): such
-    // a value reads no name of the program, so it can be inlined.
     const system = ce.contextStack[0]?.lexicalScope.bindings;
-    const libraryOnly = (x: Expression): boolean => {
-      if (isSymbol(x)) {
-        const d = system?.get(x.symbol);
-        return (
-          d !== undefined &&
-          (('value' in d && d.value === x.valueDefinition) ||
-            ('operator' in d && d.operator === x.operatorDefinition))
-        );
-      }
-      if (isFunction(x)) {
-        const d = system?.get(x.operator);
-        return (
-          d !== undefined &&
-          'operator' in d &&
-          d.operator === x.operatorDefinition &&
-          x.ops.every(libraryOnly)
-        );
-      }
-      return true;
-    };
+    const libraryOnly = (x: Expression) => readsNoProgramName(ce, x);
     const values = args.map((op, i) => {
       if (i === 0) return self;
       // A function value at a parameter of no stated type or of type

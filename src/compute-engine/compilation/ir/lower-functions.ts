@@ -19,7 +19,11 @@ import type {
 import { typeToString as engineTypeToString } from '../../../common/type/serialize.js';
 import { isSubtype } from '../../../common/type/subtype.js';
 import { resolveTypeAlias } from '../../../common/type/utils.js';
-import type { BoxedValueDefinition, Expression } from '../../global-types.js';
+import type {
+  BoxedValueDefinition,
+  Expression,
+  IComputeEngine,
+} from '../../global-types.js';
 import {
   freeBinding,
   isFreeCallHead,
@@ -49,13 +53,16 @@ import {
   LANE_MISMATCH,
   listedOf,
   tupleBody,
+  isDeclaredRecordType,
   UNSETTLED_SHAPE,
   type Binding,
   type DeclaredRecord,
   type Fn,
   type Listed,
   type Lowering,
+  userBinding,
 } from './lower-context.js';
+import { readsNoProgramName } from './lower-protocols.js';
 import {
   broadcastableParamSlots,
   paramsAreScalar,
@@ -311,6 +318,32 @@ function isDictionaryType(t: Type): boolean {
   );
 }
 
+/** The call `e` of the function literal of `binding` with the default of
+ *  each parameter that it leaves out, or `undefined` when it leaves out
+ *  none, a parameter it leaves out has no default, or a default reads a
+ *  name of the program (`readsNoProgramName()`): the interpreter would
+ *  evaluate such a default when it applies the function, which a value
+ *  inlined here would not follow. The canonical form already supplies the
+ *  defaults of a call of a declared function (`call()`; CE-1911). */
+function withDefaults(
+  e: Fn,
+  binding: { key: object; literal: Fn }
+): Fn | undefined {
+  const params = binding.literal.ops.slice(1);
+  if (e.nops >= params.length) return undefined;
+  const ce = e.engine as unknown as IComputeEngine;
+  const defaults: Expression[] = [];
+  for (const p of params.slice(e.nops)) {
+    if (!isFunction(p, 'Optional') || p.nops !== 2) return undefined;
+    const d = p.ops[1];
+    if (!readsNoProgramName(ce, d)) return undefined;
+    defaults.push(d);
+  }
+  // The call with its defaults must name the same function.
+  const filled = ce._fn(e.operator, [...e.ops, ...defaults]) as Fn;
+  return userBinding(filled)?.key === binding.key ? filled : undefined;
+}
+
 /** `t` is a union whose every member is a real type, `nan` or an infinity
  *  (`nan | real | signed_infinity`): a double holds each of its values, so
  *  it is on the real lane, also when the finite members are integers. */
@@ -502,14 +535,15 @@ function signatureTypes(
           // No stated type, or `number`: the lane of a scalar argument,
           // a real or a complex (`laneKey()`).
           open: present(t) === 'unknown' || present(t) === 'number',
-          // No stated type, `any`, or a nominal tuple type: the type of a
-          // record argument (`held()`); `true` for any record, else the
-          // nominal type that the record must have. A dictionary type: the
-          // record of a dictionary literal only (`dictionary`).
+          // No stated type, `any`, a nominal tuple type or a declared record
+          // type: the type of a record argument (`held()`); `true` for any
+          // record, else the nominal type that the record must have. A
+          // dictionary type: the record of a dictionary literal only
+          // (`dictionary`).
           record:
             isUntyped(t) || isDictionaryType(t)
               ? (true as const)
-              : tupleBody(t) !== undefined
+              : tupleBody(t) !== undefined || isDeclaredRecordType(t)
                 ? (t as TypeReference)
                 : undefined,
           // Of type `any`: also the lane of a number (`held()`).
@@ -1546,10 +1580,10 @@ export function functionLowering(
 
   /** The record of the values `values` of the arguments of the call `e` of
    *  a function with a rest parameter, the `Tuple` to which the interpreter
-   *  binds the parameter (`IRType.head`; CE-1652, step 5). As
-   *  for a record that a constructor makes (`make()` of
-   *  `lower-records.ts`), a field of a run-time length or of the lane
-   *  `rows` declines. */
+   *  binds the parameter (`IRType.head`; CE-1652, step 5). A field of a
+   *  run-time length or of the lane `rows` declines (a record that a
+   *  constructor makes carries a run-time length, `make()` of
+   *  `lower-records.ts`; the arguments of a rest parameter do not). */
   const restRecord = (e: Fn, values: V[]): V => {
     const fields = values.map((v): IRType => {
       const t = type(v);
@@ -1595,6 +1629,15 @@ export function functionLowering(
     given?: V[],
     nanForAbsent: () => boolean = () => false
   ): number => {
+    // A call of a function literal bound to a name (`let k = (n, m = 2) =>
+    // …`) that leaves out the arguments of its last parameters, each with
+    // a default that reads no name of the program: the interpreter binds
+    // each such parameter to its default, as the canonical form of a call
+    // of a declared function supplies it (CE-1911).
+    if (binding !== undefined && given === undefined) {
+      const filled = withDefaults(e, binding);
+      if (filled !== undefined) e = filled;
+    }
     let fn = (binding ? undefined : pending.get(e.operator)) as UserFunction;
     // Without run-time lengths, the arguments of the first call are lowered
     // before the function, which takes their stated lengths; so are they

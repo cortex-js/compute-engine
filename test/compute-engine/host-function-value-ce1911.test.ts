@@ -41,6 +41,10 @@ function callsF(f: any) { f(3) }
 function withOpts(n: integer, opts: dictionary = {->}) { n + 1 }
 function styled(n: integer, opts: dictionary = {->}) -> nothing { hostApply(cells, opts) }
 function pick(d: dictionary) { d.a }
+let withOptsL = (n: integer, opts: dictionary = {->}) => n + 1
+let addTwo = (n: integer, k: integer = 2) => n + k
+const c0 = 7
+let addC0 = (n: integer, k: integer = c0) => n + k
 `;
 
 function engine(program: string) {
@@ -235,6 +239,27 @@ describe('A DICTIONARY PARAMETER', () => {
     );
     expect(compiled.value).toBe(4);
     expect(interpreted.value).toBe(4);
+  });
+
+  test.each([
+    ['a dictionary default', 'withOptsL(t)', 4],
+    ['an integer default', 'addTwo(t)', 5],
+    ['an argument for the default', 'addTwo(t, 10)', 13],
+  ])(
+    'a function literal bound to a name, with %s, compiles',
+    (_, call, value) => {
+      const { compiled, interpreted } = both(
+        `let frame = (t: integer) => ${call}`
+      );
+      expect(compiled.value).toBe(value);
+      expect(interpreted.value).toBe(value);
+    }
+  );
+
+  test('a default of a function literal that is a name of the program declines', () => {
+    expect(declined('let frame = (t: integer) => addC0(t)')).toMatch(
+      /addC0 with 1 arguments/
+    );
   });
 
   test('passes the dictionary on to the host', () => {
