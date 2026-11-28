@@ -41,7 +41,7 @@ import {
   signatureOf,
   type OperatorRow,
 } from './operators.js';
-import { isLibraryOperator } from '../../library-shadowing.js';
+import { isLibraryLowering } from '../../library-shadowing.js';
 import { isTupleOrTupleUnionShapedType } from '../../collection-utils.js';
 import {
   decline,
@@ -131,7 +131,7 @@ export function operatorLiteral(
     typeof k !== 'number' ||
     k < 1 ||
     (n !== undefined && k !== n) ||
-    !isLibraryOperator(node as never, name)
+    !isLibraryLowering(node as never, name)
   )
     return f;
   const ps = Array.from({ length: k }, (_, i) => `_p${i + 1}`);
@@ -3459,7 +3459,7 @@ export function listLowering(cx: Lowering) {
           valueDefinition: g.valueDefinition,
           engine: g.engine,
         } as never) === undefined &&
-        isLibraryOperator(
+        isLibraryLowering(
           {
             operator: g.symbol,
             operatorDefinition: g.operatorDefinition,

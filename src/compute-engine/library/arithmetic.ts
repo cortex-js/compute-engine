@@ -76,6 +76,13 @@ import {
   surplusOperandError,
 } from '../boxed-expression/error-value.js';
 import { reduceModulo } from '../boxed-expression/modular-arithmetic.js';
+import {
+  addModHook,
+  multiplyModHook,
+  negateModHook,
+  powerModHook,
+  subtractModHook,
+} from '../boxed-expression/evaluate-mod.js';
 import { logarithmAtExceptionalPoint } from '../boxed-expression/logarithm.js';
 
 import {
@@ -143,6 +150,7 @@ import {
   estimatedFactorialDigits,
   incompleteGammaUpper,
   bigIncompleteGammaUpper,
+  bigIncompleteGammaUpperNegative,
   bigGamma,
   bigGammaln,
   bigLnAbsGammaNegative,
@@ -8628,12 +8636,36 @@ function evaluateGamma(
       const closed = incompleteGammaClosedForm(engine, s, z);
       if (closed !== undefined) return closed;
     }
+    // z < 0: the value is complex, and the bignum kernel answers or the call
+    // stays unevaluated (doubles would give 15 digits at any precision).
+    if (
+      shouldNumericize(numericApproximation, s, z) &&
+      bignumPreferred(engine) &&
+      isNumber(s) &&
+      isNumber(z) &&
+      !s.isComplex &&
+      !z.isComplex &&
+      z.re < 0 &&
+      Number.isFinite(s.re) &&
+      Number.isFinite(z.re)
+    ) {
+      const v = bigIncompleteGammaUpperNegative(
+        engine,
+        s.bignumRe ?? engine.bignum(s.re),
+        z.bignumRe ?? engine.bignum(z.re),
+        engine.precision
+      );
+      if (v === undefined) return undefined;
+      return engine.number(
+        engine._inexactNumericValue(v.im.isZero() ? v.re : v)
+      );
+    }
     return shouldNumericize(numericApproximation, s, z)
       ? applyN(
           [s, z],
           (s, z) => incompleteGammaUpper(s, z),
-          // z < 0: the value is complex and no bignum kernel exists, so it
-          // declines (`null`) instead of answering in doubles.
+          // A z < 0 that the block above does not answer (a non-finite
+          // operand) declines (`null`) instead of answering in doubles.
           (s, z) =>
             z.isNegative()
               ? null
@@ -8762,6 +8794,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
     },
 
     Add: {
+      evaluateMod: addModHook,
       description: 'Sum of two or more values.',
       wikidata: 'Q32043',
       associative: true,
@@ -12242,6 +12275,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
     },
 
     Multiply: {
+      evaluateMod: multiplyModHook,
       description: 'Product of two or more values.',
       wikidata: 'Q40276',
       associative: true,
@@ -13422,6 +13456,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
     },
 
     Negate: {
+      evaluateMod: negateModHook,
       description: 'Additive Inverse',
       wikidata: 'Q715358',
       complexity: 2000,
@@ -13664,6 +13699,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
     },
 
     Power: {
+      evaluateMod: powerModHook,
       description: 'Exponentiation: raise a base to a power.',
       keywords: ['exponent', 'exponentiation'],
       wikidata: 'Q33456',
@@ -15300,6 +15336,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
     },
 
     Subtract: {
+      evaluateMod: subtractModHook,
       description: 'Difference between two or more values.',
       wikidata: 'Q40754',
       complexity: 1350,

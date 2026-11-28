@@ -218,7 +218,7 @@ export function isLibraryOperator(
     };
   },
   name?: string,
-  options?: { customLibrary?: boolean }
+  options?: { customLibrary?: boolean; lowering?: boolean }
 ): boolean {
   if (name === undefined) name = node.operator;
   else if (node.operator !== name) return false;
@@ -234,7 +234,12 @@ export function isLibraryOperator(
   )
     return false;
   const def = node.operatorDefinition;
-  if (def !== undefined) return keepsLibraryDefinition(def, libraryOperator);
+  if (def !== undefined)
+    return (
+      keepsLibraryDefinition(def, libraryOperator) ||
+      (options?.lowering === true &&
+        inheritsLibraryLowering(def, libraryOperator))
+    );
   if (node.valueDefinition !== undefined) return false;
   // A node with no definition while `ce._libraryCall()` boxes a call of
   // `name` is a raw operand of that call, written in the scope that shadows
@@ -854,4 +859,60 @@ export function markLibraryExtension(
  * extension recorded by {@link markLibraryExtension}. */
 export function extendedLibraryOperator(operator: object): object | undefined {
   return LIBRARY_EXTENSIONS.get(operator);
+}
+
+/**
+ * The operator definitions made by `ce.declare(name, patch, { extend: true })`
+ * whose `compile` is `'inherit'` or a handler, or that extend such a definition
+ * and keep its `evaluate` and `compile`, mapped to the library operator
+ * definition whose lowering they inherit (`inheritsLibraryLowering()`). A weak
+ * map, as {@link LIBRARY_EXTENSIONS} is.
+ */
+const LOWERING_EXTENSIONS = new WeakMap<object, object>();
+
+/** Record that `extension` inherits the compiled lowering of the library
+ * operator definition `libraryOperator`: the compiler lowers a call bound to
+ * it as a call of the library operator (`isLibraryOperator()` with
+ * `lowering: true`). Code that reads the library by name for another reason
+ * (`D`, the canonical folds) does not read this mark. */
+export function markLoweringExtension(
+  extension: object,
+  libraryOperator: object
+): void {
+  LOWERING_EXTENSIONS.set(extension, libraryOperator);
+}
+
+/** The library operator definition whose lowering `operator` inherits, as
+ * recorded by {@link markLoweringExtension}: the definition itself when it
+ * is a library definition or a library extension, which lowers as the
+ * library does. */
+export function loweringLibraryOperator(operator: object): object | undefined {
+  return LOWERING_EXTENSIONS.get(operator) ?? extendedLibraryOperator(operator);
+}
+
+/**
+ * True when the definition `operator` inherits the compiled lowering of the
+ * library operator definition `libraryOperator`
+ * ({@link markLoweringExtension}) and keeps the library flags: a flag that
+ * the lowering reads (`lazy`, `broadcastable`) must be the library's.
+ */
+export function inheritsLibraryLowering(
+  operator: object,
+  libraryOperator: object
+): boolean {
+  return (
+    LOWERING_EXTENSIONS.get(operator) === libraryOperator &&
+    keepsLibraryFlags(operator, libraryOperator)
+  );
+}
+
+/** {@link isLibraryOperator} for the compiler: a call bound to a definition
+ * that inherits the library lowering (`compile: 'inherit'`, or a `compile`
+ * handler that defers) lowers as the library operator. */
+export function isLibraryLowering(
+  node: Parameters<typeof isLibraryOperator>[0],
+  name?: string,
+  options?: { customLibrary?: boolean }
+): boolean {
+  return isLibraryOperator(node, name, { ...options, lowering: true });
 }

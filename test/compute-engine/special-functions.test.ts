@@ -20,8 +20,7 @@ import { engine } from '../utils';
 
 const ce = engine;
 
-// Γ(s, z) at a real z < 0 has no bignum kernel: above machine precision it
-// stays unevaluated, so these pins run at machine precision.
+// Γ(s, z) at a real z < 0: these pins are machine-precision doubles.
 function atMachinePrecision<T>(fn: () => T): T {
   const saved = ce.precision;
   ce.precision = 'machine';

@@ -1,4 +1,5 @@
 import { BoxedType } from '../../common/type/boxed-type.js';
+import { powerModHookAnswer } from '../boxed-expression/evaluate-mod.js';
 import type {
   Expression,
   IComputeEngine as ComputeEngine,
@@ -1158,7 +1159,13 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
         ),
       // All three operands are evaluated, and nothing else is read of them.
       evaluatesOperands: true,
-      evaluate: (ops, { engine: ce }) => {
+      evaluate: (ops, { engine: ce, numericApproximation }) => {
+        // A base whose operator has an `evaluateMod` hook is reduced through
+        // it, before any operand is evaluated.
+        if (!numericApproximation) {
+          const hooked = powerModHookAnswer(ops, ce);
+          if (hooked !== undefined) return hooked;
+        }
         const evaluated = ops.map((x) => x.evaluate());
         const [aOp, bOp, mOp] = evaluated;
         const threaded = threadPowerMod(ce, 'PowerMod', evaluated);

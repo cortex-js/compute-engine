@@ -16,7 +16,7 @@ import {
 import { SMALL_INTEGER } from '../../numerics/numeric.js';
 import { isSubtype } from '../../../common/type/subtype.js';
 import type { Type } from '../../../common/type/types.js';
-import { isLibraryOperator } from '../../library-shadowing.js';
+import { isLibraryLowering } from '../../library-shadowing.js';
 import { COLOR_STRING_FORMATS } from '../../numerics/color-conversion.js';
 import { decline, type Fn, type Lowering } from './lower-context.js';
 import type { V } from './ir.js';
@@ -135,7 +135,7 @@ export function patternReplace(
 ): V | undefined {
   const re = e.ops[1];
   if (!isFunction(re, 'RegExp') || e.nops < 3) return undefined;
-  if (!isLibraryOperator(re as never, 'RegExp'))
+  if (!isLibraryLowering(re as never, 'RegExp'))
     decline(e, 'StringReplace of a RegExp that is not the library operator');
   const [src, flags] = re.ops;
   const f =

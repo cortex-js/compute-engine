@@ -9,8 +9,7 @@ import { engine } from '../utils';
 
 const ce = engine;
 
-// The pins are machine-precision values: above machine precision a negative
-// real x declines, as there is no bignum kernel for the complex value.
+// The pins are machine-precision values.
 const savedPrecision = ce.precision;
 beforeAll(() => {
   ce.precision = 'machine';

@@ -17,7 +17,7 @@ import {
   isSymbol,
 } from '../../boxed-expression/type-guards.js';
 import {
-  isLibraryOperator,
+  isLibraryLowering,
   isShadowedSymbol,
 } from '../../library-shadowing.js';
 import { CONSTANTS, OPERATORS, rowOfHead } from './operators.js';
@@ -194,7 +194,7 @@ function float32Warnings(expr: Expression, fold: boolean): CompileDiagnostic[] {
         !isShadowedSymbol(x as never)) ||
       (isFunction(x) &&
         userBinding(x as Fn) === undefined &&
-        isLibraryOperator(x as never, x.operator) &&
+        isLibraryLowering(x as never, x.operator) &&
         (rowOfHead(OPERATORS, x.operator)?.effect ?? 'effectful') !==
           'effectful' &&
         x.ops.every(closed));

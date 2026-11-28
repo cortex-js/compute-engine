@@ -37,7 +37,7 @@ import { compileWithIrProfileGlsl } from './ir/adapter-glsl.js';
 import { fieldRecordInput } from './ir/lower-records.js';
 import { compileWithIrProfileInterval } from './ir/adapter-interval.js';
 import { BUILT_IN_TARGETS } from './targets.js';
-import { isLibraryOperator } from '../library-shadowing.js';
+import { isLibraryLowering } from '../library-shadowing.js';
 
 /** The answer of `canCompile()`. A positive answer also carries the
  *  `shippable` field of the result that `compile()` gives
@@ -182,7 +182,7 @@ export function compile<
   // A compiled Program owns its emitted locals, exactly as a Block does:
   // it is compiled as that Block.
   // A user function named `Program` is a user call.
-  if (isFunction(expr, 'Program') && isLibraryOperator(expr))
+  if (isFunction(expr, 'Program') && isLibraryLowering(expr))
     expr = ce._fn('Block', expr.ops);
   return compileExpression(expr, options);
 }

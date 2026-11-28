@@ -13,6 +13,7 @@ import type { MathJsonExpression } from '../math-json/types.js';
 import type {
   ComputeEngine,
   Expression,
+  EvaluateModHandler,
   ExpressionInput,
   OperatorCompileHandler,
 } from './types-expression.js';
@@ -1205,6 +1206,45 @@ export type OperatorDefinition = Partial<BaseDefinition> &
       ops: ReadonlyArray<Expression>,
       options: EvaluateHandlerOptions
     ) => Promise<Expression | undefined>;
+
+    /**
+     * The residue of an application of this operator modulo an integer,
+     * computed without forming its value.
+     *
+     * `Mod(x, m)` calls it, before `x` is evaluated, when `m` is an exact
+     * integer `>= 2`, the call is not under `.N()` and the operator of `x`
+     * has the handler; `PowerMod(a, e, m)` calls it for its base `a`. The
+     * residue it returns, in `[0, m)`, is the answer. `Mod(x, n, d)` reaches
+     * it through `Mod(x - d, n)`. When the handler returns `undefined`, or
+     * the operator has none, `x` is evaluated and reduced as usual, so the
+     * handler must agree with `evaluate`: `Mod(x, m)` has the same value
+     * with and without it.
+     *
+     * - `ops` are the operands of the application, canonical and **not
+     *   evaluated**. The handler evaluates only what it needs exactly (the
+     *   index of `Fibonacci`) and reduces the others with `context.mod`.
+     * - `modulus` is `>= 2`.
+     * - `context.mod(x)` is the residue of an operand, through its own
+     *   handler when it has one, so that handlers nest:
+     *   `Mod(2 * Fibonacci(10^9) + 1, p)`. It never evaluates an operand
+     *   that has a handler.
+     *
+     * Only an operator whose value is always an integer should have one: a
+     * quotient or a rational literal has none, and `Mod(1/3, 7)` stays `1/3`.
+     * `Add`, `Multiply`, `Negate`, `Subtract` and `Power` (with an exact
+     * positive integer exponent) have one.
+     *
+     * The handler is read by the interpreter only. Compiled code does not use
+     * it.
+     *
+     * ```ts
+     * ce.declare('Huge', {
+     *   signature: '(integer) -> integer',
+     *   evaluateMod: ([n], m) => ...,
+     * });
+     * ```
+     */
+    evaluateMod?: EvaluateModHandler;
 
     /** Dimensional analysis
      * @experimental
@@ -3801,6 +3841,8 @@ export interface BoxedOperatorDefinition
     ops: ReadonlyArray<Expression>,
     options: EvaluateHandlerOptions
   ) => Promise<Expression | undefined>;
+
+  evaluateMod?: EvaluateModHandler;
 
   evalDimension?: (
     ops: ReadonlyArray<Expression>,

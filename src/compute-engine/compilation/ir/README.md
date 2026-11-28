@@ -45,7 +45,7 @@ and helpers with the `extend` option.
 
 The head decides first: a head bound to a user function (by its definition, not
 its name) is a call, also when it is named `At` or `Sin`; a library head is
-compiled only when `isLibraryOperator()` holds; anything else declines. A head
+compiled only when `isLibraryLowering()` holds; anything else declines. A head
 whose operator definition has a `compile` handler other than the standard
 library's (`hasOwnLowering()`; a host that sets
 `ce.lookupDefinition('At').operator.compile`, or a host operator of its own) is
@@ -76,7 +76,14 @@ not evaluated by the interpreter, and a `D` or an `Integrate` over it declines
 (its closed form is computed with the library's operator). `isLibrary()` is
 false for such a node, so `literalList()`, a `Range` read as a list source and
 `speculatable()` lower it through `value()`; a node whose handler defers is the
-library's everywhere. The standard handler of `PointList` is not such a handler
+library's everywhere. A definition made by `ce.declare(name, { evaluate, compile }, { extend: true })`
+from a library definition is a library head for this test
+(`isLibraryLowering()`, which also accepts what `isLibraryOperator()` does) when
+`compile` is `'inherit'`, or a handler: a handler that defers (`undefined`) gets
+the library's lowering, and a handler gets the `compile` of the extended
+definition as `context.inherited`. A patch that replaces `evaluate` and states no
+`compile` is not a library head: it declines. `D` and the canonical folds read
+`isLibraryOperator()`, which does not see the mark. The standard handler of `PointList` is not such a handler
 (the identity of the function in the library table). A call of the library's
 `Rational` of two exact integer literals, `q` not 0, in an expression that was
 not made canonical (the `structural` form), is read as the exact number `p/q`

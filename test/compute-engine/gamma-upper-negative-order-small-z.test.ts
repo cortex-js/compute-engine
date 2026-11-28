@@ -143,10 +143,10 @@ describe('GAMMA(s, z) for non-integer s < -1 and small z', () => {
   });
 
   test('Gamma(-1.5, -0.5) is complex (.N())', () => {
-    // Above machine precision there is no bignum kernel, so it declines.
-    expect(ce.expr(['Gamma', -1.5, -0.5]).N().toString()).toBe(
-      'Gamma(-1.5, -0.5)'
-    );
+    // Above machine precision the value is computed in big decimals.
+    const big = ce.expr(['Gamma', -1.5, -0.5]).N() as any;
+    expect(big.re).toBeCloseTo(2.363271801207355, 10);
+    expect(big.im).toBeCloseTo(3.964483508345547, 10);
     const saved = ce.precision;
     ce.precision = 'machine';
     const n = ce.expr(['Gamma', -1.5, -0.5]).N();

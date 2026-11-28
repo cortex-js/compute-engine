@@ -655,6 +655,8 @@ interface BoxedOperatorDefinition
       effects: EffectHandlers;
     }
   ) => Promise<Expression | undefined>;
+  /** See `OperatorDefinition.evaluateMod` (types-definitions.ts). */
+  evaluateMod?: EvaluateModHandler;
   evalDimension?: (
     ops: ReadonlyArray<Expression>,
     options: Partial<EvaluateOptions> & { engine: ComputeEngine }
@@ -739,6 +741,12 @@ export type OperatorCompileContext = {
   /** The operand type including facts established by this compilation's local
    * bindings. The expression's type remains the target-independent contract. */
   readonly typeOf?: (expr: Expression) => Type;
+  /** Set on the handler of a definition made with
+   * `ce.declare(name, { compile }, { extend: true })`: the `compile` handler
+   * of the definition that it extends (the library's, or the handler of an
+   * earlier extension). Its answer `undefined` selects the library lowering.
+   * `undefined` when the extended definition has none. */
+  readonly inherited?: OperatorCompileHandler;
 };
 
 /**
@@ -3914,3 +3922,26 @@ export interface EqHandlers {
   eq: (a: Expression, b: Expression) => boolean | undefined;
   neq: (a: Expression, b: Expression) => boolean | undefined;
 }
+
+/**
+ * The `context` of an `evaluateMod` handler. See
+ * `OperatorDefinition.evaluateMod` (types-definitions.ts).
+ */
+export type EvaluateModContext = {
+  engine: ComputeEngine;
+  /**
+   * The residue of an operand modulo the modulus of the call, in `[0, m)`:
+   * an exact integer literal gives its residue, an operand whose operator has
+   * an `evaluateMod` handler answers through it (it is never evaluated), and
+   * any other operand is evaluated and gives its residue when the value is an
+   * exact integer. `undefined` when there is no such residue.
+   */
+  mod: (x: Expression) => bigint | undefined;
+};
+
+/** The signature of an `evaluateMod` handler. */
+export type EvaluateModHandler = (
+  ops: ReadonlyArray<Expression>,
+  modulus: bigint,
+  context: EvaluateModContext
+) => bigint | undefined;

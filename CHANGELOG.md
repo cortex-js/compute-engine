@@ -1,3 +1,63 @@
+## [Unreleased]
+
+### Improvements
+
+- **An extension that replaces `evaluate` can keep the compiled lowering of
+  the operator** (#527, contributed by
+  [enumeratio](https://github.com/enumeratio)).
+  `ce.declare(name, patch, { extend: true })` takes a `compile` field:
+  `'inherit'` says that the new `evaluate` agrees with every call that the
+  library lowering compiles, and a handler receives the `compile` handler of
+  the extended definition as `context.inherited` and answers `undefined` to
+  keep the library lowering of that call. `Beta` extended with an `evaluate`
+  that gives 0 at its poles and `compile: 'inherit'` compiles to the same
+  `_SYS.ir.beta(_.s, _.a)` as before, on `javascript` and `glsl`; without the
+  field it called the handler as a host function. A handler that lowers the
+  two-operand `Zeta(s, a)` as `HurwitzZeta(s, a)` and returns
+  `context.inherited(…)` for `Zeta(s)` keeps `_SYS.ir.zeta(_.s)`. A patch that
+  replaces `evaluate` and states no `compile` declines as before, and so does
+  `'inherit'` on an operator that extends no library definition and has no
+  `compile` handler. Any other
+  value of `compile` throws. `D` and the canonical folds still treat such an
+  operator as a user definition.
+- **An operator can answer `Mod` without forming its value: the `evaluateMod`
+  handler** (#527, contributed by
+  [enumeratio](https://github.com/enumeratio)). `evaluateMod(ops, modulus,
+  context)` on an operator definition returns the residue in `[0, modulus)`
+  of an application of the operator, or `undefined` to decline. `Mod(x, m)`
+  calls it, before `x` is evaluated, when `m` is an exact integer `>= 2`, the
+  call is not under `.N()` and the operator of `x` has the handler;
+  `PowerMod(a, e, m)` calls it for its base, then raises the residue to the
+  exact non-negative `e` by square-and-multiply; `Mod(x, n, d)` reaches it
+  through `d + Mod(x - d, n)`, with `x - d` built without evaluating `x`.
+  `context.mod(y)` is the residue of an operand, through its own handler when
+  it has one, so handlers nest, and it never evaluates an operand that has
+  one. `Add`, `Multiply`, `Negate`, `Subtract` and `Power` (exact
+  positive integer exponent) have a handler built on `context.mod`. For
+  a declared `Huge(n)` whose `evaluate` throws and whose handler answers,
+  `Mod(Huge(10^9), 7)` is `1` where it threw, and `Mod(2 * Huge(5) + 3, 97)`
+  is `53`. A rational (`Mod(1/3, 7)` is `1/3`), a float operand, `.N()`, a
+  modulus below 2, a non-integer modulus or a list modulus keep their
+  values. The handler is read by the interpreter only: compiled code is
+  unchanged. A patch that replaces `evaluate` through
+  `ce.declare(name, …, { extend: true })` drops the old `evaluateMod`, unless
+  it gives its own.
+
+### Resolved Issues
+
+- **`Gamma(s, z)` at a real `z < 0` is computed in big decimals at the engine
+  precision.** Since #612 it stayed unevaluated above 15 digits. The value is on
+  the principal branch: for a positive integer `s`, `(s − 1)! e⁻ᶻ Σ zᵏ/k!`
+  (DLMF 8.4.8), real and exactly 0 at its roots (`Gamma(2, -1)`); for a
+  non-positive integer `s`, `−Ei(−z) − iπ` and the downward recurrence (DLMF
+  8.4.15); otherwise `Γ(s) − γ(s, z)` (DLMF 8.7.1), with the digits lost to
+  cancellation added to the working precision. `N(Gamma(1/2, -2.5))` at 30
+  digits is `1.77245385090551602729816748334 − 9.87350823887727804137255293439i`.
+  An order past 10 000 or a `z` past the work budget stays unevaluated.
+  Measured against mpmath, every part has at least 29.4 correct digits at 30
+  and 49.4 at 50. `Gamma(a, z0, z1)` with negative points answers too.
+  (#666, contributed by [enumeratio](https://github.com/enumeratio))
+
 ## 0.204.3 _2026-11-28_
 
 ### Breaking Changes

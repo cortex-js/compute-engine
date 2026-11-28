@@ -72,7 +72,7 @@ import {
   resolvedValueDefinition,
 } from '../../boxed-expression/type-guards.js';
 import {
-  isLibraryOperator,
+  isLibraryLowering,
   isShadowedSymbol,
   shadowsLibraryName,
 } from '../../library-shadowing.js';
@@ -714,7 +714,7 @@ function exactRational(e: Expression): [bigint, bigint] | undefined {
     e.isCanonical ||
     !isFunction(e, 'Rational') ||
     e.nops !== 2 ||
-    !isLibraryOperator(e as never, 'Rational') ||
+    !isLibraryLowering(e as never, 'Rational') ||
     hasOwnLowering(e.operator, e.operatorDefinition)
   )
     return undefined;
@@ -1399,7 +1399,7 @@ function lowerOnce(
 
   const isLibrary = (e: Fn) =>
     userBinding(e) === undefined &&
-    isLibraryOperator(e as never, e.operator) &&
+    isLibraryLowering(e as never, e.operator) &&
     handled(e) === undefined;
 
   const isHostBoundary = (e: Fn): boolean =>
@@ -1454,7 +1454,7 @@ function lowerOnce(
     oversized(e);
     const h = e.operator;
     const user = userBinding(e) !== undefined;
-    const library = !user && isLibraryOperator(e as never, h);
+    const library = !user && isLibraryLowering(e as never, h);
     const answer = user ? undefined : handled(e);
     const info: Facts = {
       names: new Set(),
@@ -2700,7 +2700,7 @@ function lowerOnce(
     // A closed form is computed with the library's operators.
     if ((e.operator === 'D' || e.operator === 'Integrate') && facts(e).answered)
       decline(e, `${e.operator} of an operator that a compile handler lowers`);
-    if (!isLibraryOperator(e as never, e.operator)) {
+    if (!isLibraryLowering(e as never, e.operator)) {
       // The raw arm of the constructor of a declared record type
       // (`Fig({…})`): the payload, of that type. Its other calls are calls
       // of a user function (`userBinding()`).
@@ -4434,7 +4434,7 @@ function lowerOnce(
     const library = (y: Expression, name: string, n: number) =>
       isFunction(y, name) &&
       y.nops === n &&
-      isLibraryOperator(y as never, name);
+      isLibraryLowering(y as never, name);
     if (!library(x, 'Add', 2)) return undefined;
     const [s, t] = (x as Fn).ops;
     const k = library(s, 'Negate', 1) ? 0 : library(t, 'Negate', 1) ? 1 : -1;
@@ -4480,7 +4480,7 @@ function lowerOnce(
     if (
       e.nops !== 1 ||
       !isFunction(x, 'Multiply') ||
-      !isLibraryOperator(x as never, 'Multiply')
+      !isLibraryLowering(x as never, 'Multiply')
     )
       return undefined;
     let [p, q] = [1n, 1n];
@@ -8737,7 +8737,7 @@ function lowerOnce(
     const held =
       fields?.length === v.nops
         ? v.ops.map((op, k) => placeEmptyLists(op, fields[k], out))
-        : isLibraryOperator(v as never, 'List')
+        : isLibraryLowering(v as never, 'List')
           ? v.ops.map((op) => placeEmptyLists(op, 'unknown', out))
           : [];
     if (held.includes(true)) out.set(v, null);

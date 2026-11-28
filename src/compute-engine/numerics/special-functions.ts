@@ -2885,6 +2885,221 @@ export function bigIncompleteGammaUpper(
   return usedFraction ? value : bigUpperGammaBySubtraction(ce, s, z, prec);
 }
 
+/** `bigIncompleteGammaUpperNegative` declines above |s| = this order, and
+ *  above the work (terms × digits) that `UPPER_GAMMA_MAX_WORK` allows. */
+const UPPER_GAMMA_NEGATIVE_MAX_ORDER = 10_000;
+
+/** Up to this positive integer order, Γ(n, z) at z < 0 is the exact
+ *  polynomial (n − 1)! Σ_{k<n} zᵏ/k! times e⁻ᶻ, with no cancellation and an
+ *  exact 0 at the roots of the polynomial (Γ(2, −1) = 0). */
+const UPPER_GAMMA_NEGATIVE_POLYNOMIAL_ORDER = 64;
+
+type UpperGammaNegativeResult = {
+  re: BigNum;
+  im: BigNum;
+  lost: number;
+};
+
+const UPPER_GAMMA_NEGATIVE_DECLINED: UpperGammaNegativeResult = {
+  re: BigDecimal.NAN,
+  im: BigDecimal.NAN,
+  lost: Infinity,
+};
+
+/**
+ * Σ_{k≥0} xᵏ / (k!·(s + k)) for x > 0 and s not a non-positive integer
+ * (the series of γ(s, −x) = (−x)ˢ·Σ, DLMF 8.7.1 with 8.2.1), or, with
+ * `s = undefined`, Σ_{k≥1} xᵏ / (k·k!) (the series of Ei, DLMF 6.6.1). Called
+ * inside a guard-digit context. For k + 1 ≥ 2x (and k + s > 0) each term is
+ * at most half of the previous one, so the tail is below the last term: the
+ * loop stops after `GAMMA_CF_CONSECUTIVE` such terms in a row below the
+ * tolerance. `largest` is the decimal magnitude of the largest term (the
+ * terms with k + s < 0 have the other sign). The sum is NaN when the loop
+ * reaches its cap.
+ */
+function bigExponentialSeries(
+  ce: ComputeEngine,
+  s: BigNum | undefined,
+  x: BigNum,
+  prec: number
+): { sum: BigNum; largest: number } {
+  const p = prec;
+  const xNum = x.toNumber();
+  const tol = new BigDecimal(10).pow(-p, prec);
+  const maxTerms =
+    2000 +
+    20 * p +
+    4 * Math.ceil(xNum) +
+    (s !== undefined && s.isNegative() ? Math.ceil(-s.toNumber()) : 0);
+  let power = BigDecimal.ONE; // xᵏ/k!
+  let sum = BigDecimal.ZERO;
+  let largest = -Infinity;
+  let settled = 0;
+  for (let k = s === undefined ? 1 : 0; k < maxTerms; k++) {
+    if ((k & 0xff) === 0) checkDeadline(ce._deadlineFrame);
+    if (k > 0) power = power.mul(x).div(k, prec);
+    const term = power.div(s === undefined ? k : s.add(k, prec), prec);
+    sum = sum.add(term, prec);
+    largest = Math.max(largest, decimalMagnitude(term));
+    const decreasing =
+      k + 1 >= 2 * xNum && (s === undefined || s.add(k).isPositive());
+    settled = decreasing && term.abs().lt(sum.abs().mul(tol)) ? settled + 1 : 0;
+    if (settled >= GAMMA_CF_CONSECUTIVE) return { sum, largest };
+  }
+  return { sum: BigDecimal.NAN, largest };
+}
+
+/** Γ(s, −x) for a positive integer s = n ≤ `UPPER_GAMMA_NEGATIVE_POLYNOMIAL_ORDER`:
+ *  the polynomial in exact arithmetic, then the factor eˣ (DLMF 8.4.8). */
+function bigUpperGammaNegativePolynomial(
+  n: number,
+  x: BigNum,
+  prec: number
+): UpperGammaNegativeResult {
+  const z = x.neg();
+  // Horner on the integer coefficients (n − 1)!/k!
+  const coefficients: bigint[] = [];
+  let c = 1n;
+  for (let k = n - 1; k >= 0; k--) {
+    coefficients[k] = c;
+    c *= BigInt(Math.max(k, 1));
+  }
+  let poly = new BigDecimal(coefficients[n - 1].toString());
+  for (let k = n - 2; k >= 0; k--)
+    poly = poly.mul(z).add(new BigDecimal(coefficients[k].toString()));
+  if (poly.isZero()) return { re: poly, im: BigDecimal.ZERO, lost: 0 };
+  return {
+    re: poly.mul(x.exp(prec)),
+    im: BigDecimal.ZERO,
+    lost: 0,
+  };
+}
+
+/**
+ * Γ(−m, −x) for an integer m ≥ 0 and x > 0. Γ(0, −x) = E₁(−x) =
+ * −Ei(x) − iπ, with Ei from its series (all terms positive), and the
+ * downward recurrence Γ(a − 1, z) = (Γ(a, z) − zᵃ⁻¹ e⁻ᶻ)/(a − 1)
+ * (DLMF 8.8.2) m times: the imaginary part is −π(−1)ᵐ/m!, and the
+ * subtractions in the real part are added up in `lost`.
+ */
+function bigUpperGammaNegativeNonPositiveInteger(
+  ce: ComputeEngine,
+  m: number,
+  x: BigNum,
+  prec: number
+): UpperGammaNegativeResult {
+  const { sum, largest } = bigExponentialSeries(ce, undefined, x, prec);
+  if (sum.isNaN()) return UPPER_GAMMA_NEGATIVE_DECLINED;
+  const lnX = x.ln(prec);
+  const eulerGamma = BigDecimal.eulerGamma(prec);
+  let g = BigDecimal.ZERO.sub(eulerGamma, prec).sub(lnX, prec).sub(sum, prec);
+  if (g.isZero()) return UPPER_GAMMA_NEGATIVE_DECLINED;
+  let im = BigDecimal.pi(prec).neg();
+  let lost = Math.max(
+    0,
+    Math.max(largest, decimalMagnitude(eulerGamma), decimalMagnitude(lnX)) -
+      decimalMagnitude(g)
+  );
+  // zᵃ⁻¹ e⁻ᶻ = (−1)ᵃ⁻¹ xᵃ⁻¹ eˣ, from a = 0: −eˣ/x, then divided by −x
+  let t = x.exp(prec).div(x, prec).neg();
+  for (let a = 0; a > -m; a--) {
+    if ((a & 0xff) === 0) checkDeadline(ce._deadlineFrame);
+    if (a < 0) t = t.div(x.neg(), prec);
+    const difference = g.sub(t, prec);
+    if (difference.isZero()) return UPPER_GAMMA_NEGATIVE_DECLINED;
+    lost += Math.max(
+      0,
+      Math.max(decimalMagnitude(g), decimalMagnitude(t)) -
+        decimalMagnitude(difference)
+    );
+    g = difference.div(a - 1, prec);
+    im = im.div(a - 1, prec);
+  }
+  return { re: g, im, lost };
+}
+
+/**
+ * Γ(s, −x) = Γ(s) − γ(s, −x) for a non-integer s and x > 0, with
+ * γ(s, −x) = (−x)ˢ Σ_{k≥0} xᵏ/(k!(s + k)) and (−x)ˢ = xˢ e^{iπs} on the
+ * principal branch (arg(−x) = π): Re = Γ(s) − xˢ cos(πs)·S and
+ * Im = −xˢ sin(πs)·S. The sum has one sign for s > 0, so the digits lost
+ * are those of Γ(s) against the first term, and for s < 0 those of the
+ * terms with k < −s.
+ */
+function bigUpperGammaNegativeBySeries(
+  ce: ComputeEngine,
+  s: BigNum,
+  x: BigNum,
+  prec: number
+): UpperGammaNegativeResult {
+  const { sum, largest } = bigExponentialSeries(ce, s, x, prec);
+  if (sum.isNaN() || sum.isZero()) return UPPER_GAMMA_NEGATIVE_DECLINED;
+  const xs = s.mul(x.ln(prec)).exp(prec);
+  const cosPi = bigSinPi(s.add(BigDecimal.HALF), prec);
+  const sinPi = bigSinPi(s, prec);
+  const gammaS = bigGamma(ce, s, prec);
+  const scaled = xs.mul(sum);
+  const re = gammaS.sub(scaled.mul(cosPi), prec);
+  const im = scaled.mul(sinPi).neg();
+  if (re.isZero() || (im.isZero() && !sinPi.isZero()))
+    return UPPER_GAMMA_NEGATIVE_DECLINED;
+  const size = decimalMagnitude(xs) + Math.max(largest, decimalMagnitude(sum));
+  const lostRe =
+    Math.max(
+      decimalMagnitude(gammaS),
+      cosPi.isZero() ? -Infinity : size + decimalMagnitude(cosPi)
+    ) - decimalMagnitude(re);
+  const lostIm = im.isZero()
+    ? 0
+    : size + decimalMagnitude(sinPi) - decimalMagnitude(im);
+  return { re, im, lost: Math.max(0, lostRe, lostIm) };
+}
+
+/**
+ * Bignum upper incomplete gamma Γ(s, z) at a real z < 0, on the principal
+ * branch (arg z = π), at the working precision `prec`. The value is complex
+ * unless s is a positive integer; `re` and `im` are each rounded to `prec`
+ * digits. Returns `undefined`, and the caller leaves the call unevaluated,
+ * when a part cannot be vouched for: |s| or |z| past the work budget, a part
+ * that cancels to zero, or the digits lost to cancellation past
+ * `UPPER_GAMMA_MAX_GUARD_FACTOR`.
+ */
+export function bigIncompleteGammaUpperNegative(
+  ce: ComputeEngine,
+  s: BigNum,
+  z: BigNum,
+  prec: number
+): { re: BigNum; im: BigNum } | undefined {
+  if (s.isNaN() || z.isNaN() || !s.isFinite() || !z.isFinite())
+    return undefined;
+  if (!z.isNegative()) return undefined;
+  if (decimalMagnitude(z) < INCOMPLETE_GAMMA_MIN_MAGNITUDE) return undefined;
+  if (s.abs().gt(UPPER_GAMMA_NEGATIVE_MAX_ORDER)) return undefined;
+  const x = z.neg();
+  if (!((4 * x.toNumber() + 2 * prec + 2000) * prec <= UPPER_GAMMA_MAX_WORK))
+    return undefined;
+  const integer = s.isInteger();
+  const order = integer ? s.toNumber() : NaN;
+  let guard = SPECIAL_FN_GUARD;
+  const maxGuard = UPPER_GAMMA_MAX_GUARD_FACTOR * prec + SPECIAL_FN_GUARD;
+  while (guard <= maxGuard) {
+    const working = prec + guard;
+    const r =
+      integer && order >= 1 && order <= UPPER_GAMMA_NEGATIVE_POLYNOMIAL_ORDER
+        ? bigUpperGammaNegativePolynomial(order, x, working)
+        : integer && order <= 0
+          ? bigUpperGammaNegativeNonPositiveInteger(ce, -order, x, working)
+          : bigUpperGammaNegativeBySeries(ce, s, x, working);
+    if (r.re.isNaN()) return undefined;
+    // Keep at least 8 of the guard digits after the loss.
+    if (r.lost <= guard - 8)
+      return { re: r.re.toPrecision(prec), im: r.im.toPrecision(prec) };
+    if (!Number.isFinite(r.lost)) return undefined;
+    guard = Math.ceil(r.lost) + SPECIAL_FN_GUARD;
+  }
+  return undefined;
+}
+
 /** Continued fraction for the regularized incomplete beta (NR betacf, Lentz),
  *  in BigDecimal. Must be called inside the guard-digit context with a,b > 0
  *  and 0 < x < 1; fast for x < (a+1)/(a+b+2), slower beyond it. NaN at the
