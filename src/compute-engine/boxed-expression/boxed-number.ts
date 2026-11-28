@@ -1303,7 +1303,18 @@ export class BoxedNumber
     // Apply the replace on the structural version of the number.
     // This will allow transformations to be applied on ["Rational", 3, 4]
     // for example.
-    return replace(this.structural, rules, options).at(-1)?.value ?? null;
+    const result =
+      replace(this.structural, rules, options).at(-1)?.value ?? null;
+    // A rule whose replacement boxes to this number (`√(-1) → i`, both
+    // `Complex(0, 1)`) changes only the form of the structural subject, which
+    // `replace()` counts as a step. Relative to the number, it is no change.
+    if (
+      isNumber(result) &&
+      result.isCanonical === this.isCanonical &&
+      result.isSame(this)
+    )
+      return null;
+    return result;
   }
   match(
     pattern: string | ExpressionInput,

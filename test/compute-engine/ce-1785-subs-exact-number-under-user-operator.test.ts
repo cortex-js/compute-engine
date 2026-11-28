@@ -69,3 +69,21 @@ describe('CE-1785: a substitution in a scope with a user operator', () => {
     });
   });
 });
+
+// A rule whose two sides box to the same number (`√(-1) → i`, both
+// `Complex(0, 1)`) is no change on that number: `replace()` gives `null`.
+// Since the inherited `subs()` returns the number, such a rewrite differed
+// from the structural subject only in its form, and was reported as a step.
+describe('CE-1785: a rule that rewrites a number to itself', () => {
+  test.each<[unknown, unknown]>([
+    [['Sqrt', -1], 'ImaginaryUnit'],
+    [['Divide', 1, 'ImaginaryUnit'], ['Negate', 'ImaginaryUnit']],
+  ])('%j → %j does not fire', (match, replace) => {
+    const ce = new ComputeEngine();
+    const rules = ce.rules(
+      [{ match: ce.expr(match as never), replace: ce.expr(replace as never) }],
+      { canonical: true }
+    );
+    expect(ce.expr(match as never).replace(rules)).toBeNull();
+  });
+});
