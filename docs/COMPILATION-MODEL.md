@@ -1131,7 +1131,20 @@ Compiled code has no test of a shape: with
 `y: real | tuple<real, real>` and `f := t ↦ 2t`, `f(y)` declines with
 `outside-profile` ("the input y of type real | tuple<real, real>"), and so
 does `Sum(U)` with `U: real | list<real>`. The host compiles one function
-for each shape.
+for each shape. A type that settles no shape is not such a union: at a
+parameter of a function literal that `Apply` applies where it is written, a
+declared type of no settled shape (`any`, `unknown`, `value`, `expression`,
+`broadcastable<T>`, a bare collection, or a collection whose elements have no
+settled shape, as in R3), or a union of such types and tuples
+(`collection<any> | tuple`, the type that the document preparation infers for
+a parameter read as a point), is read as no stated type, and the argument, of
+a shape settled in the same program, gives the shape of the parameter
+(CE-1909). Another union declines: one with a scalar member (`real | list`),
+and one with a collection of a settled element type, as the document
+preparation can write for a parameter that `Mean` reads:
+`Apply((v: collection<number> | value) ↦ Mean(v), p)` declines with `p`
+declared `list<real>`. The engine infers that type for an untyped `v` too,
+and the untyped literal compiles: only a declaration is read as a union.
 
 **R5. The compiler assumes that every value holds its static type.** It
 emits no test of it, for the values of the program and for the values of the

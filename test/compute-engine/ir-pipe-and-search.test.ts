@@ -145,6 +145,9 @@ describe('IR: Pipe', () => {
     ['a call missing its list (`L |> Take(2)`)', ['Pipe', 'L', ['Take', 2]]],
     ['a callback-first call (`L |> Map(f) |> Sum`)', ['Pipe', ['Pipe', 'L', ['Map', ['Function', ['Multiply', '_', 2]]]], 'Sum']],
     ['a closed topic', ['Pipe', 2, 'Sin']],
+    // The literal's signature takes a collection: the interpreter binds the
+    // list whole, and so does the code (CE-1909).
+    ['a list to a literal that binds it whole', ['Pipe', 'L', lambda(['Length', 't'], 't')]],
   ])('%s', (_, json) => {
     check(json);
   });
@@ -162,7 +165,6 @@ describe('IR: Pipe', () => {
   test.each([
     ['a stage that is not applicable here (a free slot in a call)', ['Pipe', 'L', ['Map', ['Multiply', '_', 2]]], /Pipe of a stage that is not/],
     ['a composition', ['Pipe', 'x', ['Compose', 'Sin', 'Cos']], /Pipe of a stage that is not/],
-    ['a literal that binds a list whole', ['Pipe', 'L', lambda(['Length', 't'], 't')], /a list or a tuple argument of Apply/],
   ])('declines %s', (_, json, cause) => {
     expect(failure(() => js(json))).toMatch(cause);
   });

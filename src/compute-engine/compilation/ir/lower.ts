@@ -76,7 +76,11 @@ import {
   isShadowedSymbol,
   shadowsLibraryName,
 } from '../../library-shadowing.js';
-import { literalParamsMap, pipeStageAsCall } from '../../library/core.js';
+import {
+  literalMappedParameters,
+  literalParamsMap,
+  pipeStageAsCall,
+} from '../../library/core.js';
 import { fixedListIntegrals } from '../../library/calculus.js';
 import { colorStringToOklch } from '../../library/colors.js';
 import {
@@ -132,6 +136,7 @@ import {
   handlerAnswer,
   hasOwnLowering,
   hasUnsettledShape,
+  settlesNoShape,
   isUntyped,
   LANE_MISMATCH,
   listedOf,
@@ -2276,11 +2281,13 @@ function lowerOnce(
           choice.op === 'choice' &&
           frame.outs.at(-1) === v &&
           inner.yields.at(-1) === choice.outs.at(-1) &&
-          inner.body.slice(0, -1).every(
-            (i) =>
-              i.k === 'const' ||
-              (i.k === 'op' && rowOfOp(rows, i.op)?.row.effect === 'pure')
-          )
+          inner.body
+            .slice(0, -1)
+            .every(
+              (i) =>
+                i.k === 'const' ||
+                (i.k === 'op' && rowOfOp(rows, i.op)?.row.effect === 'pure')
+            )
         );
       })();
     if (shared && v !== undefined && (b.effects === effects || repeatsChoice)) {
@@ -2694,8 +2701,7 @@ function lowerOnce(
         // The interpreter holds it as `List()`, so it is listed when the
         // literal is held as written (`literalListed()`; CE-1906).
         const empty = e.nops === 0 ? emptyLanes.get(e) : undefined;
-        if (empty != null)
-          return literalListed(e, [], emptyList(e, empty));
+        if (empty != null) return literalListed(e, [], emptyList(e, empty));
         const elements = e.ops.map((op) => value(op)!);
         // (JavaScript only, outside the interval and the bigint modes:
         // `rowLane()` declines elsewhere).
@@ -3835,7 +3841,13 @@ function lowerOnce(
         // The IR type of each typed parameter, from the literal's signature:
         // a scalar, or a list or a tuple of numbers, or on JavaScript a list
         // of lists of two lengths not stated (`rowsInput()`). A union
-        // (`real | list<real>`) and another type decline.
+        // (`real | list<real>`) and another type decline. A type that
+        // settles no shape (`settlesNoShape()`: `collection<any> | tuple`,
+        // the type that the document preparation writes for a parameter
+        // read as a point) is no declaration of a shape: the parameter is
+        // one of no stated type,
+        // as the parameter of a user function (`define()`), and its
+        // argument gives the shape (CE-1909).
         const sig = f.type.type;
         const declared = f.ops.slice(1).map((p, i) => {
           if (!isFunction(p, 'Typed')) return undefined;
@@ -3843,6 +3855,7 @@ function lowerOnce(
             typeof sig === 'object' && sig.kind === 'signature'
               ? sig.args?.[i]?.type
               : undefined;
+          if (t !== undefined && settlesNoShape(t)) return undefined;
           const ir =
             t === undefined
               ? undefined
@@ -3862,11 +3875,15 @@ function lowerOnce(
         // of numbers: `Map(f, list)` of one parameter, and of several the
         // lists zipped and each scalar bound whole in every cell. A
         // parameter declared a list or a tuple binds its argument whole, as
-        // the interpreter does: the argument must have that type. Another
-        // list or tuple argument declines: the interpreter maps a nested list
-        // to its leaves, a tuple is atomic, and a signature that takes a
-        // collection binds the argument whole.
+        // the interpreter does: the argument must have that type. At a
+        // parameter where the interpreter maps (`mapsAt`), another list or
+        // tuple argument declines (a nested list maps to its leaves, a tuple
+        // is atomic); at another parameter of no stated type, the argument
+        // binds whole (below).
         const maps = literalParamsMap(sig);
+        // The parameters at which the interpreter maps a list argument
+        // (`literalMappedParameters()`); at another, it binds it whole.
+        const mapsAt = literalMappedParameters(sig) ?? (() => false);
         const whole = declared.map((d) => (d?.shape.length ?? 0) > 0);
         const values = args.map((a, i) => {
           const d = declared[i];
@@ -3948,6 +3965,15 @@ function lowerOnce(
             )
               notDeclared('');
             return v;
+          }
+          // A list or a tuple argument at a parameter of no stated type
+          // where the interpreter does not map: bound whole, of the shape of
+          // the argument, as at a parameter of a user function whose body
+          // reads it as a list or a point (`define()`). The body is lowered
+          // with that value.
+          if (d === undefined && t.shape.length > 0 && !mapsAt(i)) {
+            whole[i] = true;
+            return raw;
           }
           const flat =
             t.shape.length === 1 &&

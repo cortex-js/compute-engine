@@ -3524,10 +3524,22 @@ list argument that is a lazy collection with a draw (`Map(u ↦ u + Random(), P)
 is read by the interpreter one element at a time, each after the cell before it,
 where the code builds the argument first: the frame has several draw sites and
 carries the `seeded-draw-order` warning (as for one parameter before). Another
-list or tuple argument declines: a nested list (the interpreter maps to the
-leaves), a tuple and a list of points (atomic), a list of booleans or of complex
-numbers, and a literal whose signature takes a collection
-(`(a, b) ↦ Length(a) + b`, which binds every argument whole). A typed parameter
+list or tuple argument of such a literal declines: a nested list (the
+interpreter maps to the leaves), a tuple and a list of points (atomic), a list
+of booleans or of complex numbers. A literal whose signature is not scalar
+binds a list or a tuple argument at a parameter of no stated type where the
+interpreter does not map (`literalMappedParameters()`) whole, with the shape of
+the argument, as the interpreter does (CE-1909); at an `unknown` parameter
+beside one that binds whole, a list argument still declines:
+`Apply((a, b) ↦ Length(a) + b, P, t)` is `4` at `P = [-1, 2, 5]`, `t = 1`, and
+`Apply(v ↦ PointList(v.x + 1, 2 v.y), PointList(p, q))` is a list of points. A
+declared type that settles no shape (`settlesNoShape()`: a type of no settled
+shape as R3 of `docs/COMPILATION-MODEL.md` lists them, or a union of such types
+and tuples, such as
+`collection<any> | tuple`, which the document preparation writes for a
+parameter read as a point) is read as no stated type; another union (`real |
+list`, `collection<number> | value`) still declines (R4 of
+`docs/COMPILATION-MODEL.md`). A typed parameter
 has the type that it declares, which settles the shape of its argument: a
 parameter declared a list or a tuple of numbers binds its argument whole, as the
 interpreter does, and the argument must have that type (a list of the declared
@@ -3550,8 +3562,8 @@ declines an argument of another lane. Another argument declines (`L` of no
 stated length at a parameter `list<real^3>`, which the interpreter reads whole
 with no check; a tuple at a tuple parameter whose type it does not prove; a
 complex at `real`), and so does a declared type that is not a scalar, a list or
-a tuple of numbers (a union, `real | list<real>`). A list at an untyped
-parameter still declines unless the literal maps over it. A parameter with a
+a tuple of numbers (a union of settled shapes, `real | list<real>`). A
+parameter with a
 default and another count of arguments decline too; `Apply(g, x)` of a name is
 the call `g(x)` in the canonical form. `Apply(Derivative(g, n…), a1, …)` is the
 application of the function literal that the engine gives for the derivative at

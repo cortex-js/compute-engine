@@ -153,6 +153,27 @@ export function hasUnsettledShape(t: Type): boolean {
   return false;
 }
 
+/** Whether the declared type `t` of a parameter settles no shape: an
+ *  unsettled type (`hasUnsettledShape()`), or a union of such types and
+ *  tuples with at least one of the first (`collection<any> | tuple`, the
+ *  type that the document preparation infers for a parameter read as a
+ *  point). A union with a scalar or a settled list member
+ *  (`real | list`, `real | list<real>`) is a declared union of shapes,
+ *  which declines (R4). */
+export function settlesNoShape(t: Type): boolean {
+  if (hasUnsettledShape(t)) return true;
+  const r = resolveTypeAlias(t);
+  if (typeof r !== 'object' || r.kind !== 'union') return false;
+  const tuple = (u: Type) => {
+    const v = resolveTypeAlias(u);
+    return v === 'tuple' || (typeof v === 'object' && v.kind === 'tuple');
+  };
+  return (
+    r.types.some((u) => hasUnsettledShape(u)) &&
+    r.types.every((u) => hasUnsettledShape(u) || tuple(u))
+  );
+}
+
 /** Whether `t` is `unknown` or `any`, after the transparent aliases that
  *  name it (`resolveTypeAlias()`). */
 export function isUntyped(t: Type): boolean {

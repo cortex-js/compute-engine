@@ -6,8 +6,8 @@
  * mapped over, as the interpreter maps it; a scalar argument of the
  * parameter's lane, or a real at an integer parameter, binds even when its
  * type does not prove the parameter's (CE-1503); an argument of another
- * shape declines. A list argument at an untyped parameter
- * still declines: the interpreter may map the function over it.
+ * shape declines. A list argument at an untyped parameter of a signature
+ * that the interpreter does not map binds whole (CE-1909).
  *
  * Each case states the interpreter's value, which the test checks, and the
  * value of the code on JavaScript (or a decline).
@@ -81,6 +81,9 @@ describe('Apply of a function literal with typed parameters', () => {
     // The interpreter does not check the elements of a list against the
     // type of its parameter (CE-1483): the list keeps its lane.
     ['a list of reals at a list<integer> parameter', ['Apply', ['Function', ['At', 'H', 1], typed('H', 'list<integer>')], 'L'], '2.5', 2.5, { L: [2.5, 3, 4] }],
+    // A list at an untyped parameter that the body reads by index: the
+    // signature is not scalar, so the interpreter binds it whole (CE-1909).
+    ['the witness with untyped parameters', ['Apply', ['Function', ['Block', ['Add', ['At', 'H', 1], 'n']], 'H', 'n'], 'L', 5], '7', 7],
     ['a tuple parameter binds the point whole', ['Apply', ['Function', ['Add', ['At', 'p', 1], ['At', 'p', 2]], typed('p', 'tuple<real, real>')], ['Tuple', 1, 'x']], '1.5', 1.5],
     // (b) A typed scalar parameter of a scalar signature maps over a list.
     ['a real parameter over a list', ['Apply', ['Function', ['Multiply', 2, 'k'], typed('k', 'real')], 'L'], '[4,6,8]', [4, 6, 8]],
@@ -115,9 +118,6 @@ describe('Apply of a function literal with typed parameters', () => {
     // The canonical form gives the error, of the static type `error`.
     ['a point at a list parameter', ['Apply', ['Function', ['At', 'H', 1], typed('H', 'list<real>')], ['Tuple', 'x', 1]], 'Apply((H) => At(H, 1), Error(ErrorCode("incompatible-type", "list<real>", "tuple<real, integer>"), (0.5, 1)))', /static type error/],
     ['a union type', ['Apply', ['Function', ['Add', ['At', 'H', 1], 'k'], typed('H', 'list<real>'), typed('k', 'real | list<real>')], 'L', 1], '3.5', /a parameter of Apply whose type is not a scalar, a list or a tuple of numbers/],
-    // A list at an untyped parameter: the interpreter binds it whole here,
-    // and may map over it elsewhere; the code declines.
-    ['the witness with untyped parameters', ['Apply', ['Function', ['Block', ['Add', ['At', 'H', 1], 'n']], 'H', 'n'], 'L', 5], '7.5', /a list or a tuple argument of Apply \(the interpreter may map the function over it\)/],
   ])('%s declines', (_, json, interpreted, cause) => {
     const ce = engine();
     const e = ce.box(json as never);

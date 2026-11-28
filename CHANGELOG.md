@@ -20,6 +20,16 @@
   interpreter's value: 15 for `A = [1.5, 2, 3, 4, 5, 6, 7, 8, 9.25]`
   (`A[2] + A[5] + A[8]`). A list of a stated length compiled already
   (CE-1908).
+- **Compiled code applies a function literal to a list of points.** With
+  `p` and `q` declared `list<real>`,
+  `Apply(v ↦ PointList(v.x + 1, 2 v.y), PointList(p, q))` declined ("a list
+  or a tuple argument of Apply"). It now compiles and gives the interpreter's
+  value: the points `(2, 6)` and `(3, 8)` for `p = [1, 2]` and `q = [3, 4]`.
+  The interpreter binds such an argument whole when the body reads the
+  parameter as a list or a point, and so does the compiled code.
+  A parameter that a document gets as `collection<any> | tuple` (the type
+  inferred for a parameter read as a point) compiles in the same way: it
+  declined as a declared union (CE-1909).
 
 ### Performance
 

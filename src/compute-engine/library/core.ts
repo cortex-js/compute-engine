@@ -1427,7 +1427,7 @@ function applyLiteralMaps(
  * `Apply(q, [1, 2, 6], [1, 2])` is `[3, 6]`, one call per element of `k`,
  * and `L` is bound whole in each.
  */
-function literalMappedParameters(
+export function literalMappedParameters(
   sig: Type
 ): ((i: number) => boolean) | undefined {
   if (literalParamsMap(sig)) return () => true;

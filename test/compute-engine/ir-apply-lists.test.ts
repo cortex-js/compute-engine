@@ -251,10 +251,15 @@ describe('IR profile, batch G18: Apply of a literal over a list (CE-1344)', () =
     ['a nested list (maps to the leaves: [[2, 2.3], [4, 5]])', ['Apply', ['Function', ['Add', 'k', 1], 'k'], ['List', ['List', 1, 'x'], ['List', 3, 4]]], /a list or a tuple argument of Apply/],
     ['a tuple (atomic: an incompatible-type error)', ['Apply', ['Function', ['Add', 'k', 1], 'k'], ['Tuple', 1, 'x']], /a list or a tuple argument of Apply/],
     ['a list of points (a point is atomic: a list of errors)', ['Apply', ['Function', ['Add', 'k', 1], 'k'], ['List', ['Tuple', 1, 'x'], ['Tuple', 3, 4]]], /a list or a tuple argument of Apply/],
-    ['a literal whose parameter is a collection by its signature (bound whole: 2)', ['Apply', ['Function', ['Length', 'k'], 'k'], ['List', 1, 'x']], /a list or a tuple argument of Apply/],
     ['a list of booleans (maps: [False, True])', ['Apply', ['Function', ['Not', 'k'], 'k'], ['List', 'True', ['Less', 'x', 0]]], /a list or a tuple argument of Apply/],
   ])('%s declines', (_, json, cause) => {
     expect(failure(() => js(json))).toMatch(cause);
+  });
+
+  // A literal whose parameter is a collection by its signature: the
+  // interpreter binds the list whole (CE-1909).
+  test('a literal whose parameter is a collection by its signature: bound whole', () => {
+    check(['Apply', ['Function', ['Length', 'k'], 'k'], ['List', 1, 'x']], [{ x: 0.5 }]);
   });
 });
 

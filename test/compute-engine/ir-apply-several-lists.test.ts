@@ -298,7 +298,7 @@ describe('the declines', () => {
   test('a literal whose signature takes a collection: the list bound whole', () => {
     const json = apply(F(['Add', ['Length', 'a'], 'b'], 'a', 'b'), 'P', 't');
     expect(interpret(ce, box(json), { P: [-1, 2, 5], t: 1 })).toBe(4);
-    expect(failure(() => js(json))).toMatch(MESSAGE);
+    expect(js(json).run!({ P: [-1, 2, 5], t: 1 } as never)).toBe(4);
   });
 
   test('on GLSL, a list of a run-time length', () => {
