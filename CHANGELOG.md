@@ -1,3 +1,17 @@
+## [Unreleased]
+
+### Improvements
+
+- **JavaScript compiles a figure with options, then transformed.** With
+  Tycho's drawing prelude, `polygon(pts, {fill -> "red"}).rotate(t)` and
+  `circle(c, r, {fill -> "red"}).rotate(t)` declined ("the parameter x of
+  figureBox is not a scalar (any)"): the loop that sets the options wrote
+  the figure to a local, and the local lost the value of its `kind` field,
+  so the `match` on the kind compiled every arm. A record local now keeps
+  the value of a string field that every write copies
+  (`out = U(out.kind, …)`); a write of another value still compiles, and
+  the field is then read at run time.
+
 ## 0.204.3 _2026-11-28_
 
 ### Breaking Changes

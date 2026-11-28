@@ -4139,12 +4139,13 @@ tuple, the discharges of `absent()`.
   which the later statements write with whole values only (`rebuiltOnly()`), is
   a local of the lane `record` (`Binding.record`): a loop carries it as a value
   of `looseRecord()` of the type of its first value (a carried first length for
-  each list field, no constant of a string field), and `assign()` takes a value
-  of a subtype of that type (`isSubType()`); `branch()` joins two arms as it
-  joins two records (`joinType()`). A write of a field, a parallel write, and a
-  value whose fields have other lanes or ranks decline. A stated nominal tuple
-  type or declared record type (`let out: Figure = fig`) is proven by the static
-  type of the value.
+  each list field; the constant of a string field stays, and a write of another
+  value lowers the program again without it, `WidenList`), and `assign()` takes
+  a value of a subtype of that type (`isSubType()`); `branch()` joins two arms
+  as it joins two records (`joinType()`). A write of a field, a parallel write,
+  and a value whose fields have other lanes or ranks decline. A stated nominal
+  tuple type or declared record type (`let out: Figure = fig`) is proven by the
+  static type of the value.
 - **Dictionaries** (CE-1771). A dictionary literal `{w -> t, fill -> "red"}` is
   a record of its values, in the order of its keys (`dictionary()` of
   `lower-records.ts`): its `names` are the keys and its `head` is `Dictionary`

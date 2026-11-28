@@ -537,19 +537,24 @@ export const hostCallOp = (k: number) => `call.host${k}`;
 /** The type of a record local that statements write with whole values
  *  (CE-1919): `t`, the type of its first value, with a carried first axis
  *  for each list field that can carry one (no tuple mark at that axis,
- *  `widens()` of `ir.ts`) and no constant of a string field, at every
- *  depth. A value written is of a subtype of it (`isSubType()`), whose list
- *  fields can have other lengths and whose string fields other values. */
-function looseRecord(t: FieldType): FieldType {
+ *  `widens()` of `ir.ts`), at every depth. A value written is of a subtype
+ *  of it (`isSubType()`), whose list fields can have other lengths. The
+ *  constant of a string field (the `kind` of a figure, which each write
+ *  copies) stays, unless `strings` is set: a write of another value then
+ *  lowers the program again with it set (`WidenList`). */
+function looseRecord(t: FieldType, strings: boolean): FieldType {
   // A statement can write a value of another type there; a value of
   // another static type too (`IRType.proven`, CE-1924).
   if (t.opaque !== undefined) return mixedField(t);
   const { constant: _, proven: _q, ...rest } = t;
-  if (t.fields === undefined) return rest;
+  if (t.fields === undefined)
+    return strings || t.constant === undefined
+      ? rest
+      : { ...rest, constant: t.constant };
   return {
     ...rest,
     fields: t.fields.map((f, k) => {
-      const g = looseRecord(f);
+      const g = looseRecord(f, strings);
       return f.shape.length > 0 && t.marks?.[k] !== 0 && g.opaque !== 'mixed'
         ? { ...g, shape: ['carried', ...f.shape.slice(1)] }
         : g;
@@ -6849,7 +6854,8 @@ function lowerOnce(
             v,
             lane: 'record',
             role: 'local',
-            record: looseRecord(type(v)),
+            record: looseRecord(type(v), wide.has(s)),
+            recordDeclaration: s,
           });
           return void (result = v);
         }
@@ -8138,6 +8144,27 @@ function lowerOnce(
     // type that a loop carries, of the same nominal type and fields.
     if (binding.record !== undefined) {
       const x = value(e.ops[1]);
+      // A string field of another value: the lowering again drops the
+      // constants of the local's string fields from its declaration.
+      if (
+        x !== undefined &&
+        binding.recordDeclaration !== undefined &&
+        !wide.has(binding.recordDeclaration) &&
+        !isSubType(type(x), binding.record, constant) &&
+        isSubType(
+          type(x),
+          looseRecord(binding.record, true) as FieldType,
+          constant
+        )
+      )
+        try {
+          decline(
+            e,
+            'a record of another string field written to a local that holds a record'
+          );
+        } catch (d) {
+          throw new WidenList(d as Decline, binding.recordDeclaration);
+        }
       if (x === undefined || !isSubType(type(x), binding.record, constant))
         decline(
           e,
