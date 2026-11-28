@@ -8,6 +8,7 @@ import type {
   BoxedValueDefinition,
   Expression,
   FunctionInterface,
+  IComputeEngine,
   Scope,
 } from '../../global-types.js';
 import type {
@@ -23,8 +24,10 @@ import {
   resolveTypeAlias,
 } from '../../../common/type/utils.js';
 import {
+  isDictionary,
   isExpression,
   isFunction,
+  isSymbol,
 } from '../../boxed-expression/type-guards.js';
 import type { Assigned, Builder, IRType, Lane, Region, V } from './ir.js';
 import type { OperatorRow } from './operators.js';
@@ -711,4 +714,35 @@ export function userBinding(
     : (e.valueDefinition?.value as Expression | undefined);
   if (key === undefined || !isFunction(value, 'Function')) return undefined;
   return { key, literal: value as Fn };
+}
+
+/** Whether every name of `x`, operator names included, holds the
+ *  definition of the system scope (a literal, `True`, `Pi`, `[]`, `{->}`):
+ *  such a value reads no name of the program, so it can be inlined (a
+ *  default of a protocol member, or of a function literal: `call()` of
+ *  `lower-functions.ts`). */
+export function readsNoProgramName(ce: IComputeEngine, x: Expression): boolean {
+  const system = ce.contextStack[0]?.lexicalScope.bindings;
+  const walk = (x: Expression): boolean => {
+    if (isSymbol(x)) {
+      const d = system?.get(x.symbol);
+      return (
+        d !== undefined &&
+        (('value' in d && d.value === x.valueDefinition) ||
+          ('operator' in d && d.operator === x.operatorDefinition))
+      );
+    }
+    if (isFunction(x)) {
+      const d = system?.get(x.operator);
+      return (
+        d !== undefined &&
+        'operator' in d &&
+        d.operator === x.operatorDefinition &&
+        x.ops.every(walk)
+      );
+    }
+    if (isDictionary(x)) return x.values.every(walk);
+    return true;
+  };
+  return walk(x);
 }

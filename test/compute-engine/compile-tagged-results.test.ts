@@ -180,6 +180,48 @@ describe('host-declared tagged JavaScript results', () => {
     }
   });
 
+  test('a field read from a list of strings at a run-time index', () => {
+    // A record that reaches only the result holds the read; an absent
+    // string is `undefined` there, as in any result.
+    const ce = engine();
+    ce.declare('names', 'list<string>');
+    ce.declare('i', 'integer');
+    const label: MathJsonExpression = [
+      'Dictionary',
+      ['Tuple', "'__tag'", "'label'"],
+      ['Tuple', "'text'", ['At', 'names', 'i']],
+    ];
+    for (const expr of [label, ['List', label, label]] as MathJsonExpression[])
+      for (const optimize of [true, false]) {
+        const result = compile(ce.expr(expr), {
+          fallback: false,
+          optimize,
+        } as any);
+        for (const i of [1, 2]) {
+          const expected = ce
+            .expr(expr)
+            .subs({ names: ce.expr(['List', "'a'", "'b'"]), i: ce.number(i) })
+            .evaluate();
+          const text = String.fromCharCode(96 + i);
+          const one = { __tag: 'label', text };
+          expect(expected.toString()).toContain(`"${text}"`);
+          expect(result.run!({ names: ['a', 'b'], i })).toEqual(
+            expr === label ? one : [one, one]
+          );
+        }
+      }
+  });
+
+  test('a field of rank 2 of a run-time inner length declines', () => {
+    // A tagged result is an ordinary record: an inner length of a field
+    // that is not a constant declines, as in any record (README, "Records").
+    const ce = engine();
+    ce.declare('M', 'matrix<real>');
+    expect(() =>
+      compile(ce.expr(['HostPath', 'M']), { fallback: false })
+    ).toThrow(/a run-time length of an inner axis/);
+  });
+
   test.each(['glsl', 'interval-js'] as const)('declines on %s', (to) => {
     const ce = engine();
     expect(() =>

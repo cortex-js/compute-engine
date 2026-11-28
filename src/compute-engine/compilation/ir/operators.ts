@@ -31,6 +31,7 @@ import {
   elementType,
   mapLengths,
   widensTo,
+  withShape,
   type IRType,
   type Lane,
   type Length,
@@ -713,10 +714,10 @@ const real: RegionRow['results'] = (_, ys) =>
     ? [{ lane: R, shape: [] }]
     : undefined;
 
-const listOf = (element: IRType, n: Length): IRType => ({
-  lane: element.lane,
-  shape: [n, ...element.shape],
-});
+/** The list of the length `n` of `element` (of a record, the list of
+ *  records of its record type, `withShape()`). */
+const listOf = (element: IRType, n: Length): IRType =>
+  withShape(element, [n, ...element.shape]);
 
 /** `t` is a flat list of reals or integers: a row of a value of the lane
  *  `rows`. */
@@ -835,16 +836,6 @@ export const REGION_ROWS: readonly RegionRow[] = deepFreeze([
       ys[0].shape.length === 0 &&
       rowElement(ys[1])
         ? [{ lane: 'rows', shape: [] }]
-        : undefined,
-  },
-  {
-    op: 'records.build',
-    effect: 'may-fail',
-    args: [I],
-    params: [I],
-    results: (_, ys) =>
-      ys.length === 1 && ys[0].lane === 'record' && ys[0].resultRecord
-        ? [{ lane: 'rows', shape: [], resultRecord: true }]
         : undefined,
   },
   // `Flatten(g)` of a value `g` of the lane `rows`, of

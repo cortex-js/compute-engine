@@ -21,8 +21,9 @@ const epsil = await Promise.all(
 // The record cases: a field read in a loop (a record made and passed to a
 // function at each pass), a named tuple input read field by field, a
 // record result, and a field of a carried length read in a loop (`geom`,
-// the length of the list `g`). A checkout that declines a case runs its
-// `alternative`, the same values with no record (`sumList(g)`).
+// the length of the list `g`), and a list of records built and read (20
+// records, each read in a loop). A checkout that declines a case runs its
+// `alternative`, the same values with no record (`sumList(g)`, two lists).
 const RECORDS = `
   type P = tuple<x: real, y: real>
   function dot(q: P) { q.x * q.y }
@@ -34,6 +35,8 @@ const RECORDS = `
   function loopCarried(t: real, g: list<real>) { let s = 0; for k in 1..20 { s = s + sumGeom(T("a", g)) * (t + k) }; s }
   function sumList(h: list<real>) { let s = 0; for i in 1..length(h) { s = s + h[i] * i }; s }
   function loopList(t: real, g: list<real>) { let s = 0; for k in 1..20 { s = s + sumList(g) * (t + k) }; s }
+  function loopRecords(t: real) { let L = [P(t + k, k) for k in 1..20]; let s = 0; for i in 1..length(L) { s = s + L[i].x * L[i].y }; s }
+  function loopLists(t: real) { let X = [t + k for k in 1..20]; let Y = [k for k in 1..20]; let s = 0; for i in 1..length(X) { s = s + X[i] * Y[i] }; s }
 `;
 const cases = [
   ['compound square', ['Power', ['Add', 'x', 1], 2], 100000],
@@ -68,6 +71,13 @@ const cases = [
     10000,
     RECORDS,
     ['loopList', 'x', 'g'],
+  ],
+  [
+    'list of records built and read',
+    ['loopRecords', 'x'],
+    10000,
+    RECORDS,
+    ['loopLists', 'x'],
   ],
 ];
 let checksum = 0;

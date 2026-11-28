@@ -545,10 +545,9 @@ function compileIr(
   let strings = entry.results.some((t) => t.lane === 'string');
   // A list of rows of different lengths as the result: no batch either;
   // nor a record input or result (README, "Records").
-  const rows = entry.results.some((t) => t.lane === 'rows' && !t.resultRecord);
-  let records = entry.results.some(
-    (t) => t.lane === 'record' || t.resultRecord
-  );
+  const rows = entry.results.some((t) => t.lane === 'rows');
+  // A list of records is of the lane `record` too.
+  let records = entry.results.some((t) => t.lane === 'record');
   entry.paramNames.forEach((name, k) => {
     const t = p.types[entry.body.params[k]];
     const i = argumentIndex(entry, k);

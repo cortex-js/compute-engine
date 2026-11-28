@@ -106,9 +106,6 @@ export type IRType = {
   readonly marks?: readonly (number | undefined)[];
   readonly nominal?: string;
   readonly names?: readonly string[];
-  /** A JavaScript result object (record) or a collection of those objects
-   *  (rows). These values are produced only on the entry's return path. */
-  readonly resultRecord?: true;
   /** A field of the lane `string` whose value is known when the code is
    *  emitted (CE-1652, step 4c; `README.md`, "Records"): two records whose
    *  constant fields differ are two record types. Only in `fields`: the
@@ -501,12 +498,35 @@ export function lengthValues(t: IRType): V[] {
  *  (`notCarried()`). */
 export function mapLengths(t: IRType, f: (v: V) => V): IRType {
   if (t.shape.every((n) => typeof n === 'number')) return t;
+  return withShape(
+    t,
+    t.shape.map((n) => (typeof n === 'number' ? n : { v: f(notCarried(n).v) }))
+  );
+}
+
+/** The type `t` with the shape `shape`: of the lane `record`, with the
+ *  record type of its elements (`fields`, `marks`, `nominal`, `names`,
+ *  `head`), so that a list of records and its element are of one record
+ *  type (README, "Records"). */
+export function withShape(t: IRType, shape: readonly Length[]): IRType {
+  if (t.lane !== 'record') return { lane: t.lane, shape };
+  const { fields, marks, nominal, names, head } = t;
   return {
     lane: t.lane,
-    shape: t.shape.map((n) =>
-      typeof n === 'number' ? n : { v: f(notCarried(n).v) }
-    ),
+    shape,
+    ...(fields === undefined ? {} : { fields }),
+    ...(marks === undefined ? {} : { marks }),
+    ...(nominal === undefined ? {} : { nominal }),
+    ...(names === undefined ? {} : { names }),
+    ...(head === undefined ? {} : { head }),
   };
+}
+
+/** A value of the type `t` is one record: of the lane `record` and of no
+ *  list axis. A value of the lane `record` and the shape `[n]` is a list of
+ *  records of one record type (README, "Records"). */
+export function isRecord(t: FieldType): boolean {
+  return t.lane === 'record' && t.shape.length === 0;
 }
 
 /** A value of the lane `a` is read as is where `b` is read. A real read
@@ -597,7 +617,6 @@ export function sameFields(
   b: FieldType,
   constants: 'same' | 'sub' | 'loose' | 'join' = 'same'
 ): boolean {
-  if (a.resultRecord !== b.resultRecord) return false;
   // Two arrays are one type when their cell types are (an array type is
   // invariant in its cell type).
   if (a.lane === 'array' || b.lane === 'array')
@@ -652,8 +671,14 @@ function commonConstants<T extends FieldType>(a: T, b: FieldType): T {
         : { constant }),
     } as T;
   }
+  // A list of records: its first axis widens as for any list field.
+  const shape =
+    a.shape.length > 0 && !sameShape(a.shape, b.shape)
+      ? (['carried', ...a.shape.slice(1)] as const)
+      : a.shape;
   return {
     ...a,
+    shape,
     fields: a.fields?.map((f, k) => commonConstants(f, b.fields![k])),
   };
 }
@@ -717,7 +742,7 @@ export function elementIndex(
 
 /** The type of an element of a list of type `t`. */
 export function elementType(t: IRType): IRType {
-  return { lane: t.lane, shape: t.shape.slice(1) };
+  return withShape(t, t.shape.slice(1));
 }
 
 export function typeToString(
@@ -730,16 +755,20 @@ export function typeToString(
   if (t.constant !== undefined) return JSON.stringify(t.constant);
   if (t.array !== undefined) return `array<${t.array.cell}>`;
   if (t.engine !== undefined) return `function value ${t.engine}`;
-  // A record: its fields, named or not.
+  // A record: its fields, named or not; a list of records, the record
+  // and its lengths (`Fig[3]`).
   if (t.lane === 'record')
-    return `${t.resultRecord ? 'result ' : ''}${t.nominal ?? t.head ?? 'record'}(${(
-      t.fields ?? []
-    )
+    return `${t.nominal ?? t.head ?? 'record'}(${(t.fields ?? [])
       .map(
         (f, j) =>
           `${t.names === undefined ? '' : `${t.names[j]}: `}${typeToString(f, t.marks?.[j] ?? (axis === false ? false : -1))}`
       )
-      .join(', ')})`;
+      .join(', ')})${t.shape
+      .map(
+        (n) =>
+          `[${typeof n === 'number' ? n : axis !== false ? '' : n === 'carried' ? '*' : `v${n.v}`}]`
+      )
+      .join('')}`;
   // The tuple mark's axis is the number of list axes outside the tuple.
   const k = axis === false ? -1 : axis;
   return t.shape.reduceRight<string>(

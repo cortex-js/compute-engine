@@ -1227,15 +1227,14 @@ export function listLowering(cx: Lowering) {
 
   /** A build (with `filter`, a filter) over `s` of `body`, which reads the
    *  element as `name`, or of `body(x, k)` for the element `x` at the index
-   *  `k`. A tagged result uses the record build even at a constant length. */
+   *  `k`. */
   const over = (
     e: Fn,
     s: Source,
     name: string,
     body: Expression | ((x: V, k: V) => V),
     filter: boolean,
-    site: Expression,
-    resultRecords = false
+    site: Expression
   ): V => {
     const element = (x: V, k: V) =>
       typeof body === 'function' ? body(x, k) : cx.value(body)!;
@@ -1248,14 +1247,7 @@ export function listLowering(cx: Lowering) {
     // With run-time lengths, past the cap the build keeps its loop.
     const full =
       cx.runtimeLengths && unrolled + (n ?? 0) > SCALARIZE_LIMIT ** 2;
-    if (
-      !filter &&
-      !resultRecords &&
-      n !== undefined &&
-      n >= 1 &&
-      n <= most &&
-      !full
-    ) {
+    if (!filter && n !== undefined && n >= 1 && n <= most && !full) {
       const before = unrolled;
       unrolled += n;
       if (unrolled > SCALARIZE_LIMIT ** 2)
@@ -1292,15 +1284,13 @@ export function listLowering(cx: Lowering) {
     let width: V | undefined;
     const outs = cx.region(
       () =>
-        resultRecords
-          ? 'records.build'
-          : rows === undefined
-            ? filter
-              ? 'filter'
-              : 'build'
-            : filter
-              ? 'rows.filter'
-              : 'rows.build',
+        rows === undefined
+          ? filter
+            ? 'filter'
+            : 'build'
+          : filter
+            ? 'rows.filter'
+            : 'rows.build',
       [s.length],
       [k],
       () =>
@@ -1309,7 +1299,6 @@ export function listLowering(cx: Lowering) {
           frame.names.set(name, { v: x, role: 'index' });
           const v = element(x, k);
           if (!filter) {
-            if (resultRecords) return [v];
             if (runTimeRow(v)) {
               rows = rowLane(e, v);
               width = (type(v).shape[0] as { v: V }).v;
@@ -1548,9 +1537,9 @@ export function listLowering(cx: Lowering) {
    *  `Element(i, L, cond)`: a filter of `L` by `cond`, then a build of
    *  `body` over the elements kept. The interpreter's list is lazy, so an
    *  effect declines (`README.md`, "Lists"). */
-  const comprehension = (e: Fn, record?: () => V): V => {
+  const comprehension = (e: Fn): V => {
     const c = e.ops[1];
-    if (e.nops > 2) return product(e, record);
+    if (e.nops > 2) return product(e);
     if (
       e.nops !== 2 ||
       !isFunction(c, 'Element') ||
@@ -1573,15 +1562,7 @@ export function listLowering(cx: Lowering) {
       s =
         lane === undefined ? listSource(kept) : rowsOf(e, kept, lane).source();
     }
-    const v = over(
-      e,
-      s,
-      name,
-      record ?? e.ops[0],
-      false,
-      e,
-      record !== undefined
-    );
+    const v = over(e, s, name, e.ops[0], false, e);
     if (b.changes() > before)
       decline(
         e,
@@ -1630,7 +1611,7 @@ export function listLowering(cx: Lowering) {
    *  product of the lengths, whose index `k` gives the index of the clause
    *  `j` as `Floor(k / s_j) mod n_j`, `s_j` the product of the lengths after
    *  it (exact for a total below 2^53). */
-  const product = (e: Fn, record?: () => V): V => {
+  const product = (e: Fn): V => {
     const names: string[] = [];
     const before = b.changes();
     const sources = e.ops.slice(1).map((c) => {
@@ -1654,7 +1635,7 @@ export function listLowering(cx: Lowering) {
     );
     const k = b.newValue(scalarType('integer'));
     const [v] = cx.region(
-      record === undefined ? 'build' : 'records.build',
+      'build',
       [mul(sources[0].length, strides[0])],
       [k],
       () =>
@@ -1666,7 +1647,6 @@ export function listLowering(cx: Lowering) {
             const i = j === 0 ? q : cx.apply(e, 'Mod', [q, s.length]);
             frame.names.set(names[j], { v: s.at(i), role: 'index' });
           });
-          if (record !== undefined) return [record()];
           const y = cx.value(e.ops[0])!;
           if (lengthValues(type(y)).length > 0)
             decline(e, 'a list of lists of run-time length');

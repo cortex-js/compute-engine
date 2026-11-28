@@ -47,6 +47,7 @@ import {
   isSymbol,
 } from '../../boxed-expression/type-guards.js';
 import {
+  isRecord,
   isSubLane,
   sameArrayCells,
   scalarType,
@@ -503,7 +504,7 @@ export function arrayLowering(
     // it (`records.field()`), so no tuple is allocated.
     const nominal = cells.tuple.tag !== 'Tuple';
     const parts: V[] | undefined = nominal
-      ? t.lane === 'record' &&
+      ? isRecord(t) &&
         t.nominal === cells.tuple.tag &&
         (cells.tuple.names === undefined ||
           t.names?.join('\u0000') === cells.tuple.names.join('\u0000')) &&
@@ -770,7 +771,7 @@ export function arrayLowering(
         const vt = type(v);
         const record =
           cells.tuple !== undefined &&
-          vt.lane === 'record' &&
+          isRecord(vt) &&
           vt.nominal === cells.tuple.tag;
         if (!record && (vt.shape.length > 0 || !isSubLane(vt.lane, 'real')))
           decline(

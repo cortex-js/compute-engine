@@ -3912,14 +3912,6 @@ program whose last statement is a definition is `Nothing` and declines.
 
 ## Records
 
-A tagged dictionary at the JavaScript entry result is printed directly as an
-object (CE-1904). The dictionary can come from an operator's `compile` handler.
-Its `__tag` is a literal string, and each field carries its rank without
-exporting its length values from the region that builds it. A literal list of
-these records and a comprehension with a tagged body return a list of objects.
-The comprehension uses `records.build` so varying field lengths stay local to
-the member.
-
 `lower-records.ts` (CE-1652, step 2; JavaScript only). A record is a value of
 the lane `record` and the shape `[]` whose fields each have a settled shape
 (`docs/COMPILATION-MODEL.md`, "Shapes are settled at compile time"). Its IR type
@@ -4009,9 +4001,8 @@ tuple, the discharges of `absent()`.
   with records whose field lengths are 2 and 3 lower two functions (the lane
   key holds the type). An inner length that is not a constant declines (a
   matrix of run-time size in a field declared `list`), and so does a field
-  of the lane `rows`. A list of records (an element
-  of a build, a filter or a random frame) declines, and so does a record in a
-  local that a statement writes.
+  of the lane `rows`. A record made in a random frame declines, and so does a
+  record in a local that a statement writes.
 - **Reading a record.** `Field(r, name)` of a record of a named tuple type and
   `At(r, k)` (`First`, `Last`) of a constant `k` in range give the field (the
   operation `field`, with the field's tuple mark; on JavaScript `field` of the
@@ -4032,6 +4023,58 @@ tuple, the discharges of `absent()`.
   arithmetic, `Equal`, `Length` (but of the arguments of a rest parameter,
   below), `Map`. A field of a carried length is read with its length first
   (above).
+- **Lists of records** (stage 3 of
+  `docs/plans/2026-11-27-records-objects-and-held-lengths.md`; JavaScript
+  only). A record is a value of the lane `record` and the shape `[]`
+  (`isRecord()` of `ir.ts`); a value of the lane `record` and the shape `[n]`
+  is a list of records of one record type, whose IR type holds the record
+  type of its elements (`fields`, `marks`, `nominal`, `names`, `head`), and
+  `n` is an ordinary `Length`. On JavaScript it is the array of the records.
+  Every helper that adds or removes an outer axis keeps the record type
+  (`withShape()`, `elementType()`, `mapLengths()` of `ir.ts`, `listOf()` of
+  `operators.ts`, the yields of `region()` of `lower.ts`), and
+  `typeToString()` spells a list of records `P(k: integer, x: real)[3]`. A
+  build or a filter whose element is a record is a list of records (its
+  yields join as an `if` does, so the field lengths of the elements widen to
+  a carried length), and so is a literal list of records whose types join
+  (`fitsList()` of `lower-records.ts`, `list()` of `lower.ts`):
+  `[circle(1, 2), poly(g)]` is one list of `Fig`s. A literal list of records
+  that do not join (a `Polygon` and a `Marker`) stays a record with no
+  names, the array of the records; so does a `Tuple` of records. Its
+  readers: `At` of any index and the element read of a loop over it
+  (`elem`), `Length`, a `Comprehension` or a `Map` over it, the list
+  operations that move elements (`First`, `Last`, `Take`, `Drop`, `Rest`,
+  `Reverse`, `Join`, `Filter`), a parameter of no stated type or of type
+  `any` (`held()` of `lower-functions.ts`: the parameter is a list of the
+  record type, of its stated length or of a run-time length, which the lane
+  key holds), the result of a user function, the entry result, and a field
+  of a record (its first length carried where it is not a constant:
+  `Group([leaf])` of `type Group = tuple<parts: list>`). A call
+  of a function whose parameter is a record (`area(figs)` with `area(f:
+  Fig)`) maps over the list, as the interpreter does (`mapOver()`); a list
+  of records at a parameter of a record type that does not map declines.
+  A function of the host takes a literal list of records (its `Listed` is
+  the `Listed` of each record, `literalListed()` of `lower.ts`), as the
+  `List` of the records (`boxValue()` of `print-js.ts`); a list that the
+  interpreter can hold as a lazy collection (a comprehension) declines there,
+  as a list of numbers does. Every other reader declines: an operator whose
+  row takes a number, and a list of lists of records (`verify()` refuses
+  rank 2 or more, `region()` declines its build). The verifier checks each element of
+  the `list` of a list of records against the record type. A record is never
+  absent in compiled code: out of range, `At` of a list of records gives a
+  value that no discharge reads as absent, so a lowering with an `At` of a
+  list of records whose index is not proven in range (a constant in range of
+  a constant length) and a discharge of a record (`IsMissing`, `Coalesce`,
+  `AssertPresent`) declines (`absentRecord()` of `lower.ts`), checked as each
+  is lowered, before a pass folds the read away. The value of such an `At`
+  that no discharge reads is unspecified, as an absent operand is. The
+  tagged results of CE-1904 (a dictionary whose `__tag` is a string, often
+  from the `compile` handler of a host) are ordinary dictionaries, readable
+  by the program: such a dictionary with the keys `re` and `im` declines
+  (the result convention would read it as a complex number), and its empty
+  `List()` is the empty list of reals (`dictionary()`). A field of rank 2
+  whose inner length is a run-time value declines there too, as in any
+  record; the return-only tagged result admitted one.
 - **User functions.** A function whose result type is not a scalar (a named
   tuple type, `list<real | string>`) returns the record of its body; a body that
   is not a record declines as before ("the result of f is not a scalar"), and a
@@ -4311,10 +4354,12 @@ tuple, the discharges of `absent()`.
   code holds it: a record of a named tuple type is an object keyed by its field
   names (`f(t) = P(cos(t), sin(t))` gives `{x: 0.54, y: 0.84}` at `t = 1`), a
   `nothing` field is `null`, a colour keeps its run-time object, and a record
-  with no names is an array. Only a record that has a field that can hold a
+  with no names is an array, and a list of records the array of its records.
+  Only a record that has a field that can hold a
   complex value is rewritten once, at the root (`record` of the `Syntax`,
   from the IR type of the result): that field follows the result convention
-  (`{value: 2}`, not `{value: {re: 2, im: 0}}`), at any depth. A result is
+  (`{value: 2}`, not `{value: {re: 2, im: 0}}`), at any depth, and of a list
+  of records in each element (`.map(…)`). A result is
   read-only, as a list is. A record result has no batch: `broadcast()` and
   `broadcastAsync()` throw.
 

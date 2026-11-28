@@ -27,6 +27,7 @@ import {
   type Lowering,
 } from './lower-context.js';
 import {
+  isRecord,
   isSubLane,
   scalarType,
   typeToString as irTypeToString,
@@ -78,7 +79,7 @@ function valueTypeOf(
   t: FieldType,
   mark: number | undefined
 ): Type | undefined {
-  if (t.lane === 'record') {
+  if (isRecord(t)) {
     if (t.nominal !== undefined) {
       const ce = e.engine as unknown as IComputeEngine;
       const r = ce._typeResolver.resolve(t.nominal) as
@@ -108,7 +109,8 @@ function valueTypeOf(
     const [n, ...rest] = t.shape;
     const inner = valueTypeOf(
       e,
-      { lane: t.lane, shape: rest },
+      // A list of records: of the record type of its elements.
+      { ...t, shape: rest },
       mark === undefined || mark === 0 ? undefined : mark - 1
     );
     if (inner === undefined) return undefined;
@@ -288,7 +290,7 @@ export function matchLowering(cx: Lowering, records: RecordReads) {
         : undefined;
     const r = read === undefined ? undefined : cx.value(read.ops[0])!;
     const v =
-      read === undefined || r === undefined || cx.type(r).lane !== 'record'
+      read === undefined || r === undefined || !isRecord(cx.type(r))
         ? undefined
         : read.operator === 'Field'
           ? records.named(
@@ -442,6 +444,8 @@ export function matchLowering(cx: Lowering, records: RecordReads) {
         // several lanes is not told apart here.
         if (t.lane === 'record' && t.names === undefined)
           decline(e, 'a Tuple pattern of a Match on a record with no names');
+        if (t.lane === 'record' && t.shape.length > 0)
+          decline(e, 'a Tuple pattern of a Match on a list of records');
         if (!point || t.shape[0] !== a.names.length) continue;
         const values = a.names.map((_, k) =>
           b.op('elem', [s, b.constant(k, 'integer')], scalarType(t.lane))

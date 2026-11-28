@@ -70,6 +70,7 @@ import {
 import {
   argsOf,
   entryOf,
+  isRecord,
   lengthValues,
   mapDirectArgs,
   outsOf,
@@ -151,7 +152,8 @@ export const TARGETS: Readonly<Record<Target, Profile>> = deepFreeze({
     frames: true,
     recursion: true,
     elementwise: true,
-    scalarLanes: ['rows', 'record', 'nothing', 'array'],
+    // A list of records is of the lane `record` (README, "Records").
+    scalarLanes: ['rows', 'nothing', 'array'],
     resultOnly: Object.fromEntries(
       ['rows.chunk', 'rows.partition', 'rows.pair'].map((op) => [
         op,
@@ -349,7 +351,7 @@ function nothingRefusal(p: Program): Refusal | undefined {
   };
   const walk = (r: Region): Refusal | undefined => {
     for (const i of r.body) {
-      const field = i.k === 'list' && p.types[i.out].lane === 'record';
+      const field = i.k === 'list' && isRecord(p.types[i.out]);
       const call = i.k === 'call' || (i.k === 'op' && isHostCallOp(i.op));
       if (
         !field &&
@@ -416,6 +418,40 @@ function stringListRefusal(p: Program): Refusal | undefined {
       regionsOf(i).forEach(index);
     });
   p.functions.forEach((f) => index(f.body));
+  // The records that the entry makes in its own body and that reach only its
+  // results, directly or as elements of such records: a string read there
+  // is the result's field, which the result convention gives as `undefined`
+  // where it is absent (README, "Records").
+  const resultOnly = new Set<V>();
+  {
+    const uses = new Map<V, Instr[]>();
+    const note = (r: Region): void =>
+      r.body.forEach((i) => {
+        argsOf(i).forEach((v) => {
+          if (p.types[v].lane !== 'record') return;
+          const by = uses.get(v);
+          if (by === undefined) uses.set(v, [i]);
+          else by.push(i);
+        });
+        regionsOf(i).forEach(note);
+      });
+    p.functions.forEach((f) => note(f.body));
+    const yielded = new Set(entry.body.yields);
+    const outer = (r: Region): V[] =>
+      r.body.flatMap((i) => regionsOf(i).flatMap((x) => [...x.yields, ...outer(x)]));
+    const inner = new Set(outer(entry.body));
+    for (const i of [...entry.body.body].reverse()) {
+      if (i.k !== 'list' || p.types[i.out].lane !== 'record') continue;
+      const v = i.out;
+      const by = uses.get(v) ?? [];
+      if (
+        !inner.has(v) &&
+        (yielded.has(v) || by.length > 0) &&
+        by.every((u) => u.k === 'list' && resultOnly.has(u.out))
+      )
+        resultOnly.add(v);
+    }
+  }
   const walk = (r: Region, guard?: V): Refusal | undefined => {
     if (r !== entry.body && r.params.some(listOf)) return refusal;
     for (const i of r.body) {
@@ -432,12 +468,11 @@ function stringListRefusal(p: Program): Refusal | undefined {
         const head = i.op.startsWith('text.joinl') ? 'StringJoin' : 'At';
         return { head, cause: `${head} of a list that is not of strings` };
       }
-      const resultField = i.k === 'list' && p.types[i.out].resultRecord;
       // A field of a record, and an argument of a function of the host,
       // hold the list as it is: the host receives its `List` (`boxValue()`
       // of `print-js.ts`; CE-1906).
       const held =
-        (i.k === 'list' && p.types[i.out].lane === 'record') ||
+        (i.k === 'list' && isRecord(p.types[i.out])) ||
         (i.k === 'op' && isHostCallOp(i.op));
       if (!held && argsOf(i).some((v, k) => listOf(v) && !(read && k === 0)))
         return refusal;
@@ -445,7 +480,7 @@ function stringListRefusal(p: Program): Refusal | undefined {
         argsOf(i).some(
           (v, k) =>
             reads.has(v) &&
-            !resultField &&
+            !(i.k === 'list' && resultOnly.has(i.out)) &&
             !(i.k === 'op' && i.op === 'text.isundef') &&
             !(i.k === 'op' && i.op === 'text.present' && k === 1)
         )

@@ -3235,15 +3235,6 @@ returned by `run()` compiles.
 
 ### Records
 
-The JavaScript entry can return a dictionary with a literal string
-`__tag`, a literal list of these dictionaries, or a comprehension with
-such a body. An operator's `compile` handler can supply the dictionary.
-The compiler emits the declared keys and values, including the tag. Each
-field has a settled shape and list lengths can vary at run time, including
-zero. An array of tagged results preserves member order and can hold
-different tags and fields when a literal list declares them. Nested record
-fields, engine arrays, and numeric batching are outside this profile.
-
 A value of a named tuple type of the program is a record on JavaScript
 (`compilation/ir/README.md`, "Records"; CE-1652): each field has a settled
 shape, from its declared type, or, for a field typed `any`, `list` or
@@ -3291,9 +3282,8 @@ that read is not a test of a type. These decline:
 - a field whose inner length is not a constant (a matrix of run-time
   size `M: matrix<real>` in a field declared `list`), and a field of the
   lane `rows` (`(chunk(L, 2), t)`, whose rows can have two lengths);
-- a record in a local that a statement writes, a record that is an element
-  of a build, a filter or a random frame (`[T("a", g) for k in 1..3]`), and
-  the arguments of a rest parameter of a run-time length;
+- a record in a local that a statement writes, a record made in a random
+  frame, and the arguments of a rest parameter of a run-time length;
 - a record or a list of several lanes given to a parameter declared `list`:
   Tycho's `label` (the geometry `[x, y, text]`) and `group` (a list of
   figures) decline at `figureOf(kind: string, geom: list)`;
@@ -3302,6 +3292,43 @@ that read is not a test of a type. These decline:
 A dictionary literal is a record of its keys, and a key of the value
 `Nothing` is a field that is `null`: `{a -> t, alpha -> nothing}` gives
 `{ a: 2, alpha: null }` at `t = 2`, as the interpreter keeps the key.
+
+**Lists of records** (stage 3 of the plan above). A list of records of one
+record type is a value of the program on JavaScript, the array of its
+records at `run()`. With `type P = tuple<k: integer, x: real>`,
+`[P(k, t * k) for k in 1..3]` gives
+`[{ k: 1, x: 2 }, { k: 2, x: 4 }, { k: 3, x: 6 }]` at `t = 2`. A build, a
+filter and a literal list of records of one type make one; the elements
+join as the arms of an `if` do, so `[circle(1, 2), poly(g)]` of Tycho's
+`Figure`, whose `geom` fields have two lengths, is one list. A literal
+list of records of several types (a `Polygon` and a `Marker`) is a record
+with no names, the array of its records. A program reads a list of records
+with `At` (also at a run-time index), a loop over it (a `Comprehension`, a
+`Map`, a `Filter`), `Length`, the list operations that move elements
+(`First`, `Last`, `Take`, `Drop`, `Rest`, `Reverse`, `Join`), a parameter
+of no stated type or of type `any` (bound whole), the result of a user
+function or of the entry, and a field of a record (`{a -> figs(n)}`). A call `area(figs)` of `function area(f: Fig)`
+maps over the list, as the interpreter does. A complex field of each record
+of the result follows the result convention. The tagged dictionaries of a
+host's `compile` handler (a string `__tag`, CE-1904) are ordinary
+dictionaries: the program can read them (`At(HostPath(…), "coordinates")`),
+one with the keys `re` and `im` declines (the result convention would read
+it as a complex number), and its empty `List()` is the empty list of reals.
+These decline:
+
+- `IsMissing`, `Coalesce` and `AssertPresent` of a record in a program that
+  reads an element of a list of records at an index that can be out of
+  range (`isMissing(figs(n)[i])`): out of range the interpreter's value is
+  `Missing`, and compiled code does not read a record as absent. The value
+  of such an element that no discharge reads is unspecified;
+- a list of lists of records (`[figs(k) for k in 1..n]`), and a list of
+  records given to a function of the host other than a literal list (the interpreter can hold
+  a comprehension as a lazy collection; `draw([P(1, t), P(2, t)])` gives the
+  host the `List` of the records);
+- every other operator on a list of records (`Sort`, `Max`, arithmetic);
+- a field of rank 2 or more whose inner length is a run-time value, also in
+  a tagged dictionary, which the return-only tagged result of CE-1904
+  admitted; no test and no handler of Tycho used one.
 
 **Declared record types** (CE-1914). A value of a record type that
 `type Fig = record{…}` declares compiles on JavaScript when its constructor

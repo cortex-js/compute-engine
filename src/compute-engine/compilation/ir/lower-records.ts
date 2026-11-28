@@ -20,6 +20,7 @@ import { unfoldAliasOnDescent } from '../../../common/type/utils.js';
 import {
   isDictionary,
   isFunction,
+  isString,
   isSymbol,
 } from '../../boxed-expression/type-guards.js';
 import type { DictionaryInterface, Expression } from '../../global-types.js';
@@ -40,6 +41,7 @@ import { arrayCells } from './lower-arrays.js';
 import { inputType, tupleAxis, tupleOrInputType } from './lower-functions.js';
 import {
   elementIndex,
+  isRecord,
   isSubType,
   fieldValueType,
   isSubLane,
@@ -252,8 +254,7 @@ export function recordLowering(
     values: V[],
     nominal?: { nominal?: string; names?: readonly string[] },
     fields: (IRType | undefined)[] = [],
-    head?: IRType['head'],
-    resultRecord = false
+    head?: IRType['head']
   ): V => {
     // A record with names is an object at run time (README, "Records"),
     // where `"__proto__"` sets the prototype instead of a key.
@@ -269,14 +270,10 @@ export function recordLowering(
       const t = fields[k] ?? type(v);
       if (t.lane === 'rows')
         decline(e, 'a record with a field of lists of rows of two lengths');
-      // An output object keeps the rank of each field. Its source value
-      // holds the lengths, which can be local to a comprehension.
-      const shape: FieldLength[] = resultRecord
-        ? t.shape.map(() => 0)
-        : t.shape.map((n) =>
-            typeof n === 'number' ? n : (cx.constant(n.v) ?? n)
-          );
-      if (!resultRecord && typeof shape[0] === 'object') {
+      const shape: FieldLength[] = t.shape.map((n) =>
+        typeof n === 'number' ? n : (cx.constant(n.v) ?? n)
+      );
+      if (typeof shape[0] === 'object') {
         // A tuple has a static length.
         if (tuples.get(v) === 0)
           decline(
@@ -285,7 +282,7 @@ export function recordLowering(
           );
         shape[0] = 'carried';
       }
-      if (!resultRecord && shape.some((n) => typeof n === 'object'))
+      if (shape.some((n) => typeof n === 'object'))
         decline(
           e,
           'a record with a field of lists of a run-time length (a run-time length of an inner axis)'
@@ -310,7 +307,6 @@ export function recordLowering(
       ...(nominal?.nominal === undefined ? {} : { nominal: nominal.nominal }),
       ...(nominal?.names === undefined ? {} : { names: nominal.names }),
       ...(head === undefined ? {} : { head }),
-      ...(resultRecord ? { resultRecord: true } : {}),
     });
     parts.set(v, values);
     cx.listed.set(
@@ -332,8 +328,12 @@ export function recordLowering(
       t = joinType(t, type(v));
       if (t === undefined) return false;
     }
+    // Records of one record type make a list of records (README,
+    // "Records"), not a `Tuple` of them.
     return (
-      t.lane !== 'record' && t.lane !== 'nothing' && !lengthValues(t).length
+      (t.lane !== 'record' || (!tuple && t.shape.length === 0)) &&
+      t.lane !== 'nothing' &&
+      !lengthValues(t).length
     );
   };
 
@@ -479,14 +479,15 @@ export function recordLowering(
    *  and whose head is `Dictionary` (`IRType.head`). The keys of a
    *  dictionary are strings, so each one is known when the code is emitted.
    *  A read of a key (`d.k`, `d["k"]`) is the field of that name; a key
-   *  that the literal does not have declines. */
-  const dictionary = (
-    e: Expression & DictionaryInterface,
-    resultRecord = false
-  ): V => {
+   *  that the literal does not have declines. A tagged dictionary (a
+   *  string `__tag`, the form of a host's handler, CE-1904) with the keys
+   *  `re` and `im` declines, as the result convention would read it as a
+   *  complex number, and its empty `List()` is the empty list of reals. */
+  const dictionary = (e: Expression & DictionaryInterface): V => {
     if (!javascript)
       decline(e, 'a dictionary, a record: records compile on javascript only');
-    if (resultRecord && e.hasKey('re') && e.hasKey('im'))
+    const tagged = isString(e.get('__tag'));
+    if (tagged && e.hasKey('re') && e.hasKey('im'))
       decline(
         e,
         'a tagged result with fields re and im, reserved for complex results'
@@ -496,22 +497,11 @@ export function recordLowering(
       // field is of the lane `nothing`, as a field of a named tuple.
       if (isSymbol(x, 'Nothing'))
         return b.op('nothing', [], { lane: 'nothing', shape: [] });
-      if (
-        resultRecord &&
-        isFunction(x, 'List') &&
-        x.nops === 0 &&
-        cx.isLibrary(x)
-      )
+      if (tagged && isFunction(x, 'List') && x.nops === 0 && cx.isLibrary(x))
         return cx.emptyList(x, 'real');
-      const v = cx.value(x)!;
-      if (
-        resultRecord &&
-        (type(v).lane === 'record' || type(v).lane === 'array')
-      )
-        decline(x, 'a record or engine array in a tagged result field');
-      return v;
+      return cx.value(x)!;
     });
-    return make(e, values, { names: e.keys }, [], 'Dictionary', resultRecord);
+    return make(e, values, { names: e.keys }, [], 'Dictionary');
   };
 
   /** The value of the declared record type `d` (`DeclaredRecord`) whose
@@ -533,11 +523,7 @@ export function recordLowering(
     if (def.kind === 'tuple') return declaredTuple(e, payload, v, d, def);
     const t = type(v);
     const what = `a value of the type ${d.nominal}`;
-    if (
-      t.lane !== 'record' ||
-      t.head !== 'Dictionary' ||
-      t.nominal !== undefined
-    )
+    if (!isRecord(t) || t.head !== 'Dictionary' || t.nominal !== undefined)
       decline(e, `${what} whose payload is not a dictionary`);
     const keys = Object.keys(def.elements);
     const names = t.names!;
@@ -605,7 +591,7 @@ export function recordLowering(
       pt.kind !== 'tuple' ||
       pt.elements.length !== n
         ? undefined
-        : t.lane === 'record' &&
+        : isRecord(t) &&
             t.names === undefined &&
             t.nominal === undefined &&
             t.head !== 'Dictionary' &&
@@ -745,8 +731,13 @@ export function recordLowering(
    *  type or of a dictionary. */
   const named = (e: Expression, r: V, name: string | undefined): V => {
     const t = type(r);
-    if (t.lane !== 'record')
-      decline(e, 'Field of a value that is not a record');
+    if (!isRecord(t))
+      decline(
+        e,
+        t.lane === 'record'
+          ? 'Field of a list of records'
+          : 'Field of a value that is not a record'
+      );
     const k = name === undefined ? -1 : (t.names?.indexOf(name) ?? -1);
     if (k < 0)
       decline(

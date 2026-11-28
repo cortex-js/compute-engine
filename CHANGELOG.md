@@ -2,6 +2,24 @@
 
 ### Improvements
 
+- **JavaScript compiles a list of records.** With
+  `type P = tuple<k: integer, x: real>`, `[P(k, t * k) for k in 1..3]`
+  declined ("a record made in a build, a filter or a random frame"). It now
+  gives `[{ k: 1, x: 2 }, { k: 2, x: 4 }, { k: 3, x: 6 }]` at `t = 2`. A
+  filter of records and a literal list of records of one type compile too,
+  also of figures whose list fields have different lengths
+  (`[circle(1, 2), poly(g)]`). The program reads the list with `figs[i]`,
+  `length(figs)`, a loop or a `map` over it, passes it to a function and
+  returns it; `area(figs)` of `function area(f: Fig)` maps over the list,
+  as the interpreter does, and a host function receives a literal list of
+  records. A record can hold a list of records in a field.
+  `isMissing(figs[i])`, `figs[i] ?? f0` and `figs[i]?!` decline where `i`
+  can be out of range, and so does a list of lists of records.
+  The tagged result of a host's `compile` handler (a dictionary with a
+  string `__tag`) is now an ordinary record that the program can read
+  (`At(HostPath(Take(coords, n)), "coordinates")`); one with a field of
+  rank 2 whose inner length is known only when the code runs (`HostPath(M)`
+  of `M: matrix<real>`) now declines, as in any record.
 - **JavaScript compiles a call of a function literal bound to a name that
   leaves out an argument with a default.** With
   `let withOpts = (n: integer, opts: dictionary = {->}) => n + 1`,

@@ -42,6 +42,7 @@ import {
 import {
   argumentIndex,
   entryOf,
+  isRecord,
   loopPasses,
   recursiveFunctions,
   regionsOf,
@@ -196,10 +197,6 @@ const builds = (z: Ints, count: Wrap): Syntax['regions'] => {
       open: open(out, n, k, false),
       close: ([y]) => [`  ${out}[${toNumber(k)}] = ${y};`, '}'],
     }),
-    'records.build': ({ outs: [out], args: [n], params: [k] }) => ({
-      open: open(out, n, k, false),
-      close: ([y]) => [`  ${out}[${toNumber(k)}] = ${y};`, '}'],
-    }),
     'rows.filter': ({ outs: [out], args: [n], params: [k] }) => ({
       open: open(out, n, k, true),
       close: ([keep, y]) => [`  if (${keep}) ${out}.push(${y});`, '}'],
@@ -261,11 +258,15 @@ function fieldOf(record: string, k: number, t: FieldType): string {
  *  `value`, when a field of a record in `t` can hold a complex value: the
  *  same record (an object for a record with names, an array for one with
  *  none) with the result convention (`_SYS.ir.normalize`) applied to that
- *  field, which the boundary does not apply inside an object. `undefined`
- *  when no field can hold one: the record is the result as it is. */
+ *  field, which the boundary does not apply inside an object; of a list of
+ *  records, the array of those records. `undefined` when no field can hold
+ *  one: the record is the result as it is. */
 function recordResult(value: string, t: FieldType): string | undefined {
-  if (t.lane !== 'record' || t.resultRecord || !holdsComplex(t))
-    return undefined;
+  if (t.lane !== 'record' || !holdsComplex(t)) return undefined;
+  // A list of records (of rank 1, `verify.ts`), also in a field: each
+  // record.
+  if (t.shape.length > 0)
+    return `${value}.map((_e) => (${recordResult('_e', { ...t, shape: [] })}))`;
   const fields = (t.fields ?? []).map((f, k) => {
     const x = fieldOf(value, k, t);
     return (
@@ -637,16 +638,11 @@ export const JS: Syntax = deepFreeze({
   width: (list) => `(${list}.length === 0 ? 0 : ${list}[0].length)`,
   part: (tuple, index) => `${tuple}[${index}]`,
   // A record with names is an object of its fields in their order, one
-  // with none the array of its fields (README, "Records"). A tagged result
-  // applies the result convention to a complex field where it is made.
+  // with none the array of its fields, and a list of records the array of
+  // the records (README, "Records").
   list: (elements, t) =>
-    t.lane === 'record' && t.names !== undefined
-      ? `{ ${t.names
-          .map((name, k) => {
-            const value = elements[k];
-            return `${key(name)}: ${t.resultRecord && holdsComplex(t.fields![k]) ? `_SYS.ir.normalize(${value})` : value}`;
-          })
-          .join(', ')} }`
+    isRecord(t) && t.names !== undefined
+      ? `{ ${t.names.map((name, k) => `${key(name)}: ${elements[k]}`).join(', ')} }`
       : `[${elements.join(', ')}]`,
   field: fieldOf,
   // An array of the length, filled in index order by a `for` loop: an
@@ -1001,7 +997,7 @@ function recordField(t: FieldType, x: unknown, k: number): unknown {
 }
 
 /** Whether a value of the IR type `t` holds an array of the engine: an
- *  array, or a record with such a field. */
+ *  array, or a record (or a list of records) with such a field. */
 function holdsArray(t: FieldType): boolean {
   return (
     t.lane === 'array' ||
@@ -1014,6 +1010,11 @@ function holdsArray(t: FieldType): boolean {
 function syncValue(t: FieldType, x: unknown): void {
   if (t.lane === 'array') return syncArray(x);
   if (t.lane !== 'record') return;
+  if (t.shape.length > 0) {
+    const element = { ...t, shape: t.shape.slice(1) };
+    for (const y of x as readonly unknown[]) syncValue(element, y);
+    return;
+  }
   (t.fields ?? []).forEach((f, k) => syncValue(f, recordField(t, x, k)));
 }
 
@@ -1120,7 +1121,7 @@ function boxValue(
 ): Expression {
   // An array of the engine: the same reference.
   if (t.lane === 'array') return x as Expression;
-  if (t.lane === 'record') {
+  if (isRecord(t)) {
     const fields = (t.fields ?? []).map((f, k) =>
       boxValue(ce, f, t.marks?.[k], recordField(t, x, k))
     );
@@ -1139,7 +1140,8 @@ function boxValue(
     return ce.function(t.nominal ?? t.head!, fields);
   }
   if (t.shape.length > 0) {
-    const inner: FieldType = { lane: t.lane, shape: t.shape.slice(1) };
+    // The element of a list of records is of its record type.
+    const inner: FieldType = { ...t, shape: t.shape.slice(1) };
     const m = mark === undefined || mark === 0 ? undefined : mark - 1;
     return ce.function(
       mark === 0 ? 'Tuple' : 'List',

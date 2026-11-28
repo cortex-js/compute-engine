@@ -370,12 +370,9 @@ describe('a record declines', () => {
       /At of a record at an index that is not a constant/
     ));
 
-  test('a list of records', () =>
-    expectDeclines(
-      ce,
-      ['many', 't'],
-      /a record made in a build|a list of records/
-    ));
+  // A list of records compiles on JavaScript (`compile-records-lists.test.ts`).
+  test('a list of records on GLSL', () =>
+    expectDeclines(ce, ['many', 't'], /record/, 'glsl'));
 
   test('a Tuple pattern on a record with no names', () =>
     expectDeclines(

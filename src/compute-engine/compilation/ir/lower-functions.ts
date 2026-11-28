@@ -31,6 +31,7 @@ import {
   isSymbol,
 } from '../../boxed-expression/type-guards.js';
 import {
+  isRecord,
   isSubLane,
   isSubType,
   sameArrayCells,
@@ -39,6 +40,7 @@ import {
   typeToString,
   type IRFunction,
   type IRType,
+  withShape,
   type Lane,
   type Length,
   type V,
@@ -60,9 +62,9 @@ import {
   type Fn,
   type Listed,
   type Lowering,
+  readsNoProgramName,
   userBinding,
 } from './lower-context.js';
-import { readsNoProgramName } from './lower-protocols.js';
 import {
   broadcastableParamSlots,
   paramsAreScalar,
@@ -853,7 +855,11 @@ export function functionLowering(
         // A parameter that holds the type of its argument: one function
         // per type, a record by its nominal type and each field.
         const h = held(p, args?.[i], ops?.[i], name && `${name}#${i}`);
-        if (h !== undefined) return `{${typeToString(h)}}`;
+        // A list of records by its record type and its stated length.
+        if (h !== undefined)
+          return h.lane === 'record' && h.shape.length > 0
+            ? `{${typeToString(withShape(h, []))}[${typeof h.shape[0] === 'number' ? h.shape[0] : ''}]}`
+            : `{${typeToString(h)}}`;
         // A point, or a flat list that binds whole, at a parameter that
         // takes the shape of its argument (`define()`): one function per
         // shape, beside the one of a scalar (CE-1652, step 4b).
@@ -913,7 +919,7 @@ export function functionLowering(
     // literal (CE-1911), which the code reads by its keys; another record
     // declines.
     if ('dictionary' in p && p.dictionary) {
-      if (t.lane !== 'record' || t.head !== 'Dictionary')
+      if (!isRecord(t) || t.head !== 'Dictionary')
         decline(
           op ?? cx.root,
           `an argument of type ${typeToString(t)} for a parameter of a dictionary type (only a dictionary literal compiles there)`
@@ -1071,6 +1077,23 @@ export function functionLowering(
             e.ops[i] ?? e,
             `an argument of ${e.operator} for the parameter ${names[i]} of type ${nominal.name} that is ${h.nominal === undefined ? 'a record of no named type' : `a record of the type ${h.nominal}`}`
           );
+        // A list of records (README, "Records") at a parameter of no
+        // stated type or of type `any`, which binds it whole: of its stated
+        // length, or of a run-time length; `type` is the type of its
+        // records.
+        if (h.lane === 'record' && h.shape.length > 0) {
+          if (typeof nominal === 'object')
+            decline(
+              e.ops[i] ?? e,
+              `a list of records given to the parameter ${names[i]} of ${e.operator}, of type ${nominal.name}`
+            );
+          const n = h.shape[0];
+          return {
+            lane: h.lane,
+            shape: [typeof n === 'number' ? n : 'run-time'],
+            type: withShape(h, []),
+          } as UserFunction['params'][number];
+        }
         return { lane: h.lane, shape: [], type: h };
       }
       if (complexAt(declared, args?.[i]))
@@ -1173,8 +1196,13 @@ export function functionLowering(
       );
       // A string of a known value: the parameter is that value
       // (`cx.holdKnown()`); its type does not hold it.
+      // A list of records: of the record type `type` and of that shape.
       const { constant, ...paramType } =
-        'type' in t && t.type !== undefined ? t.type : { lane: t.lane, shape };
+        'type' in t && t.type !== undefined
+          ? t.shape.length > 0
+            ? withShape(t.type, shape)
+            : t.type
+          : { lane: t.lane, shape };
       const v = param(ir, names[i], paramType);
       if (constant !== undefined)
         cx.holdKnown(v, constant, `${e.operator}#${i}`);
@@ -1351,7 +1379,11 @@ export function functionLowering(
         // A result that is not a scalar: a record, of the nominal type of
         // the result type when it is one.
         if (record) {
-          if (t.lane !== 'record')
+          // A list of records where a list type is declared only.
+          if (
+            t.lane !== 'record' ||
+            (t.shape.length > 0 && !isSubtype(r!, 'list'))
+          )
             scalarOf(literal, r!, `the result of ${e.operator}`);
           const nominal = tupleBody(r!) && (r as TypeReference).name;
           if (nominal !== undefined && t.nominal !== nominal)
@@ -1762,20 +1794,38 @@ export function functionLowering(
       // A list of elements of two lanes (a record, `lower.ts`) at a
       // parameter that the interpreter maps over a list: the interpreter
       // maps the function over the elements, the parameter would hold the
-      // record whole. A tuple binds whole.
-      if (lowered !== undefined && !sig.rest)
+      // record whole. A tuple binds whole. A list of records of one record
+      // type there: the call maps, one record per call (`mapOver()`).
+      const listAt = (i: number): boolean => {
+        const s = e.ops[i]?.type.type;
+        // (Not the elements that `mapOver()` gives, `given`.)
+        return (
+          given === undefined &&
+          lowered !== undefined &&
+          type(lowered[i]).lane === 'record' &&
+          sig.mapsAt(i, false) &&
+          (s === 'list' || (typeof s === 'object' && s.kind === 'list'))
+        );
+      };
+      if (lowered !== undefined && !sig.rest) {
         e.ops.forEach((op, i) => {
-          const s = op.type.type;
-          if (
-            type(lowered[i]).lane === 'record' &&
-            sig.mapsAt(i, false) &&
-            (s === 'list' || (typeof s === 'object' && s.kind === 'list'))
-          )
+          if (listAt(i) && type(lowered[i]).shape.length === 0)
             decline(
               op,
               `a list of elements of two types given to the parameter ${sig.names[i]} of ${e.operator}, which maps over a list (the interpreter maps the function over the list)`
             );
         });
+        if (e.ops.some((_, i) => listAt(i)))
+          return mapOver(
+            e,
+            binding,
+            [...(functions.get(binding.key)?.values() ?? [])].some((f) =>
+              lowering.has(f)
+            ),
+            lowered,
+            (i) => (listAt(i) ? 'list' : undefined)
+          );
+      }
       // A call in the body being lowered (a recursive call) calls that IR
       // function, whatever its reader (`tells`); another call calls the one
       // for its kind of reader (`define()`). An argument can hold the first
@@ -1929,10 +1979,15 @@ export function functionLowering(
         p.shape[0] !== 'run-time' || n === undefined
           ? []
           : [typeof n === 'number' ? b.constant(n, 'integer') : n.v];
-      const declared = (p.type ?? {
-        lane: p.lane,
-        shape: p.shape.map((m) => (m === 'run-time' ? n : m)),
-      }) as IRType;
+      const shape = p.shape.map((m) => (m === 'run-time' ? n : m));
+      // A list of records: of the record type `p.type` (`define()`).
+      const declared = (
+        p.type === undefined
+          ? { lane: p.lane, shape }
+          : p.shape.length > 0
+            ? withShape(p.type, shape as Length[])
+            : p.type
+      ) as IRType;
       if (p.shape.length === 0 && t.shape.length > 0) {
         // A list that the interpreter binds whole at a scalar parameter.
         if (!fn.mapsAt(i, false))
@@ -2071,10 +2126,10 @@ export function functionLowering(
         : [];
     const out = b.newValue(
       outs.length > 0
-        ? {
-            lane: result.lane,
-            shape: [{ v: outs[0] }, ...(result.shape.slice(1) as Length[])],
-          }
+        ? withShape(result as IRType, [
+            { v: outs[0] },
+            ...(result.shape.slice(1) as Length[]),
+          ])
         : (result as IRType)
     );
     const all = [...args, ...inputs];

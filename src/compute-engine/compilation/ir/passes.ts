@@ -755,7 +755,6 @@ const repeated = (i: Instr): Region | undefined =>
         (i.op === 'build' ||
           i.op === 'filter' ||
           i.op === 'rows.build' ||
-          i.op === 'records.build' ||
           i.op === 'rows.filter')
       ? i.regions[0]
       : undefined;

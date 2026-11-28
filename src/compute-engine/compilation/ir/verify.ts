@@ -13,6 +13,7 @@
 import {
   argsOf,
   elementType,
+  isRecord,
   isSubLane,
   isSubType,
   lengthValues,
@@ -113,9 +114,10 @@ export function verify(p: Program, rows: readonly OperatorRow[]): void {
         ].includes(t.lane)
       )
         fail(`v${v}: lane ${t.lane}`);
-      // A record is not an element of a list, nor is an array.
-      if (t.lane === 'record' && t.shape.length > 0)
-        fail(`v${v}: a list of records`);
+      // A list of records has rank 1 (README, "Records"); an array is not
+      // an element of a list.
+      if (t.lane === 'record' && t.shape.length > 1)
+        fail(`v${v}: a list of lists of records`);
       if (
         (t.lane === 'array') !== (t.array !== undefined) ||
         (t.lane === 'array' && t.shape.length > 0)
@@ -202,7 +204,7 @@ export function verify(p: Program, rows: readonly OperatorRow[]): void {
         if (i.op === 'field' || i.op === 'field.len') {
           const [r, k] = i.args;
           const f = type(r).fields?.[constant(k) ?? -1];
-          if (type(r).lane !== 'record' || f === undefined)
+          if (!isRecord(type(r)) || f === undefined)
             fail(`${i.op} v${i.out}: not a field of a record`);
           if (i.op === 'field.len') {
             if (f!.shape.length === 0)
@@ -292,18 +294,9 @@ export function verify(p: Program, rows: readonly OperatorRow[]): void {
       case 'list': {
         const t = type(i.out);
         // A record: one value per field, of the field's type.
-        if (t.lane === 'record') {
+        if (isRecord(t)) {
           if (t.fields?.length !== i.args.length)
             fail(`record v${i.out}: ${i.args.length} fields`);
-          if (t.resultRecord)
-            return i.args.forEach((a, k) => {
-              const f = t.fields![k];
-              const v = type(a);
-              if (v.lane !== f.lane || v.shape.length !== f.shape.length)
-                fail(
-                  `result record v${i.out}: field ${k} of type ${typeToString(v)}`
-                );
-            });
           return i.args.forEach((a, k) =>
             sub(a, t.fields![k], `record v${i.out}`)
           );
@@ -313,13 +306,6 @@ export function verify(p: Program, rows: readonly OperatorRow[]): void {
         if (t.lane === 'rows' && t.shape.length === 0)
           return i.args.forEach((a) => {
             const r = type(a);
-            if (t.resultRecord) {
-              if (r.lane !== 'record' || !r.resultRecord)
-                fail(
-                  `result records v${i.out}: an element of type ${typeToString(r)}`
-                );
-              return;
-            }
             if (
               r.shape.length !== 1 ||
               !(r.lane === 'integer' || r.lane === 'real')

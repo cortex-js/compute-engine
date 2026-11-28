@@ -94,6 +94,8 @@ import {
   sameArrayCells,
   sameFields,
   elementType,
+  isRecord,
+  withShape,
   isSubLane,
   isSubType,
   joinType,
@@ -1880,8 +1882,8 @@ function lowerOnce(
     // Two values of one named tuple type whose fields are numbers (a pixel,
     // the read of a tuple cell of an array): the equality of each field.
     if (
-      s.lane === 'record' &&
-      t.lane === 'record' &&
+      isRecord(s) &&
+      isRecord(t) &&
       s.nominal !== undefined &&
       s.nominal === t.nominal &&
       s.fields?.length === t.fields?.length &&
@@ -2091,10 +2093,37 @@ function lowerOnce(
     return arrays.element(e, a, cell.ops[1], k);
   };
 
+  /** The first `At` of a list of records at an index not proven in range,
+   *  and the first discharge (`IsMissing`, `Coalesce`, `AssertPresent`) of
+   *  a record, of this lowering (`absent()`). */
+  let recordAt: Expression | undefined;
+  let recordDischarge: Expression | undefined;
+  /** A record is not absent in compiled code: out of range, `At` of a list
+   *  of records gives a value that no discharge reads as absent. So a
+   *  lowering with both an `At` of a list of records whose index is not
+   *  proven in range and a discharge of a record declines (README,
+   *  "Records"), checked as each is lowered, before the passes fold a read
+   *  away. */
+  const absentRecord = (): void => {
+    if (recordAt !== undefined && recordDischarge !== undefined)
+      decline(
+        recordDischarge,
+        `${recordDischarge.operator} of a record, in a program with ${recordAt.toString()}, an element of a list of records at an index that can be out of range (compiled code does not read the absent record)`
+      );
+  };
+
   /** `At(l, i)` of a list or a tuple `l` and a scalar index `i`. */
   const at = (e: Expression, l: V, i: V): V => {
     const t = type(l);
-    if (t.lane === 'record') return records.at(e, l, i);
+    if (isRecord(t)) return records.at(e, l, i);
+    if (t.lane === 'record') {
+      const n = t.shape[0];
+      const length = typeof n === 'number' ? n : constant(n.v);
+      if (elementIndex(length, constant(i)) === undefined) {
+        recordAt ??= e;
+        absentRecord();
+      }
+    }
     const [n, k] = [t.shape[0], constant(i)];
     const flat = t.shape.length === 1 && !tuples.has(l);
     const points = tuples.get(l) === 1 && t.shape.length === 2;
@@ -2479,24 +2508,6 @@ function lowerOnce(
     return out;
   };
 
-  // A host handler returns an expression. Recognize a tagged dictionary
-  // there just as at a literal return site, without interpreting its tag.
-  const taggedRecord = (e: Expression | undefined): boolean => {
-    if (isDictionary(e)) return isString(e.get('__tag'));
-    if (
-      !isFunction(e) ||
-      options.vars?.includes(e.operator) ||
-      userBinding(e) !== undefined
-    )
-      return false;
-    const answer = handled(e);
-    return (
-      typeof answer === 'object' &&
-      isDictionary(answer) &&
-      isString(answer.get('__tag'))
-    );
-  };
-
   let lowered = 0;
   const node = (
     e: Expression,
@@ -2515,11 +2526,7 @@ function lowerOnce(
       );
     if (isSymbol(e)) return symbol(e, want);
     if (isString(e)) return b.constant(e.string, 'string');
-    if (isDictionary(e))
-      return records.dictionary(
-        e,
-        entryResult && javascript && taggedRecord(e)
-      );
+    if (isDictionary(e)) return records.dictionary(e);
     // An array that a value of a name holds: a reference of the program.
     if (isMutableArray(e)) return arrays.ref(e);
     if (!isFunction(e))
@@ -2640,20 +2647,6 @@ function lowerOnce(
     if (interval && isEnclosureCollection(e.type.type)) decline(e, COLLECTION);
     if (interval && isEnclosureNode(e)) return enclosures(e);
     checkTextDomains(e);
-    if (entryResult && javascript) {
-      if (e.operator === 'List' && e.nops > 0 && e.ops.every(taggedRecord))
-        return b.list(
-          e.ops.map((op) => value(op, true, true)!),
-          {
-            lane: 'rows',
-            shape: [],
-            resultRecord: true,
-          }
-        );
-      const member = e.ops[0];
-      if (e.operator === 'Comprehension' && taggedRecord(member))
-        return lists.comprehension(e, () => value(member, true, true)!);
-    }
     const closed = closedValue(e);
     if (closed !== undefined) return closed;
     switch (e.operator) {
@@ -3385,7 +3378,7 @@ function lowerOnce(
         // step 5).
         if (e.nops === 1 && owned !== undefined) {
           const t = type(owned.binding.v);
-          if (t.head === 'Tuple' || t.head === 'List')
+          if (isRecord(t) && (t.head === 'Tuple' || t.head === 'List'))
             return b.constant(t.fields!.length, 'integer');
         }
         // Of a string (its static type): the number of its characters.
@@ -5761,25 +5754,38 @@ function lowerOnce(
     const body = b.region(params, f);
     const op = typeof which === 'string' ? which : which();
     const r = regionRow(op)!;
-    // A list of records, or a record from a region, has no type here.
+    // A build or a filter of records is a list of records (README,
+    // "Records"), whose yields join (`joinType()`); a list of records from
+    // a region, a record from a random frame, and Nothing decline.
     if (
-      op !== 'records.build' &&
-      body.yields.some((y) => ['record', 'nothing'].includes(type(y).lane))
+      body.yields.some(
+        (y) =>
+          type(y).lane === 'nothing' ||
+          (type(y).lane === 'record' &&
+            (type(y).shape.length > 0 || (op !== 'build' && op !== 'filter')))
+      )
     )
-      decline(site, 'a record made in a build, a filter or a random frame');
+      decline(
+        site,
+        body.yields.some((y) => type(y).lane === 'nothing')
+          ? 'Nothing made in a build, a filter or a random frame'
+          : op === 'build' || op === 'filter'
+            ? 'a list of lists of records'
+            : 'a record made in a random frame'
+      );
     // The element of a build whose length is a constant value (made in
     // the region, which the result cannot name) has that length.
     const ys = body.yields.map((y): IRType => {
       const t = type(y);
       if (op !== 'build') return t;
-      return {
-        lane: t.lane,
-        shape: t.shape.map((n) => {
+      return withShape(
+        t,
+        t.shape.map((n) => {
           if (typeof n === 'number') return n;
           const c = constant(n.v);
           return c !== undefined && c > 0 ? c : n;
-        }),
-      };
+        })
+      );
     });
     const outs = r
       .results(args, ys, [])!
@@ -6394,6 +6400,10 @@ function lowerOnce(
   const absent = (node: Expression, operand: Expression, v: V): V => {
     const t = type(v);
     if (t.lane === 'nothing') decline(node, `${node.operator} of Nothing`);
+    if (isRecord(t)) {
+      recordDischarge ??= node;
+      absentRecord();
+    }
     // Out of range, the read of a tuple cell of a nominal type is the
     // interpreter's tuple of four NaN, which is absent; the record of four
     // NaN that the code reads is not.
@@ -6533,11 +6543,15 @@ function lowerOnce(
    *  value of the engine, such as the elements of a `Range` of constants)
    *  and each element is listed (`Listed`; CE-1652, step 5). */
   const literalListed = (e: Fn, elements: V[], v: V): V => {
-    if (
-      heldLiteral(e) &&
-      cx.listed.get(v) !== false &&
-      elements.every((x) => listedOf(cx, x) === true)
-    )
+    if (!heldLiteral(e) || cx.listed.get(v) === false) return v;
+    // A list of records: the `Listed` of each record, as of the fields of a
+    // record.
+    if (type(v).lane === 'record')
+      cx.listed.set(
+        v,
+        elements.map((x) => listedOf(cx, x))
+      );
+    else if (elements.every((x) => listedOf(cx, x) === true))
       cx.listed.set(v, true);
     return v;
   };
@@ -6566,14 +6580,17 @@ function lowerOnce(
     }
     if (lengthValues(t).length > 0)
       decline(e, 'a list of lists of run-time length');
-    if (t.lane === 'record' || t.lane === 'nothing')
-      decline(e, 'a list of records');
+    // A list of records of one record type, on JavaScript (README,
+    // "Records"); a list of lists of records declines.
+    if (t.lane === 'nothing') decline(e, 'a list of Nothing');
+    if (t.lane === 'record' && (t.shape.length > 0 || !options.javascript))
+      decline(
+        e,
+        t.shape.length > 0 ? 'a list of lists of records' : 'a list of records'
+      );
     const v = b.list(
       elements.map((v) => widen(v, t!.lane)),
-      {
-        lane: t.lane,
-        shape: [elements.length, ...t.shape],
-      }
+      withShape(t, [elements.length, ...t.shape])
     );
     return keep(elements[0], v, 1);
   };

@@ -12,11 +12,7 @@ import type { TypeReference } from '../../../common/type/types.js';
 import { isSubtype } from '../../../common/type/subtype.js';
 import { typesOverlap } from '../../../common/type/reduce.js';
 import { typeToString as engineTypeToString } from '../../../common/type/serialize.js';
-import {
-  isDictionary,
-  isFunction,
-  isSymbol,
-} from '../../boxed-expression/type-guards.js';
+import { isFunction, isSymbol } from '../../boxed-expression/type-guards.js';
 import { canonicalFunctionLiteral } from '../../function-utils.js';
 import type { ConformanceRecord } from '../../types-engine.js';
 import type { Expression, IComputeEngine } from '../../global-types.js';
@@ -27,40 +23,15 @@ import {
   protocolDispatchCandidates,
   protocolRequirementAt,
 } from '../../engine-protocols.js';
-import { decline, isUntyped, type Fn, type Lowering } from './lower-context.js';
+import {
+  decline,
+  isUntyped,
+  readsNoProgramName,
+  type Fn,
+  type Lowering,
+} from './lower-context.js';
 import { laneProves } from './lower-records.js';
-import { typeToString, type V } from './ir.js';
-
-/** Whether every name of `x`, operator names included, holds the
- *  definition of the system scope (a literal, `True`, `Pi`, `[]`, `{->}`):
- *  such a value reads no name of the program, so it can be inlined (a
- *  default of a protocol member, or of a function literal: `call()` of
- *  `lower-functions.ts`). */
-export function readsNoProgramName(ce: IComputeEngine, x: Expression): boolean {
-  const system = ce.contextStack[0]?.lexicalScope.bindings;
-  const walk = (x: Expression): boolean => {
-    if (isSymbol(x)) {
-      const d = system?.get(x.symbol);
-      return (
-        d !== undefined &&
-        (('value' in d && d.value === x.valueDefinition) ||
-          ('operator' in d && d.operator === x.operatorDefinition))
-      );
-    }
-    if (isFunction(x)) {
-      const d = system?.get(x.operator);
-      return (
-        d !== undefined &&
-        'operator' in d &&
-        d.operator === x.operatorDefinition &&
-        x.ops.every(walk)
-      );
-    }
-    if (isDictionary(x)) return x.values.every(walk);
-    return true;
-  };
-  return walk(x);
-}
+import { isRecord, typeToString, type V } from './ir.js';
 
 export function protocolLowering(cx: Lowering) {
   const { type } = cx;
@@ -100,7 +71,7 @@ export function protocolLowering(cx: Lowering) {
     // the named tuple type of its constructor.
     const self = cx.value(receiver)!;
     const t = type(self);
-    if (t.lane !== 'record')
+    if (!isRecord(t))
       decline(
         receiver,
         `${what} on a value that is not a record (${typeToString(t)}): the implementation is selected at run time`
