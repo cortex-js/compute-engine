@@ -143,6 +143,14 @@
 
 ### Resolved Issues
 
+- **A product with an exact rational, such as a quotient by an exact
+  integer, of a number made at a higher precision keeps the digits of a
+  double after the precision is set to `'machine'`** (CE-1789). After
+  `ce.precision = 30; const a = ce.box({ num: '0.3' }); ce.precision =
+  'machine'`, `ce.box(['Divide', a, 7]).N()` gave `0.0428571428571429`, two
+  digits fewer than `0.3 / 7`, `0.04285714285714286`. The same applied to
+  `Multiply(a, 3/7)` and to a complex value. They now give a double, as
+  `Divide(a, 0.7)` did.
 - **`Gamma(s, z)` ends for a very large negative integer order** (CE-1795).
   At machine precision, `ce.box(['Gamma', -1e300, 0.5]).N()` did not end:
   for an integer `s ≤ 0` and `0 < z < 1`, the evaluation ran `−s` steps of a

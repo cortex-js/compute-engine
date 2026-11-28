@@ -3,8 +3,9 @@ import { ComputeEngine } from '../../src/compute-engine';
 // A number made at a higher precision keeps its big decimal when the
 // precision of the engine is lowered to machine precision. The kernels that
 // round their result (`sqrt`, `ln`, `exp`, `inv`, `root`, `div`, `pow`,
-// `abs`) then give a double, computed from all the digits of the operands:
-// they gave 15 digits, two fewer than a double.
+// `abs`, and a product by an exact rational) then give a double, computed
+// from all the digits of the operands: they gave 15 digits, two fewer than a
+// double.
 
 function engineWithValues(latex: string[]) {
   const ce = new ComputeEngine();
@@ -51,6 +52,25 @@ describe('A BIG DECIMAL AT MACHINE PRECISION', () => {
     // The double nearest to 3/7. The quotient of the doubles `0.3` and
     // `0.7` is the next double, `0.4285714285714286`.
     expect(ce.expr(['Divide', a, b]).evaluate().re).toBe(0.42857142857142855);
+  });
+
+  // A quotient by an exact integer is the product with an exact rational
+  // (CE-1789).
+  test('has a quotient by an exact integer with the digits of a double', () => {
+    const { ce, values } = engineWithValues(['0.3', '0.3+0.2i']);
+    const [a, z] = values;
+    expect(ce.expr(['Divide', a, 7]).N().toString()).toBe(
+      '0.04285714285714286'
+    );
+    expect(ce.expr(['Multiply', a, ['Rational', 3, 7]]).N().re).toBe(
+      0.12857142857142856
+    );
+    const w = ce.expr(['Divide', z, 7]).N();
+    expect(w.re).toBe(0.04285714285714286);
+    expect(w.im).toBe(0.02857142857142857);
+    expect(w.toString()).toBe(
+      '(0.04285714285714286 + 0.02857142857142857i)'
+    );
   });
 
   test('has an integer power from all the digits of the base', () => {

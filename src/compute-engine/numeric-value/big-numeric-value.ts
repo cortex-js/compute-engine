@@ -552,12 +552,16 @@ export class BigNumericValue extends NumericValue {
       // keeps them (`mulBounded` rounds only past twice the working
       // precision, `div` rounds to it): an angle such as `π/2 − 10⁻¹²` must
       // carry them for `cos(π/2 − 10⁻¹²)` to be `10⁻¹²` to more than 9
-      // digits.
+      // digits. The quotient rounds, so at machine precision it is computed
+      // at `DOUBLE_DIGITS` and is a double, as the quotient of `div` is:
+      // `0.3 · (1/7)` with a 30-digit `0.3` is `0.04285714285714286`.
       if (
         other instanceof ExactNumericValue &&
         other.radical === 1 &&
         other.rational[1] != 1
       ) {
+        if (prec <= MACHINE_PRECISION)
+          return toDouble(this.mul(other, DOUBLE_DIGITS));
         const [p, q] = other.rational;
         return this.clone(
           this.decimal.mul(new BigDecimal(p)).div(new BigDecimal(q), prec + 5)
@@ -579,6 +583,8 @@ export class BigNumericValue extends NumericValue {
       other.imRadical === 1 &&
       (other.rational[1] != 1 || other.imRational[1] != 1)
     ) {
+      if (prec <= MACHINE_PRECISION)
+        return toDouble(this.mul(other, DOUBLE_DIGITS));
       const [p1, q1] = other.rational.map((x) => new BigDecimal(x));
       const [p2, q2] = other.imRational.map((x) => new BigDecimal(x));
       const c = p1.mul(q2);
@@ -1283,13 +1289,15 @@ function decimalToString(num: BigDecimal): string {
  * digits, gives fewer digits than a double: `√0.3` was `0.547722557505166`,
  * and the square root of the double `0.3` is `0.5477225575051661`. Thus, at
  * machine precision, the kernels that round their result (`inv`, `div`,
- * `pow`, `root`, `sqrt`, `abs`, `ln` and `exp`) compute at this precision,
+ * `pow`, `root`, `sqrt`, `abs`, `ln`, `exp`, and `mul` by an exact rational
+ * that is not an integer) compute at this precision,
  * from all the digits of the operands, and `toDouble()` converts the result
  * to a machine value, also when the kernel returns its operand (`√1`). The digits of an
  * operand are not rounded to a double first: the relative error of `ln x`
  * near `x = 1`, and of `e^x` for a large `x`, would be much larger than the
  * error of the double of `x`. (`add` and `mul` do not round to the
- * precision: they keep the digits of their operands.) `apply2()` gives
+ * precision: they keep the digits of their operands, except for the
+ * quotient of a product by an exact rational.) `apply2()` gives
  * the big-decimal kernels of the two-argument functions this precision too.
  */
 export const DOUBLE_DIGITS = 20;
