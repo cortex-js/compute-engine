@@ -13,6 +13,7 @@ import type { NumericValue } from '../numeric-value/types.js';
 import { bignumPreferred, boxBignumResult } from './utils.js';
 import { isNumber } from './type-guards.js';
 import { isImaginaryPartNaN } from './imaginary-part.js';
+import { SMALL_INTEGER } from '../numerics/numeric.js';
 
 /**
  * Box a kernel result that is a plain JS double.
@@ -481,13 +482,22 @@ export function apply2(
   }
 
   if (result === undefined && bigFn) {
-    let bigRe1 = expr1.bignumRe;
-    let bigRe2 = expr2.bignumRe;
+    // An exact integer that `ce.number()` stores as a plain number (up to
+    // `SMALL_INTEGER`) has no big decimal. The same integer computed by a
+    // function (`4 + 5`) can be an `ExactNumericValue`, which has one: it
+    // selects the same lane as the literal, so at machine precision
+    // `1.1^{4+5}` is `Math.pow(1.1, 9)`, as `1.1^9` is.
+    const bigReOf = (x: typeof expr1) =>
+      x.isExact && x.isInteger === true && Math.abs(x.re) <= SMALL_INTEGER
+        ? undefined
+        : x.bignumRe;
+    let bigRe1 = bigReOf(expr1);
+    let bigRe2 = bigReOf(expr2);
     if (bigRe1 !== undefined || bigRe2 !== undefined) {
       // At machine precision, a float with a big decimal was made at a
       // higher precision: the kernel computes at `DOUBLE_DIGITS`. An exact
-      // operand alone (an integer from a function call) keeps the working
-      // precision (CE-1790).
+      // operand alone (a large integer, a rational) keeps the working
+      // precision.
       const isBigFloat = (x: typeof expr1) =>
         !x.isExact && x.bignumRe !== undefined;
       const prec =

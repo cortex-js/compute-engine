@@ -143,6 +143,20 @@
 
 ### Resolved Issues
 
+- **At machine precision, an integer that a function computes gives the
+  value of the same integer written as a number** (CE-1790). In
+  `ce.box(['Power', 1.1, ['Add', 4, 5]]).evaluate()`, the exponent `9`
+  computed by `Add` took the big-decimal kernel, which gave `2.357947691`,
+  where `1.1^9` gives `2.357947691000002`, the value of `Math.pow()` and of
+  compiled code. `Remainder` and `Mod` had the same difference:
+  `Remainder(2 + 3, 0.7)` gave `0.1` and `Remainder(5, 0.7)` gives
+  `0.10000000000000031`. An exact integer up to 10^6 in magnitude now
+  takes the double kernel, as the number literal does, also when a double
+  cannot hold the result: `0.1^{200 + 200}` is now `0`, as `0.1^{400}`
+  and `Math.pow(0.1, 400)` are (it was `1e-400`). A larger exact
+  integer keeps its lane: `Remainder(-825977087020874, 0.7)` is still
+  `-0.1`.
+
 - **A numerical integral of a lone symbol that holds a number gives a
   number** (CE-1788). With `c := 5`, `NIntegrate(c, 0, 2)` gave `NaN`,
   because `c` was read as the name of a function. It now gives `10`: the

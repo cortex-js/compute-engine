@@ -135,3 +135,29 @@ describe('A BIG DECIMAL AT MACHINE PRECISION', () => {
     );
   });
 });
+
+// An integer computed by a function (`4 + 5`) is an exact numeric value with
+// a big decimal; the same integer written as a number is a plain number. At
+// machine precision both select the double kernel (CE-1790).
+describe('A small integer computed by a function at machine precision', () => {
+  const ce = new ComputeEngine();
+  ce.precision = 'machine';
+  const value = (expr: any) => ce.box(expr).evaluate().re;
+
+  test('gives a power the value of a literal exponent', () => {
+    expect(value(['Power', 1.1, ['Add', 4, 5]])).toBe(Math.pow(1.1, 9));
+    expect(value(['Power', 1.1, ['Add', 4, 5]])).toBe(value(['Power', 1.1, 9]));
+    // A power of a double that a double cannot hold is the value of
+    // `Math.pow()`, with a computed exponent as with a literal one.
+    expect(value(['Power', 0.1, ['Add', 200, 200]])).toBe(
+      value(['Power', 0.1, 400])
+    );
+  });
+
+  test('gives a remainder the value of a literal operand', () => {
+    expect(value(['Remainder', ['Add', 2, 3], 0.7])).toBe(
+      value(['Remainder', 5, 0.7])
+    );
+    expect(value(['Mod', ['Add', 3, 4], 0.3])).toBe(value(['Mod', 7, 0.3]));
+  });
+});
