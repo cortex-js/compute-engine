@@ -1185,7 +1185,12 @@ export function sliceProgram(
         ? { forward: false }
         : {}),
       ...(interval
-        ? { fold: passes.fold && 'lists', hoist: false, strength: false }
+        ? {
+            fold: passes.fold && 'lists',
+            hoist: false,
+            strength: false,
+            idleInfiniteIntegrals: true,
+          }
         : {}),
       // Where sums are written out, a call made twice by its caller is also
       // copied (README, "User functions").

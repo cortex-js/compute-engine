@@ -13,6 +13,12 @@ Every code fence on this page is executed by the test suite and its `// ➔`
 output verified — the examples cannot drift from the implementation. Epsil is
 **experimental**: syntax and semantics may change between releases.
 
+This card names the `epsil` command for each task: running a program, checking
+it, looking up the library. When you have no shell, use what your host gives
+you for the same task. The Epsil MCP server has the tools `evaluate`, `check`
+and `doc`; a host that embeds Epsil can give its own tools; on the web, the
+[Standard Library](/epsil/library/) page lists every function.
+
 ## What Epsil Is
 
 Epsil is a programming language for scientific computing built on the Compute
@@ -145,6 +151,80 @@ convention of Python (`-7 % 3` → `2`); `xs[-1]` is the last element; `0.1 +
 work; `2 in [1, 2, 3]` works; lowercase `true`/`false` are accepted
 (canonically `True`/`False`).
 
+## Order of Preference
+
+Prefer a library function, then broadcasting, then a pipeline, and write a loop
+last. Search the library (`epsil doc <keywords>`, or your host's lookup) before
+you write a loop: `nthPrime`, `primeFactors`, `gcd`, `mandelbrot` and `julia` are library
+functions, and a hand-written loop for one of them is longer and slower.
+
+1. **A library function**: `gcd(1071, 462)`, `nthPrime(100)`,
+   `count(xs, pred)`, `sum`, `mean`, `max`.
+2. **Broadcasting**: arithmetic (`+ - * / ^`), the ordering comparisons
+   (`< <= > >=`) and a function whose parameters are numbers (`sqrt`, `sin`,
+   `abs`, `floor`, `Mod`, `isPrime`, `nthPrime`, …) apply to each element of a
+   list or a range, and give a list. An aggregate (`sum`, `max`, `length`,
+   `gcd`) takes the whole list. When you are not sure that a function
+   broadcasts, evaluate it on a short list.
+3. **A pipeline**: `map(f, xs)` and `filter(xs, pred)` (note the argument
+   order of each), `count`, `fold`, `reduce`, chained with `|>`. A pipe stage
+   that is a one-parameter lambda whose body uses its parameter as a number is
+   applied to each element of a list or a range, so it needs no `map`:
+   `xs |> x => x^2` and `xs |> _^2` are `xs^2`. In an operator-written stage
+   (`_^2`, `_ + 1`) `_` is the parameter of that lambda; in a call stage
+   (`take(_, 10)`, `length(_)`) `_` is the whole piped value.
+4. **A loop**, for an effect (a `print`, a write to an array) or for a state
+   whose next value depends on the previous one and whose number of turns is
+   not known in advance.
+
+```epsil
+(sqrt([1, 4, 9]) + 1, (1..5)^2, isPrime(1..6), Mod(1..6, 3) == 0)
+// ➔ ([2,3,4], [1,4,9,16,25], [false,true,true,false,true,false], [false,false,true,false,false,true])
+```
+
+```epsil
+(1..5 |> _^2 |> sum, [[1, 2], [3]] |> length(_))
+// ➔ (55, 2)
+```
+
+Instead of this loop, which sums the first 100 primes:
+
+```epsil
+let total = 0
+let found = 0
+let n = 2
+while found < 100 {
+  if isPrime(n) {
+    total = total + n
+    found = found + 1
+  }
+  n = n + 1
+}
+total
+// ➔ 24133
+```
+
+write the library function, broadcast over a range:
+
+```epsil
+nthPrime(1..100) |> sum
+// ➔ 24133
+```
+
+More pairs:
+
+| Instead of a loop that… | Write |
+|:--|:--|
+| builds the list of the squares of 1…10 | `(1..10)^2` |
+| adds `1/k` for `k` from 1 to 10 | `sum(1 / (1..10))` |
+| counts the primes `p ≤ 100` with `p % 4 == 1` | `count(1..100, p => isPrime(p) && Mod(p, 4) == 1)` |
+| keeps the multiples of 3 up to 20 | `filter(1..20, k => Mod(k, 3) == 0)` |
+
+```epsil
+(sum(1 / (1..10)), count(1..100, p => isPrime(p) && Mod(p, 4) == 1))
+// ➔ (7381/2520, 11)
+```
+
 ## Verified Idioms
 
 The [Style Guide](/epsil/style/) states each idiom with its reason; this
@@ -183,29 +263,22 @@ reduce([1, 2, 3, 4], (acc, x) => acc + x, 0) + sum(1..100)
 // ➔ 5060
 ```
 
-Loops are for effect — accumulate into a variable declared outside:
+A loop is the right form when each turn depends on the previous one and the
+number of turns is not known in advance. It evaluates to `nothing`, so
+accumulate into a variable declared outside. To build a list in a loop, spread
+the old list into a new literal (each literal snapshots the current value);
+never `join(xs, [k])` on every turn, which nests a lazy recipe per turn and
+takes seconds by a thousand elements. The Collatz path of 6:
 
 ```epsil
-let a = 1071
-let b = 462
-while b != 0 {
-  let t = a % b
-  a = b
-  b = t
+let n = 6
+let path = [n]
+while n != 1 {
+  n = n / 2 if n % 2 == 0 else 3 * n + 1
+  path = [...path, n]
 }
-a
-// ➔ 21
-```
-
-Building a list in a loop — spread the old list into a new literal (each
-literal snapshots the current value); never `join(xs, [k])` on every turn,
-which nests a lazy recipe per turn and takes seconds by a thousand elements:
-
-```epsil
-let xs = []
-for k in 1..3 { xs = [...xs, k * k] }
-xs
-// ➔ [1, 4, 9]
+path
+// ➔ [6, 3, 10, 5, 16, 8, 4, 2, 1]
 ```
 
 Structural `match` (an expression; `_` is the wildcard; a bare name **binds**

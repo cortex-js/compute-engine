@@ -86,6 +86,11 @@ const IDENTIFIER = /^[A-Za-z_$][\w$]*$/;
 const guard = (n: string, what: string, bits = 32) =>
   `if (!(${n} < ${2 ** bits})) throw new RangeError('${what} of more than 2^${bits} iterations');`;
 
+/** A count written as an integer literal below 2^32 (`2000`, `2000n`):
+ *  its build needs no guard. */
+const isSmallCount = (n: string) =>
+  /^\d+n?$/.test(n) && Number(n.replace('n', '')) < 2 ** 32;
+
 /** The integers of a mode: `zero`, the literal `c` (`5` or `5n`), the
  *  number of an integer (`toNumber()`), the least of two (`min()`) and the
  *  integer part of a difference of bounds (`floor()`). */
@@ -172,7 +177,7 @@ const builds = (z: Ints, count: Wrap): Syntax['regions'] => {
   const toNumber = z.toNumber;
   const open = (out: string, n: string, k: string, filter: boolean) => [
     `const ${out}_n = ${n};`,
-    guard(`${out}_n`, 'a list'),
+    ...(isSmallCount(n) ? [] : [guard(`${out}_n`, 'a list')]),
     `const ${out} = ${filter ? '[]' : `new Array(${toNumber(`${out}_n`)})`};`,
     blocks(z, k, `${out}_n`),
   ];

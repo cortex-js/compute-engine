@@ -83,8 +83,8 @@ const text = (r: ReturnType<typeof js>) => `${r.preambleOnce ?? ''}\n${r.code}`;
 
 describe('IR profile, batch G25: a Range of constants as a list value', () => {
   // A list of at most 16 elements is written out ("Lists", the short
-  // lists): the product of each element is in the text.
-  const three = '[(_.x * 1), (_.x * 2), (_.x * 3)]';
+  // lists): the product of each element is in the text (`x * 1` is `x`).
+  const three = '[_.x, (_.x * 2), (_.x * 3)]';
   test.each([
     ['one operand', ['Multiply', 'x', ['Range', 3]], three],
     ['two operands', ['Multiply', 'x', ['Range', 1, 3]], three],
@@ -92,7 +92,7 @@ describe('IR profile, batch G25: a Range of constants as a list value', () => {
     [
       'descending',
       ['Multiply', 'x', ['Range', 5, 1]],
-      '[(_.x * 5), (_.x * 4), (_.x * 3), (_.x * 2), (_.x * 1)]',
+      '[(_.x * 5), (_.x * 4), (_.x * 3), (_.x * 2), _.x]',
     ],
     [
       'a negative step',

@@ -330,11 +330,61 @@ describe('IR profile, batch G22: the numeric derivative (JavaScript)', () => {
     // Away from x = 2, where the branches of the Min meet: 2x below.
     expect(r.run!({ x: 0.7 } as never)).toBeCloseTo(1.4, 9);
     expect(r.run!({ x: 2.5 } as never)).toBeCloseTo(2, 9);
-    // `Apply(Derivative(g), a)` has no stencil: it declines.
+    // `Apply(Derivative(m), a)`: the engine's closed form keeps
+    // `Derivative(Min, 1, 0)`, which the interpreter's `N()` leaves
+    // unevaluated: a decline, at each order.
     for (const k of [1, 2])
       expect(failure(() => js(['Apply', ['Derivative', 'm', k], 'x']))).toMatch(
         /a derivative with no closed form/
       );
+  });
+
+  test('Apply(Derivative(g, 1), a) over the size limit: the stencil of the call g(t) (CE-1945)', () => {
+    // `r(t)`, a nest of 37 square roots that reads the free name `a` (5),
+    // is over the engine's differentiation limit: `Derivative(r, 1)` stays
+    // whole, and the interpreter's `N()` runs the same stencil. In
+    // `Sum(…, Limits(a, 1, 3))` the index `a` does not reach the body of
+    // `r`: three times r'(x) at a = 5.
+    let body: Json = ['Sqrt', ['Multiply', 'a', 't']];
+    for (let i = 1; i < 37; i++) body = ['Sqrt', ['Add', 't', body]];
+    define('r', ['Function', ['Block', body], 't']);
+    const json = ['Apply', ['Derivative', 'r', 1], 'x'];
+    const r = js(json);
+    expect(r.code + (r.preamble ?? '')).toMatch(/_SYS\.nd\(/);
+    const want = box(json).subs({ x: 0.5 }).N().re;
+    expect(Number.isFinite(want)).toBe(true);
+    expect(r.run!({ x: 0.5 } as never)).toBe(want);
+    const sum = js(['Sum', json, ['Limits', 'a', 1, 3]]);
+    expect(sum.run!({ x: 0.5 } as never)).toBeCloseTo(3 * want, 12);
+    // An order that is not the literal 1, and the interval mode: a decline.
+    expect(failure(() => js(['Apply', ['Derivative', 'r', 2], 'x']))).toMatch(
+      /a derivative with no closed form/
+    );
+    expect(failure(() => interval(json))).toMatch(
+      /a derivative with no closed form/
+    );
+  });
+
+  test('the stencil keeps the binding of g when a scope declares another g', () => {
+    const engine = new ComputeEngine();
+    const nest = (k: number): Json => {
+      let b: Json = ['Sqrt', ['Multiply', k, 't']];
+      for (let i = 1; i < 37; i++) b = ['Sqrt', ['Add', 't', b]];
+      return ['Function', ['Block', b], 't'];
+    };
+    engine.declare('x', 'real');
+    engine.declare('q', 'function');
+    engine.assign('q', engine.box(nest(5) as never));
+    const d = engine.box(['Apply', ['Derivative', 'q', 1], 'x'] as never);
+    const want = engine
+      .box(['Apply', ['Derivative', 'q', 1], 0.5] as never)
+      .N().re;
+    engine.pushScope();
+    engine.declare('q', 'function');
+    engine.assign('q', engine.box(nest(50) as never));
+    const r = compile(d, IR);
+    expect(r.run!({ x: 0.5 } as never)).toBe(want);
+    engine.popScope();
   });
 
   test('in a Sum, with respect to its index, in an arm, in a user function', () => {

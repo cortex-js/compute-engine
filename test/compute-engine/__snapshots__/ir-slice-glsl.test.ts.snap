@@ -31,7 +31,7 @@ exports[`IR slice: GLSL text a loop counts with an int, each bound evaluated onc
 "float f(float in0_y, float in1_x) {
   float v9 = 0.0;
   int v4_hi = int(clamp(floor(in0_y), -1073741824.0, 1073741824.0));
-  for (int v4_i = int(clamp(1.0, -1073741824.0, 1073741824.0)); v4_i <= v4_hi; v4_i++) {
+  for (int v4_i = 1; v4_i <= v4_hi; v4_i++) {
     float v4 = float(v4_i);
     v9 = (v9 + (v4 * in1_x));
   }

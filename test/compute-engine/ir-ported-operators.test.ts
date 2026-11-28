@@ -408,7 +408,6 @@ describe('a target with no spelling declines', () => {
   test.each([
     ['HarmonicNumber in the interval mode', ['HarmonicNumber', 'x'], 'interval-js', /the operation harmonic/],
     ['Gamma of two operands on GLSL', ['Gamma', 'x', 'y'], 'glsl', /the operation gammaupper/],
-    ['Sign of a complex on GLSL', ['Sign', 'w'], 'glsl', /the operation csign/],
     ['ND on GLSL', ['ND', ['Function', ['Sin', 't'], 't'], 'x'], 'glsl', /ND on another target than javascript/],
   ])('%s', (_, json, to, cause) => {
     expect(decline(json, { to })).toMatch(cause);

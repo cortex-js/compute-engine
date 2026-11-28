@@ -9,6 +9,7 @@ import {
   statSync,
   writeFileSync,
 } from 'node:fs';
+import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -57,6 +58,27 @@ if (!existsSync(join(dirname(CLI), 'for-agents.md')))
   fail('for-agents.md was not copied beside the CLI bundle.');
 if (!existsSync(join(dirname(CLI), 'compute-engine-for-agents.md')))
   fail('compute-engine-for-agents.md was not copied beside the CLI bundle.');
+
+// The cards are package exports (`@cortex-js/compute-engine/for-agents.md`):
+// both `require.resolve` and `import.meta.resolve` must find a file of the
+// build through the package's self-reference.
+const requireFromHere = createRequire(import.meta.url);
+for (const card of ['for-agents.md', 'compute-engine-for-agents.md']) {
+  const spec = `@cortex-js/compute-engine/${card}`;
+  let required;
+  try {
+    required = requireFromHere.resolve(spec);
+  } catch (error) {
+    fail(`require.resolve('${spec}') failed: ${error.message}`);
+  }
+  if (!existsSync(required))
+    fail(`${spec} resolves to ${required}, which the build lacks.`);
+  const imported = fileURLToPath(import.meta.resolve(spec));
+  if (imported !== required)
+    fail(
+      `${spec}: import.meta.resolve gives ${imported}, require.resolve ${required}.`
+    );
+}
 
 const mcp = run(
   ['mcp'],

@@ -221,10 +221,7 @@ describe('CE-1524, a value of seeded draws', () => {
   test('a name whose value has another effect is not evaluated at compile time', () => {
     const log = jest.spyOn(console, 'log').mockImplementation(() => {});
     try {
-      ce.assign(
-        'q',
-        ce.box(['Block', ['Print', 1], ['Random']] as never)
-      );
+      ce.assign('q', ce.box(['Block', ['Print', 1], ['Random']] as never));
       ce.assign('r', ce.box(['WithRandomSeed', 7, 'q'] as never));
       log.mockClear();
       try {
@@ -250,13 +247,100 @@ describe('CE-1524, a value of seeded draws', () => {
         ] as never)
       );
       log.mockClear();
-      expect(() =>
-        compile(ce.box(['Add', 'x', 'p'] as never), IR)
-      ).toThrow();
+      expect(() => compile(ce.box(['Add', 'x', 'p'] as never), IR)).toThrow();
       expect(log).not.toHaveBeenCalled();
     } finally {
       log.mockRestore();
     }
+  });
+});
+
+/**
+ * CE-1947: on interval-js too, a held value of seeded draws over literals is
+ * its interpreter value, a list of point intervals, and so is the
+ * arithmetic of numbers and such frames (the Desmos `2random(7)-1`). Corpus:
+ * neyret/vwbagbcerj `h=random(400)`, neyret/yvwfq1kpio `C=2random(7)-1`.
+ */
+describe('CE-1947, a value of seeded draws on interval-js', () => {
+  const ce = new ComputeEngine();
+  ce.declare('x', 'real');
+  ce.assign('h', ce.box(DRAW as never));
+  ce.assign('C', ce.box(['Add', -1, ['Multiply', 2, DRAW]] as never));
+  const sum = (name: string) => [
+    'Sum',
+    ['Multiply', ['At', name, ['Add', 'i', 1]], ['Power', 'x', 'i']],
+    ['Limits', 'i', 0, ['Add', ['Length', name], -1]],
+  ];
+
+  test.each([['h'], ['C']])(
+    'a sum over %s compiles, and its interval holds the interpreter value',
+    (name) => {
+      const json = sum(name);
+      const r = compile(ce.box(json as never), {
+        ...IR,
+        to: 'interval-js',
+      });
+      expect(r.success).toBe(true);
+      for (const x of [0.3, 1.7]) {
+        const want = ce
+          .box(json as never)
+          .subs({ x })
+          .N();
+        const got = r.run!({ x } as never) as {
+          value?: { lo: number; hi: number };
+        };
+        const v = got.value ?? (got as unknown as { lo: number; hi: number });
+        expect(isNumber(want)).toBe(true);
+        expect(v.lo).toBeLessThanOrEqual((want as never as { re: number }).re);
+        expect(v.hi).toBeGreaterThanOrEqual(
+          (want as never as { re: number }).re
+        );
+      }
+    }
+  );
+
+  test('the arithmetic of the frame is folded on javascript too', () => {
+    const r = compile(ce.box(sum('C') as never), IR);
+    expect(r.success).toBe(true);
+    expect(r.code).not.toMatch(/withRandomSeed|drawNextRandomNumber/);
+  });
+});
+
+/**
+ * CE-1943: a frame of draws over literals under a number as the seed,
+ * written in place, is its interpreter value, a literal: the code does not
+ * draw its elements again at each call. Corpus: art/bixumi1pk6
+ * `r\\ge\\operatorname{random}(9^4)[8\\theta]`. GLSL keeps the decline.
+ */
+describe('CE-1943, seeded draws written in place', () => {
+  const ce = new ComputeEngine();
+  ce.declare('x', 'real');
+  const json = ['At', DRAW, ['Max', ['Floor', ['Multiply', 3, 'x']], 1]];
+
+  test.each([['javascript'], ['interval-js']])(
+    'on %s the frame is a literal list',
+    (to) => {
+      const r = compile(ce.box(json as never), { ...IR, to } as never);
+      expect(r.success).toBe(true);
+      expect(r.code).not.toMatch(/withRandomSeed|randomChoice/);
+    }
+  );
+
+  test('the value is the interpreter value at each call', () => {
+    const r = compile(ce.box(json as never), IR);
+    for (const x of [0.1, 0.5, 0.9]) {
+      const want = ce
+        .box(json as never)
+        .subs({ x })
+        .N();
+      expect(r.run!({ x } as never)).toBe((want as never as { re: number }).re);
+    }
+  });
+
+  test('glsl keeps the decline', () => {
+    expect(() =>
+      compile(ce.box(json as never), { ...IR, to: 'glsl' } as never)
+    ).toThrow(/WithRandomSeed on glsl/);
   });
 });
 

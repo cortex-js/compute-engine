@@ -147,6 +147,7 @@ import {
   markSignatureMarkerOperand,
   literalParameterDefault,
   typeHasParameterDefault,
+  uncanonicalParameterDefault,
 } from './boxed-expression/parameter-defaults.js';
 import { isLibraryDefinition } from './boxed-expression/implicit-variable-rule.js';
 import {
@@ -2748,7 +2749,7 @@ function eraseGenericParameters(
   const optionalMatches = optArgs.every((a, j) => {
     const op = optionalParameterDefault(params[args.length + j]);
     if (a.default === undefined || op === undefined) return false;
-    const d = markerPassDefault(op);
+    const d = uncanonicalParameterDefault(op);
     return d === undefined || sameParameterDefault(d, a.default);
   });
   if (
@@ -2813,7 +2814,7 @@ function eraseGenericParameters(
   if (required < args.length) {
     const promoted = args.slice(required).map((a, i) => {
       const op = optionalParameterDefault(params[required + i]);
-      const d = op === undefined ? undefined : markerPassDefault(op);
+      const d = op === undefined ? undefined : uncanonicalParameterDefault(op);
       return d === undefined ? undefined : { ...a, default: d };
     });
     const symbolDefaults = new Set<string>();
@@ -2941,24 +2942,6 @@ function replaceSignatureMarkerOperand(
   }
   if (!isFunction(body, 'Typed')) return body;
   return ce._fn('Typed', [body.op1, operand], { canonical: false });
-}
-
-/** The default value of a literal parameter's default operand `op`, read
- * before the parameters are canonicalized. Only the shapes that must be
- * canonical to be read are canonicalized: a `["List"]` or a `["Dictionary"]`
- * with no operand (a raw `["Dictionary"]` is an empty dictionary only once it
- * is canonical), a `Negate` of a number and a `Delimiter` around a number.
- * Every other operand is read as written. A compound operand is not a valid
- * default, and the parameter check refuses it; to canonicalize it here
- * would declare its symbols in the enclosing scope, also when the marker is
- * refused. */
-function markerPassDefault(op: Expression): ParameterDefault | undefined {
-  const canonicalize =
-    ((isFunction(op, 'List') || isFunction(op, 'Dictionary')) &&
-      op.nops === 0) ||
-    (isFunction(op, 'Negate') && op.nops === 1 && isNumber(op.op1)) ||
-    (isFunction(op, 'Delimiter') && op.nops >= 1 && isNumber(op.op1));
-  return literalParameterDefault(canonicalize ? op.canonical : op);
 }
 
 /** True when two parameter default values are the same value. */

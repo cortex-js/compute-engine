@@ -489,7 +489,7 @@ describe('IR profile, batch G23: GLSL and the interval mode', () => {
     const r = glsl(escape());
     expect(r.code).toMatch(/^bool v\d+ = false;$/m);
     expect(r.code).toMatch(
-      /for \(int (\w+) = int\(clamp\(0\.0, [^;]*\); \1 <= \w+ && !v\d+; \1\+\+\) \{/
+      /for \(int (\w+) = 0; \1 <= \w+ && !v\d+; \1\+\+\) \{/
     );
   });
   // A list input, and an inner `Range` of a run-time bound, need run-time

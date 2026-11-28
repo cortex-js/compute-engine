@@ -568,6 +568,22 @@ keep rejecting. (The dot must touch the value it reads: `p.x` is a field
 access, `p .x` is not; and a number never takes a field — `2.x` is a
 multiplication.)
 
+The **spread** copies the fields of a value of a declared record type into
+a new record: `{...f, kind -> "x"}`. The copy is a plain record, not a
+value of the declared type, because only the constructor makes a value of
+the type. (`dictionaryFrom`, which the spread is a short form of, also
+reads the fields of such a value in its list.) To get a value of the type,
+give the copy to the constructor, which checks it:
+
+```epsil-live
+type fig = record{kind: string, size: integer}
+function fig(kind: string, size: integer) { {kind -> kind, size -> size} }
+let f = fig("dot", 2)
+let g = fig({...f, kind -> "box"})
+(g.kind, type(g))
+// ➔ ("box", TypeFrom("fig"))
+```
+
 An **alias** has none of this reserve — it *is* its definition, so an
 alias-typed value works anywhere the underlying shape works:
 

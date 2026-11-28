@@ -565,7 +565,11 @@ describe('IR slice: random frames of one draw site', () => {
     ce.declare('n', 'real');
     ce.assign(
       'L',
-      ce.box(['WithRandomSeed', 7, ['RandomChoice', ['Interval', 0, ['Open', 1]], ['Multiply', 4, 'n']]])
+      ce.box([
+        'WithRandomSeed',
+        7,
+        ['RandomChoice', ['Interval', 0, ['Open', 1]], ['Multiply', 4, 'n']],
+      ])
     );
     const e = ce.box(['Add', ['At', 'L', 1], ['At', 'L', 2]]);
     const result = compile(e, { to: 'javascript', fallback: false });
@@ -680,7 +684,6 @@ describe('IR slice: a random constant is a literal', () => {
     ['a body that reads an input', ['WithRandomSeed', 7, ['Add', ['Random'], 'x']]],
     ['a seed that is an input', ['WithRandomSeed', 'n', ['Random']]],
     ['two draws', ['WithRandomSeed', 7, ['Add', ['Random'], ['Random']]]],
-    ['a list', ['WithRandomSeed', 7, ['List', ['Random'], ['Random']]]],
     ['a loop', ['WithRandomSeed', 7, ['Sum', ['Random'], ['Limits', 'k', 1, 5]]]],
     ['a seed that is a draw', ['WithRandomSeed', ['Random'], ['Random']]],
     ['a seed computed from a draw', ['WithRandomSeed', ['Floor', ['Multiply', 1000, ['Random']]], ['Random']]],

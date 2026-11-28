@@ -446,9 +446,7 @@ describe('IR slice: the fold is the double arithmetic of the row', () => {
       ['Declare', 't', 'real', 0.1],
       ['Equal', ['Add', 't', 0.2], 0.3],
     ];
-    expect(js(closed).run({})).toBe(
-      interpret(ce, ce.box(closed as never), {})
-    );
+    expect(js(closed).run({})).toBe(interpret(ce, ce.box(closed as never), {}));
   });
 });
 
@@ -954,8 +952,9 @@ describe('IR slice: draws', () => {
     { x: -1, n: 0, p: false, D: [], J: [2] },
   ];
   // The frames of one draw site evaluated once (a nested frame has its
-  // own count; a site in an arm of `Or` is evaluated at most once).
-  const ONE_SITE = new Set([0, 2, 11, 13, 14, 16]);
+  // own count; a site in an arm of `Or` is evaluated at most once), and a
+  // frame of draws over literals, which is its interpreter value (CE-1943).
+  const ONE_SITE = new Set([0, 1, 2, 11, 13, 14, 16]);
   test.each(SEEDED.map((p, i) => [JSON.stringify(p), p, i]))(
     '%s: one site gives the interpreter bits, another frame a warning',
     (_, json, i) => {

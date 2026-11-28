@@ -108,6 +108,20 @@ function float(x: number): string {
   return f < 0 || Object.is(f, -0) ? `(${literal})` : literal;
 }
 
+/** The `int` of a loop bound `text`, clamped to ±2^30 (`int()` truncates
+ *  toward zero): the number itself for a literal (`15.0`, `(-3.0)`). */
+function loopBound(text: string): string {
+  const literal = /^\(?(-?\d+(?:\.\d*)?(?:e[+-]?\d+)?)\)?$/.exec(text);
+  if (literal !== null) {
+    // The float32 that GLSL reads, which differs from the double of the
+    // decimal at 2^24 and above.
+    const x = Math.fround(Number(literal[1]));
+    if (Number.isFinite(x))
+      return String(Math.trunc(Math.min(Math.max(x, -1073741824), 1073741824)));
+  }
+  return `int(clamp(${text}, -1073741824.0, 1073741824.0))`;
+}
+
 /** The name of the parameter `index` of the entry for the input `name`:
  *  ASCII letters and digits only (GLSL reserves `__` and `gl_`). */
 function glslParameterName(name: string, index: number): string {
@@ -134,6 +148,13 @@ const COMPLEX: Record<string, [binary: boolean, ...body: string[]]> = {
     'vec2 l = vec2(log(length(a)), _gpu_ir_carg(a));',
     'vec2 w = vec2(b.x * l.x - b.y * l.y, b.x * l.y + b.y * l.x);',
     'return exp(w.x) * vec2(cos(w.y), sin(w.y));'],
+  // The interpreter's `Sign` of a complex, `z/|z|`, and 0 at 0; the parts
+  // are scaled by the larger one first (`csign` of `javascript-runtime.ts`).
+  sign: [false,
+    'float s = max(abs(a.x), abs(a.y));',
+    'if (s == 0.0) return vec2(0.0);',
+    'vec2 u = a / s;',
+    'return u / length(u);'],
   exp: [false, 'return exp(a.x) * vec2(cos(a.y), sin(a.y));'],
   sin: [false, 'return vec2(sin(a.x) * cosh(a.y), cos(a.x) * sinh(a.y));'],
   cos: [false, 'return vec2(cos(a.x) * cosh(a.y), -sin(a.x) * sinh(a.y));'],
@@ -1931,10 +1952,10 @@ export const GLSL: Syntax = deepFreeze({
   declare: (t, name, value) =>
     `${declarator(t, name)}${value === undefined ? '' : ` = ${value}`};`,
   // An `int` counter: a `float` one stops advancing at 2^24. The bounds are
-  // clamped to ±2^30 before the conversion.
+  // clamped to ±2^30 before the conversion; a literal bound is that `int`.
   loopOpen: (k, lo, hi, _passes, done) => [
-    `int ${k}_hi = int(clamp(${hi}, -1073741824.0, 1073741824.0));`,
-    `for (int ${k}_i = int(clamp(${lo}, -1073741824.0, 1073741824.0)); ${k}_i <= ${k}_hi${done === undefined ? '' : ` && !${done}`}; ${k}_i++) {`,
+    `int ${k}_hi = ${loopBound(hi)};`,
+    `for (int ${k}_i = ${loopBound(lo)}; ${k}_i <= ${k}_hi${done === undefined ? '' : ` && !${done}`}; ${k}_i++) {`,
     `  float ${k} = float(${k}_i);`,
   ],
   // A helper is named `_gpu_ir_…` and a user function `_fn_ir_…`: a host

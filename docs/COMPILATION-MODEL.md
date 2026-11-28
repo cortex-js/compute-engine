@@ -3306,7 +3306,9 @@ A block local that holds a record can be written with whole values
 }; out` compiles, with or without the stated type, also in an `if` and in
 a loop that the local crosses. Each value written is of the record type of
 the first value, where a list field can have another length (it is
-carried) and a string field another value. These decline:
+carried) and a string field another value. A string field that every
+write copies (`out.kind` above) keeps its value at compile time, so a
+`match` or an `if` on it compiles only the arm it selects. These decline:
 
 - a field whose inner length is not a constant (a matrix of run-time
   size `M: matrix<real>` in a field declared `list`), and a field of the

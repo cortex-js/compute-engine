@@ -303,8 +303,11 @@ export type Binding = {
   rows?: { lane: 'integer' | 'real'; declaration: Expression };
   /** A local of the lane `record` that statements write whole (CE-1919):
    *  the type that a loop carries, of which each value written is a
-   *  subtype (`looseRecord()` of `lower.ts`). */
+   *  subtype (`looseRecord()` of `lower.ts`), and the declaration that
+   *  `WidenList` makes drop the constants of its string fields where a
+   *  write gives another one. */
   record?: FieldType;
+  recordDeclaration?: Expression;
 };
 /** The names of one scope. A loop frame stops writes to outer locals. */
 export type Frame = { names: Map<string, Binding>; loop: boolean };

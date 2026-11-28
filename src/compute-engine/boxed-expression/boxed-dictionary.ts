@@ -67,7 +67,7 @@ const TYPE_KEYWORD_KEYS = new Set([
   'Infinity',
   'oo',
 ]);
-function isRecordKey(key: string): boolean {
+export function isRecordKey(key: string): boolean {
   return /^[a-zA-Z_][a-zA-Z0-9_]*$/.test(key) && !TYPE_KEYWORD_KEYS.has(key);
 }
 

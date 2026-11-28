@@ -42,6 +42,59 @@
   unchanged. A patch that replaces `evaluate` through
   `ce.declare(name, …, { extend: true })` drops the old `evaluateMod`, unless
   it gives its own.
+- **The agent cards are package exports** (CE-1948).
+  `@cortex-js/compute-engine/for-agents.md` is the Epsil card and
+  `@cortex-js/compute-engine/compute-engine-for-agents.md` the Compute Engine
+  card, so a host that puts a card in a prompt reads it with
+  `require.resolve` or `import.meta.resolve` instead of an internal path of the
+  package. The Epsil card has a new section, "Order of Preference": a library
+  function, then broadcasting, then a pipeline, then a loop, which functions
+  broadcast over a list or a range, and loops rewritten as library calls
+  (`nthPrime(1..100) |> sum`). Its one loop example, the Collatz path, is a
+  loop that the other forms cannot replace.
+- **JavaScript compiles a figure with options, then transformed.** With
+  Tycho's drawing prelude, `polygon(pts, {fill -> "red"}).rotate(t)` and
+  `circle(c, r, {fill -> "red"}).rotate(t)` declined ("the parameter x of
+  figureBox is not a scalar (any)"): the loop that sets the options wrote
+  the figure to a local, and the local lost the value of its `kind` field,
+  so the `match` on the kind compiled every arm. A record local now keeps
+  the value of a string field that every write copies
+  (`out = U(out.kind, …)`); a write of another value still compiles, and
+  the field is then read at run time.
+- **A compiled integral computes the part of its integrand that does not
+  depend on the variable once.** In
+  `\int_x^\infty \frac{e^{-y/2} y^{k/2-1}}{\Gamma(k/2)\, 2^{k/2}}\,dy`, the
+  denominator was computed at each node of the quadrature on JavaScript
+  (CE-1942); it is now computed once per call, also when it is the body
+  of a small user function (interval-js already did this, except for that
+  body). That integral takes about 0.54 ms per call in place of 1.78 ms,
+  with the same values. The same holds for a numeric derivative and the
+  comparison of a `Sort`.
+- **`Sign` of a complex compiles on GLSL**, as `z/|z|`, and `0` at `0`.
+- **Shorter JavaScript and GLSL code**: `x * 1` and `x / 1` are `x`,
+  `-c + x` is written `x - c` and `1 + (-0.4) * y` is written
+  `1 - 0.4 * y`, a list of a constant length is built without a check of
+  its length, and a GLSL loop of constant bounds has no `clamp`. The
+  values are the same, bit for bit.
+- **A seeded random list compiles on interval-js** (CE-1947). With
+  `h := WithRandomSeed(660536, RandomChoice([0, 1), 400))`, the Desmos
+  `h=random(400)`, a sum that reads `h[i+1]` declined on interval-js ("a
+  list whose length is not one number"). The value of `h` is now the
+  interpreter's, a list of point intervals, as on JavaScript; so is
+  `2·WithRandomSeed(…) - 1`, the Desmos `2random(7)-1`, on both targets.
+- **Seeded draws written in place are computed once** (CE-1943).
+  `At(WithRandomSeed(628117, RandomChoice([0, 1), 6561)), …)`, the Desmos
+  `random(9^4)[8θ]`, drew its 6,561 numbers again at each call of the
+  compiled function, on JavaScript and interval-js; the code now holds the
+  interpreter's list, and a call takes about 0.24 µs in place of 24 µs.
+  GLSL declines as before.
+- **`f'(x)` compiles on JavaScript when the derivative has no closed form**
+  (CE-1945). `Apply(Derivative(f, 1), x)` of a user function `f` whose
+  derivative exceeds the engine's size limit declined; it is now the
+  numeric derivative of the call `f(t)` at `x`, as `D(f(x), x)` already
+  compiled, and gives the interpreter's numeric value. Higher orders, a
+  partial closed form (one that keeps a derivative head), GLSL and
+  interval-js still decline.
 
 ### Resolved Issues
 
@@ -57,6 +110,29 @@
   Measured against mpmath, every part has at least 29.4 correct digits at 30
   and 49.4 at 50. `Gamma(a, z0, z1)` with negative points answers too.
   (#666, contributed by [enumeratio](https://github.com/enumeratio))
+- **The spread copies a value of a declared record type** (CE-1913). With
+  `type Fig = record{kind: string, size: integer}`, a constructor function
+  `Fig` and `f = Fig(…)`, `{...f, kind -> "x"}` was an `incompatible-type`
+  error. It is now a plain
+  record with the fields of `f` and the new `kind`. It is not a `Fig`: give
+  it to the constructor, `Fig({...f, kind -> "x"})`, to get one: such a
+  spread literal has a record type when the fields of each part are known,
+  so the constructor accepts the copy. A spread literal with no part of a
+  declared record type keeps the type `dictionary`.
+- **A protocol member with the default `{}` can be implemented.** An
+  implementation that repeated the default of
+  `function f(self: Self, opts: dictionary = {}) -> integer` was refused
+  ("argument 2 declares a default value; the requirement declares {}"), and
+  the type then implemented no member of the protocol. The implementation
+  now matches.
+- **A sum or a product with an `Element` clause and a long range stops at
+  the time limit** (CE-1934). In
+  `["Sum", ["Multiply", "j", "k"], ["Element", "k", ["List", 1, 2]],
+  ["Limits", "j", 1, 1e8]]`, the range was turned into a list of its
+  10⁸ terms before the first term, and the process ran out of memory, also
+  inside `ce.withTimeLimit()`. The terms of the range are now made one at a
+  time, and the evaluation throws a `CancellationError` at the time limit,
+  as the same sum with only `Limits` clauses does.
 
 ## 0.204.3 _2026-11-28_
 

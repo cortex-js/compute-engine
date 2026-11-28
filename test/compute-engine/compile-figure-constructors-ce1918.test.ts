@@ -28,6 +28,10 @@ function withLocal(f: U) -> U { let out: U = f; for k in 1..2 { out = U(out.kind
 function withLocalNoType(f: U) -> U { let out = f; for k in 1..2 { out = U(out.kind, out.n + 1) }; out }
 function grow(w: W, m: integer) -> W { let out = w; for k in 1..m { out = W(out.kind, [...out.xs, k]) }; out }
 function pick(f: U, c: boolean) -> U { let out = f; if c { out = U("b", 10) }; out }
+function keep(f: U, m: integer) -> U { let out = f; for k in 1..m { out = U(out.kind, out.n + 1) }; out }
+function relabel(f: U, m: integer) -> string { let out = f; for k in 1..m { if k == 2 { out = U("z", out.n) } }; out.kind }
+function scalarOnly(x: any) -> real { x + 1 }
+function byKind(f: U) -> real { if f.kind == "c" { 1 } else { scalarOnly([f.n, 2]) } }
 function count(n: real, opts: dictionary = {->}) -> real {
   let s = n
   for k in keys(opts) { s = s + g(opts[k]) }
@@ -95,6 +99,17 @@ describe('CE-1919: a record local written with whole values', () => {
   test('in an if, either arm', () => {
     same('pick(U("c", t), t > 2).n', 3);
     same('pick(U("c", t), t > 2).n', 1);
+  });
+  test('a string field that each write copies stays a constant', () => {
+    // `byKind` compiles only where `kind` is known: its other arm gives a
+    // list to a parameter of type `any` that holds a scalar.
+    same('byKind(keep(U("c", t), 3))');
+  });
+  test('a write of another string value', () => {
+    same('if relabel(U("c", t), 3) == "z" { 1 } else { 0 }');
+    same('if relabel(U("c", t), 1) == "c" { 1 } else { 0 }');
+    same('if pick(U("c", t), t > 2).kind == "b" { 1 } else { 0 }', 3);
+    same('if pick(U("c", t), t > 2).kind == "b" { 1 } else { 0 }', 1);
   });
   test('a write of a field declines', () => {
     const r = run('do { let out = U("c", t); out.n = 4; out.n }');

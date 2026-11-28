@@ -65,13 +65,16 @@ describe('Tycho item 237 — interval-js lowering batch', () => {
     expect(wide.value ?? wide).toEqual({ lo: 1, hi: 4 });
   });
 
-  test('WithRandomSeed(Random()) encloses the support', () => {
-    const r = compile(ce().box(['WithRandomSeed', 628117, ['Random']]), {
-      to: 'interval-js',
-    });
+  test('WithRandomSeed(Random()) is the point of the interpreter value', () => {
+    // A seeded draw over literals is its interpreter value (CE-1943); it
+    // was the support [0, 1] before, which encloses it too.
+    const engine = ce();
+    const json = ['WithRandomSeed', 628117, ['Random']];
+    const r = compile(engine.box(json), { to: 'interval-js' });
     expect(r.success).toBe(true);
     const v: any = r.run({});
-    expect(v.value ?? v).toEqual({ lo: 0, hi: 1 });
+    const want = engine.box(json).N().re;
+    expect(v.value ?? v).toEqual({ lo: want, hi: want });
   });
 
   test('Random with a source argument fails closed', () => {

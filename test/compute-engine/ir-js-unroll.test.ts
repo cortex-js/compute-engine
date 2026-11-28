@@ -106,7 +106,7 @@ describe('IR profile, batch G27: sums written out on JavaScript', () => {
     ];
     const r = check(json);
     expect(r.code).toContain(
-      '(((0 + (Math.sin((1 * _.x)) / 1)) + (Math.sin((2 * _.x)) / 2)) + (Math.sin((3 * _.x)) / 3))'
+      '(((0 + Math.sin(_.x)) + (Math.sin((2 * _.x)) / 2)) + (Math.sin((3 * _.x)) / 3))'
     );
     const [on, off] = [slice(json, true), slice(json, false)];
     expect(on.code).not.toMatch(/for \(/);

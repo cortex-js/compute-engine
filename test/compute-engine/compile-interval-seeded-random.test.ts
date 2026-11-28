@@ -79,7 +79,15 @@ describe('Seeded RandomChoice — what still fails closed', () => {
     declines(['Min', draw(1, -3)], 'outside-profile');
   });
 
-  test('in a position that takes one interval', () => {
-    declines(['Less', draw(1, 3), 1], 'outside-profile');
+  test('in a position that takes one interval: the interpreter value', () => {
+    // Written in place, the seeded list is its interpreter value, a
+    // literal (CE-1943), and `Less` maps over it as over any list.
+    const json = ['Less', draw(1, 3), 1];
+    const r = compile(ce.box(json as any), { to: 'interval-js' });
+    expect(r.success).toBe(true);
+    expect(JSON.stringify(ce.box(json as any).evaluate().json)).toBe(
+      '["List","True","True","True"]'
+    );
+    expect(r.run({})).toEqual(['true', 'true', 'true']);
   });
 });
