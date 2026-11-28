@@ -422,6 +422,19 @@ describe('MATRIX OPERATORS: THE INTERPRETER VALUE ON JAVASCRIPT', () => {
     }
   });
 
+  // A matrix with an infinite entry has no inverse: NaN, where the
+  // interpreter leaves `Inverse` unevaluated (CE-1823).
+  it('Inverse of a matrix with an infinite entry is NaN', () => {
+    for (const inf of [Infinity, -Infinity]) {
+      const m = [
+        [1.5, inf, 1],
+        [1, 1, 1],
+        [4, 3, 2],
+      ];
+      expect(compiled(['Inverse', 'C']).run({ C: m })).toEqual(nan(3, 3));
+    }
+  });
+
   // A name that holds a dimension of `Reshape` is a capture of the program:
   // a host that invalidates on `symbolDeps` compiles again when it changes.
   it('a dimension of Reshape held by a name is in symbolDeps', () => {

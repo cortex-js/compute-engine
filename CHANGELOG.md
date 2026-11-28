@@ -143,6 +143,12 @@
 
 ### Resolved Issues
 
+- **The inverse of a matrix that has an infinite entry stays unevaluated**
+  (CE-1823). `Inverse([[1.5, +oo, 1], [1, 1, 1], [4, 3, 2]])` gave
+  `[[4, -3, -0.5], [-8, 4, 2], [4, 0, -1.5]]` with `evaluate()` and `.N()`,
+  and the same matrix with a complex or a `~oo` entry gave a matrix of NaN
+  and 0. Such a matrix has no inverse: the call now stays unevaluated, as
+  for order 2. In compiled JavaScript, the inverse is a matrix of NaN.
 - **A product with an exact rational, such as a quotient by an exact
   integer, of a number made at a higher precision keeps the digits of a
   double after the precision is set to `'machine'`** (CE-1789). After

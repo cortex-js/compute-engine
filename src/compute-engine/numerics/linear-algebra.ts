@@ -49,12 +49,21 @@ export function determinant(matrix: number[][]): number {
  *  orders 3 to 6, where the pivots of the regular ones were at least
  *  `1.8e11·ε` of theirs. For `2 × 2` the determinant is 0 when it is at
  *  most `1024ε` times the larger of its two products. So a regular matrix
- *  as ill-conditioned as the Hilbert matrix of order 11 is singular here. */
+ *  as ill-conditioned as the Hilbert matrix of order 11 is singular here.
+ *
+ *  The result is also `undefined` when an entry of `m` is infinite: such a
+ *  matrix has no inverse, and the test of a residue is true for every finite
+ *  entry once its bound is infinite, so the elimination would give a matrix
+ *  of finite numbers (`[[1.5, ∞, 1], [1, 1, 1], [4, 3, 2]]` gave
+ *  `[[4, -3, -0.5], [-8, 4, 2], [4, 0, -1.5]]`). A NaN entry gives a matrix
+ *  with NaN entries. */
 export function numberMatrixInverse(
   m: readonly (readonly number[])[]
 ): number[][] | undefined {
   const n = m.length;
   const tiny = 1024 * Number.EPSILON;
+  if (m.some((row) => row.some((x) => x === Infinity || x === -Infinity)))
+    return undefined;
   if (n === 2) {
     const [[a, b], [c, d]] = m;
     const det = a * d + -(b * c);

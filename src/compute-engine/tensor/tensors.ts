@@ -838,6 +838,16 @@ export abstract class AbstractTensor<
     const [m, n] = this.shape;
     if (m !== n) return undefined;
 
+    // A matrix with an infinite entry has no inverse. The elimination below
+    // has no test for it, and gives a matrix of NaN and 0 for
+    // `[[1, ~oo, 1], [1, 1, 1], [4, 3, 2]]`. The kernels of `float64` and
+    // of the complex dtypes have their own test.
+    if (
+      this.dtype === 'expression' &&
+      (this.data as Expression[]).some((x) => x.isInfinity === true)
+    )
+      return undefined;
+
     // A matrix of machine numbers: the kernel of compiled JavaScript. Its
     // test of a singular matrix is relative to the magnitude of the
     // entries; the exact test of a pivot for 0 below misses the rounding

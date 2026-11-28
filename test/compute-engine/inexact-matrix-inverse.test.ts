@@ -188,4 +188,27 @@ describe('Inverse of a matrix with exact and decimal entries', () => {
     expect(inverse.operator).toBe('List');
     expect(cells(inverse)[1][0].re).toBeCloseTo(0.4, 12);
   });
+
+  // A matrix with an infinite entry has no inverse, on every path: a matrix
+  // of machine numbers (`1.5`), of exact entries (the generic elimination),
+  // and of complex entries (CE-1823).
+  it.each([
+    ['a machine number', 1.5, 'PositiveInfinity'],
+    ['a machine number, -oo', 1.5, 'NegativeInfinity'],
+    ['an integer', 1, 'PositiveInfinity'],
+    ['an integer, ~oo', 1, 'ComplexInfinity'],
+    ['a complex number', ['Complex', 1.5, 1], 'PositiveInfinity'],
+    ['a fraction', third, 'PositiveInfinity'],
+  ])(
+    'a matrix with an infinite entry next to %s has no inverse',
+    (_, a, inf) => {
+      const m = list([
+        [a, inf, 1],
+        [1, 1, 1],
+        [4, 3, 2],
+      ]);
+      expect(ce.box(['Inverse', m]).evaluate().operator).toBe('Inverse');
+      expect(ce.box(['Inverse', m]).N().operator).toBe('Inverse');
+    }
+  );
 });
