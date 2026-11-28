@@ -341,13 +341,16 @@ describe('A list local written whole (CE-1481)', () => {
         ['f', 5]
       )
     ).toBeDefined();
-    // An empty list of no stated type has no lane.
-    expect(
-      declines(
-        'function f(n: integer) { let L = []; for k in 1..n { L = [...L, k*k] }; L }',
-        ['f', 4]
-      )
-    ).toMatch(/an empty list/);
+    // An empty list of no stated type takes the integer lane, which a write
+    // of reals widens (`placeEmptyLists()`; CE-1918).
+    agrees(
+      'function f(n: integer) { let L = []; for k in 1..n { L = [...L, k*k] }; L }',
+      ['f', 4]
+    );
+    agrees(
+      'function f(n: integer) { let L = []; for k in 1..n { L = [...L, k/2] }; L }',
+      ['f', 4]
+    );
     // A point written whole.
     expect(
       declines('function f(n: integer) { let p = (1, 2); p = (n, 3); p }', [

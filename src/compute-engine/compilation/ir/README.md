@@ -1650,7 +1650,11 @@ rank 1 of no stated length, of integers, reals, booleans or strings
 position, and an operand of the constructor of a nominal tuple type at the type
 of its field (`Figure("circle", [])`), even when the constructor is inside a
 list literal (CE-1891). A list of no stated element type (`let pts = []`, of
-type `list<unknown>`) takes the integer lane. The memo of `value()` takes no
+type `list<unknown>`) takes the integer lane. The same placement
+(`withPlacedEmptyLists()`) runs for the operands of a constructor of a nominal
+tuple type in the code (`Figure(kind, geom, [])` in a function body), and for
+the value of a block local at its stated type, or at the type of its value
+(`let b = []`; CE-1918). The memo of `value()` takes no
 node that holds such a `List()`: its key does not have the place of the node. No
 value has a stated length of 0: the result of a function whose length is the
 constant 0 keeps its length value, and the read of a record field of the stated
@@ -2036,8 +2040,8 @@ it as a result before the lists. The gasket's `fillGap` and `generations`
 (`out = [...out, (…)]`, `out = fillGap(…, out)`,
 `out = [...take(out, i), c, ...drop(out, i)]`) compile this way. A local with
 both a whole write and a write in place declines with the cause of the paragraph
-above; so do a point written whole and an empty list of no stated type (no
-lane). GLSL (no run-time length), the interval mode and the `bigint` mode
+above; so does a point written whole. An empty list of no stated type takes
+the integer lane, which a write of reals widens (CE-1918). GLSL (no run-time length), the interval mode and the `bigint` mode
 decline such a local.
 
 A list operator that declines an effect in an element, in its function or in a
@@ -4105,6 +4109,16 @@ tuple, the discharges of `absent()`.
   (`recordCycle()`): the type of a record on a cycle is a fixed point that the
   lowering does not compute, and a record that grows at each call would lower a
   new function at each.
+- **Record locals** (CE-1919). A block local whose first value is a record,
+  and which the later statements write with whole values only
+  (`rebuiltOnly()`), is a local of the lane `record` (`Binding.record`): a loop
+  carries it as a value of `looseRecord()` of the type of its first value (a
+  carried first length for each list field, no constant of a string field), and
+  `assign()` takes a value of a subtype of that type (`isSubType()`); `branch()`
+  joins two arms as it joins two records (`joinType()`). A write of a field, a
+  parallel write, and a value whose fields have other lanes or ranks decline.
+  A stated nominal tuple type or declared record type (`let out: Figure = fig`)
+  is proven by the static type of the value.
 - **Dictionaries** (CE-1771). A dictionary literal `{w -> t, fill -> "red"}` is
   a record of its values, in the order of its keys (`dictionary()` of
   `lower-records.ts`): its `names` are the keys and its `head` is `Dictionary`
@@ -4118,7 +4132,14 @@ tuple, the discharges of `absent()`.
   by its IR type (`valueTypeOf()` gives `undefined`). A parameter of no stated
   type or `any` holds a dictionary as it holds another record, and so does a
   parameter of a `dictionary` type (CE-1911), which takes the record of a
-  dictionary literal only (`held()`): another record declines there. A parameter
+  dictionary literal only (`held()`): another record declines there. A `for k
+  in keys(d)` of such a record is unrolled, a pass per key with `k` the string
+  constant of the key (`loop()` of `lower.ts`; CE-1920), unless the body has a
+  `Break` or a `Continue` or the loop is parallel; `d[k]` then reads the field
+  by its constant key, and a number read so, given to a parameter of type
+  `any`, keeps its lane (`held()`), so a test of its type is decided by the
+  lane as for a field itself. `Element` of a string in a `List` literal of
+  strings is the `Or` of `Equal`s (`search()` of `lower-lists.ts`). A parameter
   of a `record` type declines ("not a scalar"). As the result of the code a
   dictionary is an object of its keys, and at a function of the host it is the
   engine's dictionary of its keys (`boxValue()` of `print-js.ts`). The values of

@@ -141,6 +141,7 @@ import {
   hasOwnLowering,
   hasUnsettledShape,
   settlesNoShape,
+  isDeclaredRecordType,
   isUntyped,
   LANE_MISMATCH,
   listedOf,
@@ -531,6 +532,26 @@ export const isHostVarOp = (op: string) => /^host\d+\./.test(op);
  *  (`Program.hosts`): an effectful operation, spelled as a call of
  *  `_SYS.hosts[k]`. */
 export const hostCallOp = (k: number) => `call.host${k}`;
+
+/** The type of a record local that statements write with whole values
+ *  (CE-1919): `t`, the type of its first value, with a carried first axis
+ *  for each list field that can carry one (no tuple mark at that axis,
+ *  `widens()` of `ir.ts`) and no constant of a string field, at every
+ *  depth. A value written is of a subtype of it (`isSubType()`), whose list
+ *  fields can have other lengths and whose string fields other values. */
+function looseRecord(t: FieldType): FieldType {
+  const { constant: _, ...rest } = t;
+  if (t.fields === undefined) return rest;
+  return {
+    ...rest,
+    fields: t.fields.map((f, k) => {
+      const g = looseRecord(f);
+      return f.shape.length > 0 && t.marks?.[k] !== 0
+        ? { ...g, shape: ['carried', ...f.shape.slice(1)] }
+        : g;
+    }),
+  };
+}
 
 /** Whether the IR operation `op` is a `hostCallOp()`. */
 export const isHostCallOp = (op: string): boolean => /^call\.host\d+$/.test(op);
@@ -2629,11 +2650,15 @@ function lowerOnce(
           );
         return records.payload(e, d);
       }
+      // The constructor of a named tuple type: a record. A `List()`
+      // operand has the lane of the type of its field (`list<string>`;
+      // `placeEmptyLists()`, CE-1918).
+      const construct = () =>
+        withPlacedEmptyLists(e, 'unknown', () => records.construct(e));
       if (d !== undefined && recordConstructor(e) !== undefined)
-        return records.construct(e);
+        return construct();
       if (isHostDefinition(e)) return hostCall(e, want);
-      // The constructor of a named tuple type: a record.
-      if (recordConstructor(e) !== undefined) return records.construct(e);
+      if (recordConstructor(e) !== undefined) return construct();
       decline(
         e,
         e.operatorDefinition === undefined && e.valueDefinition === undefined
@@ -4912,20 +4937,9 @@ function lowerOnce(
     // After `expression()`: a decline in it leaves no capture behind. A
     // `List()` of `v` has the lane of its place in the type of the name
     // while `v` is lowered (`placeEmptyLists()`).
-    const placed = new Map<Expression, Lane | null>();
-    if (!literal) placeEmptyLists(v, e.type.type, placed);
-    const before = [...placed.keys()].map(
-      (k) => [k, emptyLanes.get(k)] as const
-    );
-    for (const [k, lane] of placed) emptyLanes.set(k, lane);
-    let x: V | undefined;
-    try {
-      x = literal ? undefined : expression(e, name, v);
-    } finally {
-      for (const [k, lane] of before)
-        if (lane === undefined) emptyLanes.delete(k);
-        else emptyLanes.set(k, lane);
-    }
+    const x = literal
+      ? undefined
+      : withPlacedEmptyLists(v, e.type.type, () => expression(e, name, v));
     if (!library) b.captures.add(name);
     if (x !== undefined) return x;
     // The interval mode: a constant of the library whose value is not exact
@@ -6745,8 +6759,31 @@ function lowerOnce(
           frame.names.set(n, { v, role: 'constant' });
           return void (result = v);
         }
-        // A record (README, "Records") is a constant: a local that a later
-        // statement writes declines (a loop or an arm would carry it).
+        // A record (README, "Records") that no later statement writes is a
+        // constant. One that the later statements write with whole values
+        // only (`out = Figure(…)`, `rebuiltOnly()`) is a local, of the type
+        // that a loop carries (`looseRecord()`; CE-1919); a write of a
+        // field, and any other write, declines.
+        const scope = e.ops.slice(i + 1);
+        if (
+          options.javascript &&
+          type(v).lane === 'record' &&
+          type(v).shape.length === 0 &&
+          scope.some((y) => facts(y).writes.has(n))
+        ) {
+          if (!rebuiltOnly(scope, n))
+            decline(
+              s,
+              `a record in the local ${n}, which a statement writes other than with a whole value`
+            );
+          frame.names.set(n, {
+            v,
+            lane: 'record',
+            role: 'local',
+            record: looseRecord(type(v)),
+          });
+          return void (result = v);
+        }
         if (type(v).lane === 'record' || type(v).lane === 'nothing') {
           if (e.ops.some((y) => facts(y).writes.has(n)))
             decline(s, `a record in the local ${n}, which a statement writes`);
@@ -6879,6 +6916,31 @@ function lowerOnce(
             bindLocal(s, i, name.symbol, v, value, 'unknown', constant);
             return;
           }
+          // A local of a named tuple type or a declared record type
+          // (`let out: Figure = fig`): a record, as a local of no stated
+          // type that holds one (`bindLocal()`; CE-1919). Its value proves
+          // the stated type.
+          const stated = scalarLocal ? undefined : ce.type(typeName).type;
+          if (
+            stated !== undefined &&
+            listType === undefined &&
+            wholeType === undefined &&
+            (tupleBody(stated) !== undefined || isDeclaredRecordType(stated))
+          ) {
+            if (!isSubtype(value.type.type, stated))
+              decline(
+                s,
+                `a value of type ${value.type.toString()} for a local declared ${typeName}`
+              );
+            const v = cx.value(value)!;
+            if (type(v).lane !== 'record')
+              decline(
+                s,
+                `a value of ${typeToString(type(v))} for a local declared ${typeName}, not a record`
+              );
+            bindLocal(s, i, name.symbol, v, value, 'unknown', constant);
+            return;
+          }
           if (!scalarLocal && listType === undefined && wholeType === undefined)
             decline(s, `a local of type ${typeName}`);
           // A constant list that a later statement writes declines (the
@@ -6893,8 +6955,14 @@ function lowerOnce(
           }
           // A list (or a tuple) local of no stated type is its value, a
           // local that no `Assign` writes (`assign()` declines one). A list
-          // of lists of run-time length is its value too (CE-1736).
-          const v = wholeRows(value);
+          // of lists of run-time length is its value too (CE-1736). A
+          // `List()` in the value has the lane of its place in the stated
+          // type (`let b: list<string> = []`, `Figure(…, [])`; CE-1918).
+          const v = withPlacedEmptyLists(
+            value,
+            typeName === 'unknown' ? value.type.type : ce.type(typeName).type,
+            () => wholeRows(value)
+          );
           if (rebuilt && (!scalarLocal || type(v).shape.length > 0)) {
             if (isSymbol(constant, 'True'))
               decline(s, 'a write to a constant list local');
@@ -7116,8 +7184,13 @@ function lowerOnce(
       const k = b.newValue(scalarType('integer'));
       const params = carried.flatMap((x) => {
         if (x.whole === undefined) {
+          // A record local (CE-1919): of the type it carries.
           const p = b.newValue(
-            x.lane === 'array' ? type(x.v) : scalarType(x.lane!)
+            x.record !== undefined
+              ? (x.record as IRType)
+              : x.lane === 'array'
+                ? type(x.v)
+                : scalarType(x.lane!)
           );
           // A list of lists of run-time length (CE-1736): the lane of its
           // elements is that of the local.
@@ -7213,6 +7286,39 @@ function lowerOnce(
             }),
           parallel && j === 1
         );
+      }
+      // `for k in keys(d)` where `d` holds a dictionary literal (a record
+      // of the head `Dictionary`, CE-1771): its keys are known when the
+      // code is emitted, so the clause is a loop of one pass per key, in
+      // the order of the keys, with `k` the key, a string (CE-1920): each
+      // pass counts for the `iterationBudget`. A read `d[k]` is then a read
+      // of that key. `{->}` has no pass. With a `Break` or a `Continue`, in
+      // a `ParallelLoop`, or of a `Keys` that is not the library's, `Keys`
+      // declines below.
+      const keys = c.ops[1];
+      if (
+        javascript &&
+        heads === 0 &&
+        !parallel &&
+        isSymbol(index) &&
+        isFunction(keys, 'Keys') &&
+        keys.nops === 1 &&
+        isLibrary(keys)
+      ) {
+        const t = type(value(keys.ops[0])!);
+        if (t.lane === 'record' && t.head === 'Dictionary') {
+          for (const key of t.names ?? [])
+            counted(b.constant(0, 'integer'), b.constant(0, 'integer'), () =>
+              withFrame(false, (frame) => {
+                frame.names.set(index.symbol, {
+                  v: b.constant(key, 'string'),
+                  role: 'index',
+                });
+                clause(j + 1);
+              })
+            );
+          return;
+        }
       }
       const s = lists.source(c.ops[1]);
       const lo = b.constant(0, 'integer');
@@ -7943,6 +8049,19 @@ function lowerOnce(
       // (`wholeOnly()`): a statement gives none.
       return want ? x : undefined;
     }
+    // A record local written whole (CE-1919): a record of a subtype of the
+    // type that a loop carries, of the same nominal type and fields.
+    if (binding.record !== undefined) {
+      const x = value(e.ops[1]);
+      if (x === undefined || !isSubType(type(x), binding.record, constant))
+        decline(
+          e,
+          `a value of type ${x === undefined ? 'nothing' : typeToString(type(x))} written to a local that holds a record of type ${typeToString(binding.record as IRType)}`,
+          LANE_MISMATCH
+        );
+      binding.v = x;
+      return x;
+    }
     // A local that holds an array: another array of the same cells.
     if (binding.lane === 'array') {
       const x = value(e.ops[1])!;
@@ -7984,6 +8103,11 @@ function lowerOnce(
     // A local that holds a list of lists of run-time length is written by
     // `assign()` only, which checks the lane of its elements.
     bindings.forEach((x, k) => {
+      if (x.record !== undefined)
+        decline(
+          e,
+          `a parallel write of ${seen[k] || 'a local'}, a local that holds a record`
+        );
       if (x.lane === 'rows')
         decline(
           e,
@@ -8533,6 +8657,26 @@ function lowerOnce(
           : [];
     if (held.includes(true)) out.set(v, null);
     return out.has(v);
+  };
+
+  /** The value of `f()`, while each `List()` of `v`, the value of a place
+   *  of the type `t`, has the lane of its place (`placeEmptyLists()`); the
+   *  lanes are restored after, since a node of the canonical form can be
+   *  at more than one place. */
+  const withPlacedEmptyLists = <T>(v: Expression, t: Type, f: () => T): T => {
+    const placed = new Map<Expression, Lane | null>();
+    placeEmptyLists(v, t, placed);
+    const before = [...placed.keys()].map(
+      (k) => [k, emptyLanes.get(k)] as const
+    );
+    for (const [k, lane] of placed) emptyLanes.set(k, lane);
+    try {
+      return f();
+    } finally {
+      for (const [k, lane] of before)
+        if (lane === undefined) emptyLanes.delete(k);
+        else emptyLanes.set(k, lane);
+    }
   };
 
   /** The list of no element of the lane `lane`: a build of no element (a

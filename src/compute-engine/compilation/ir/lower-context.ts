@@ -29,7 +29,15 @@ import {
   isFunction,
   isSymbol,
 } from '../../boxed-expression/type-guards.js';
-import type { Assigned, Builder, IRType, Lane, Region, V } from './ir.js';
+import type {
+  Assigned,
+  Builder,
+  FieldType,
+  IRType,
+  Lane,
+  Region,
+  V,
+} from './ir.js';
 import type { OperatorRow } from './operators.js';
 import { STANDARD_LIBRARIES } from '../../library/library.js';
 
@@ -293,6 +301,10 @@ export type Binding = {
    *  the declaration that `WidenList` puts on the real lane where a write
    *  gives reals. */
   rows?: { lane: 'integer' | 'real'; declaration: Expression };
+  /** A local of the lane `record` that statements write whole (CE-1919):
+   *  the type that a loop carries, of which each value written is a
+   *  subtype (`looseRecord()` of `lower.ts`). */
+  record?: FieldType;
 };
 /** The names of one scope. A loop frame stops writes to outer locals. */
 export type Frame = { names: Map<string, Binding>; loop: boolean };

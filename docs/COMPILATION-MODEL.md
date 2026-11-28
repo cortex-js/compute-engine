@@ -3092,7 +3092,11 @@ type of its position in a tuple (`let fig = ("circle", [])`, read with
 (`Figure("circle", [])`), including a record inside a captured list
 (CE-1891). With no stated element type (`let pts = []`) it is
 an empty list of integers: `length(pts)` and `[...pts, t]` compile, and
-`[...pts, "a"]` declines, since the two lists are of two types. An empty
+`[...pts, "a"]` declines, since the two lists are of two types. A `[]` in
+the compiled code itself takes the type of its place the same way (CE-1918):
+a field of a constructor of a named tuple type (`Figure(kind, geom, [])` in
+the body of a function, of the field `badOptions: list<string>`), and the
+value of a block local (`let b = []`, an empty list of integers). An empty
 list of points (`let x: list<tuple<real, real>> = []`), one at a union type
 (`list<string> | nothing`) and a `[]` that the program writes as an argument
 of a function still decline ("an empty list"), and so do GLSL and
@@ -3277,13 +3281,24 @@ lists of run-time lengths: `f.geom + h.geom` throws a `RangeError`
 interpreter gives that error. A field declared `list<real>` holds reals,
 also of an operand of integers. The lane and the rank of a field stay
 settled at compile time; only the first length is read at run time, and
-that read is not a test of a type. These decline:
+that read is not a test of a type.
+
+A block local that holds a record can be written with whole values
+(CE-1919): `let out: U = f; for k in 1..2 { out = U(out.kind, out.n + 1)
+}; out` compiles, with or without the stated type, also in an `if` and in
+a loop that the local crosses. Each value written is of the record type of
+the first value, where a list field can have another length (it is
+carried) and a string field another value. These decline:
 
 - a field whose inner length is not a constant (a matrix of run-time
   size `M: matrix<real>` in a field declared `list`), and a field of the
   lane `rows` (`(chunk(L, 2), t)`, whose rows can have two lengths);
-- a record in a local that a statement writes, a record made in a random
+- a record in a local that a statement writes other than with a whole
+  value (`out.n = 4`, or a parallel assignment), a record made in a random
   frame, and the arguments of a rest parameter of a run-time length;
+- a whole value written to a record local whose fields have other lanes or
+  ranks than its first value (`let out = V("c", Nothing); out = V("c",
+  "red")` of a field `fill: any`): the local would hold two shapes (R3);
 - a record or a list of several lanes given to a parameter declared `list`:
   Tycho's `label` (the geometry `[x, y, text]`) and `group` (a list of
   figures) decline at `figureOf(kind: string, geom: list)`;
@@ -3698,14 +3713,15 @@ points of reals or integers, whose length can change at each write
 the passes of a loop and between the arms of an `if`. Each write gives a new
 value and no array is changed, so any read of `L` is allowed. The type is
 the declared one or that of the value (a declared empty list `[]` is the
-empty list of that type); a written value of another rank, another length
+empty list of that type, and `let L = []` of no stated type an empty list of
+integers, CE-1918); a written value of another rank, another length
 of its points, or a lane that is not a sub-lane declines, except a real list
 written to a list of integers of no declared type, which puts the local on
 reals as above.
 
 Every other write to a list local declines: a local with both a whole write
 and a write in place (`L = [...L, 2]` and `L[1] = 5`), a tuple (a point)
-written whole, an empty list of no stated type (`let L = []`), a write in a
+written whole, a write in a
 `Sum` or a `Product` body to a list local declared outside it, and
 `xs = Append(xs, v)` (the operator `Append` is not compiled). GLSL and the
 interval mode decline a list local that its block writes.
@@ -3716,7 +3732,14 @@ On JavaScript a dictionary literal is a record (`compilation/ir/README.md`,
 "Records"): its values are the fields and its keys the field names.
 `d.a` and `d["a"]` read the field `a`; a key that the literal does not have,
 an index that is not a constant key (`d[1]`), and every other reader
-(`Length`, `Keys`, arithmetic, `Map`) decline. As the result of the code,
+(`Length`, `Keys`, arithmetic, `Map`) decline. One exception (CE-1920): a
+`for k in keys(d)` is a pass per key, in the order of the keys, with `k`
+that key, so `d[k]` reads its field (Tycho's `figureStyled`). `{->}` has no
+pass. With a `break` or a `continue` in the body, or in a `parallel for`,
+`Keys` declines. A number read from a dictionary in this way, given to a
+parameter of type `any`, keeps its lane, so `v is real` and `v is string`
+are decided; `v is integer` of a real declines. A string in a list literal
+of strings (`k in ["range", "smooth"]`) compiles too. As the result of the code,
 `run()` gives an object of the keys (`{a -> x + 1}` at `x = 1`:
 `{ a: 2 }`); a function of the host receives the dictionary. A value of the
 dictionary that is a `List` or a `Tuple` literal reaches the host as that

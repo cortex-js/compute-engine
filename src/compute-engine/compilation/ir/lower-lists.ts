@@ -9,6 +9,7 @@
 import {
   isFunction,
   isNumber,
+  isString,
   isSymbol,
 } from '../../boxed-expression/type-guards.js';
 import type { Expression } from '../../global-types.js';
@@ -1981,7 +1982,9 @@ export function listLowering(cx: Lowering) {
    *  real number: a filter of the indices from 0 whose element is the same
    *  as `v` (`same()`); `Contains` is a count above 0, `IndexOf` the first
    *  index kept plus 1, or 0. A list with an effect declines (the
-   *  interpreter stops at the first match). */
+   *  interpreter stops at the first match). `Element` and `Contains` of a
+   *  string in a `List` literal of strings (not `IndexOf`): the `Or` of its
+   *  equality to each element (CE-1920). */
   const search = (e: Fn): V => {
     // `Element(v, L)` is `Contains(L, v)`.
     const [l, needle] =
@@ -2005,6 +2008,27 @@ export function listLowering(cx: Lowering) {
         : isNumber(x)
           ? x.isExact !== true || x.type.matches('integer')
           : isFunction(x, 'List') && x.ops.every(doubles);
+    // A string in a `List` literal of strings (`k in ["range", "smooth"]`
+    // of Tycho's `figureStyled`): the `Or` of its equality to each, which
+    // the passes fold for a key known when the code is emitted (CE-1920).
+    const strings = literalList(cx, l) ? l.ops.filter(isString) : [];
+    if (
+      e.operator !== 'IndexOf' &&
+      needle.type.matches('string') &&
+      literalList(cx, l) &&
+      strings.length === l.nops
+    ) {
+      const v = cx.scalar(needle);
+      if (type(v).lane === 'string' && type(v).shape.length === 0)
+        return strings.reduce<V>(
+          (found, x) =>
+            cx.apply(e, 'Or', [
+              found,
+              cx.apply(e, 'Equal', [v, b.constant(x.string, 'string')]),
+            ]),
+          b.constant(false, 'boolean')
+        );
+    }
     const integers =
       l.type.matches('list<integer>') && needle.type.matches('integer');
     if (!integers && !(doubles(l) && doubles(needle)))

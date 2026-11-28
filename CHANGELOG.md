@@ -2,6 +2,20 @@
 
 ### Improvements
 
+- **JavaScript compiles the figure constructors of a drawing prelude:
+  an empty list in a record, a record local that a loop replaces, and a
+  loop over the keys of a dictionary.** Three shapes declined:
+  `T("c", [t], [])` of a field `bad: list<string>` ("List(): an empty
+  list"), `let out: U = f; for k in 1..2 { out = U(out.kind, out.n + 1) }`
+  ("a local of type U"), and `for k in keys(opts) { s = s + g(opts[k]) }`
+  of `opts: dictionary` ("the operator Keys is not supported by the
+  compiler"). Each now compiles and gives the interpreter's value. The loop
+  over the keys of a dictionary literal runs a pass per key, `{->}` none;
+  `k in ["range", "smooth"]` of a string compiles too. A write of a field
+  of a record local (`out.n = 4`) and a write of a record whose fields have
+  other types than the first value still decline (CE-1918, CE-1919,
+  CE-1920).
+
 - **JavaScript compiles a list of records.** With
   `type P = tuple<k: integer, x: real>`, `[P(k, t * k) for k in 1..3]`
   declined ("a record made in a build, a filter or a random frame"). It now

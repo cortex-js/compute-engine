@@ -962,11 +962,18 @@ export function functionLowering(
     // A number at `any`: the lane that its static type proves, or that a
     // parameter of this kind holds, so that a test of its type in the body
     // is decided by the lane (`matchesType()` of `lower-match.ts`). A
-    // parameter of no stated type keeps the real lane of today.
+    // parameter of no stated type keeps the real lane of today. A field of
+    // a dictionary literal (`opts[k]` of `opts: dictionary`, whose static
+    // type is `any`) has the lane of its value in the literal, as a test of
+    // the type of the field itself is decided (`matchesType()`; CE-1920).
+    const read = b.defs.get(v);
+    const dictionaryField =
+      read?.op === 'field' && type(read.args[0]).head === 'Dictionary';
     return 'any' in p &&
       p.any &&
       (t.lane === 'real' || t.lane === 'integer') &&
       (cx.heldParams.has(v) ||
+        dictionaryField ||
         (op !== undefined && isSubtype(op.type.type, t.lane)))
       ? { lane: t.lane, shape: [] }
       : undefined;
