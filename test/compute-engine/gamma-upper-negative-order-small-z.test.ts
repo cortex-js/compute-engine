@@ -173,6 +173,23 @@ describe('GAMMA(s, z) for non-integer s < -1 and small z', () => {
     expect(typeof incompleteGammaUpper(-1e7 - 0.5, 0.5)).toBe('number');
   });
 
+  test('an integer order past the recurrence cap ends (CE-1795)', () => {
+    // The recurrence from E₁(z) ran −s steps: Γ(−1e300, 0.5) did not end.
+    // Past 4096 steps the continued fraction answers; references are mpmath.
+    expect(incompleteGammaUpper(-1e300, 0.5)).toBe(Infinity);
+    expect(ce.expr(['Gamma', -1e300, 0.5]).N().re).toBe(Infinity);
+    expect(
+      rel(incompleteGammaUpper(-5000, 0.999), 0.0109557445538469958866)
+    ).toBeLessThan(TOLERANCE);
+    expect(
+      rel(incompleteGammaUpper(-4097, 0.995), 74841.714059106214035)
+    ).toBeLessThan(TOLERANCE);
+    // The last order of the recurrence
+    expect(
+      rel(incompleteGammaUpper(-4096, 0.995), 74485.681614643912925)
+    ).toBeLessThan(TOLERANCE);
+  });
+
   test('integer and positive orders are unchanged', () => {
     expect(
       rel((ce.expr(['Gamma', -2, 0.001]).N() as any).re, 499003.91543645285562)

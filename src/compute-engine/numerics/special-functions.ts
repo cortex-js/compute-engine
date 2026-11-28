@@ -760,9 +760,13 @@ export function incompleteGammaUpper(s: number, z: number): number {
   // accurate there: measured against mpmath for s from 0 to −30 and
   // 1 ≤ z ≤ 200 (and at s = −100 for z = 1, 3, 50), the relative error is
   // below 4e-14. The recurrence stays
-  // for z < 1, where it is accurate and the fraction converges slowly.
+  // for z < 1, where it is accurate and the fraction converges slowly. The
+  // recurrence runs −s steps, so past `UPPER_GAMMA_SHIFT_MAX_ORDER` the
+  // fraction answers, as for a non-integer order (Γ(−1e300, 0.5) did not end).
   if (Number.isInteger(s) && s <= 0)
-    return z >= 1 ? upperGammaCFReal(s, z) : upperGammaNegIntReal(s, z);
+    return z < 1 && -s <= UPPER_GAMMA_SHIFT_MAX_ORDER
+      ? upperGammaNegIntReal(s, z)
+      : upperGammaCFReal(s, z);
   if (
     s < -1 &&
     z < UPPER_GAMMA_SHIFT_LIMIT &&

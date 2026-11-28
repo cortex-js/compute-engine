@@ -143,6 +143,13 @@
 
 ### Resolved Issues
 
+- **`Gamma(s, z)` ends for a very large negative integer order** (CE-1795).
+  At machine precision, `ce.box(['Gamma', -1e300, 0.5]).N()` did not end:
+  for an integer `s ≤ 0` and `0 < z < 1`, the evaluation ran `−s` steps of a
+  recurrence. Past 4096 steps it now uses the continued fraction, as for a
+  non-integer order, and gives `+Infinity` here. `Gamma(-5000, 0.999)` is
+  `0.010955744553847`.
+
 - **A series of an inverse trigonometric or hyperbolic function, of
   `GammaLn`, `LogGamma`, `PolyLog`, `ExpIntegralEi`, `CosIntegral`,
   `CoshIntegral`, `LogIntegral`, `EllipticK` or `EllipticE`, whose complex
