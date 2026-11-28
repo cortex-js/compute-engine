@@ -133,6 +133,29 @@ export function libraryFn<T>(
 }
 
 /**
+ * The canonical call `name(...ops)` of the library operator `name`: as
+ * {@link libraryFn}, but `ce.function()` builds the call outside a scope
+ * that shadows `name`, so the call is in canonical form (a fold of the
+ * library operator can give another expression).
+ */
+export function libraryFunction<T>(
+  ce: Parameters<typeof shadowsLibraryName>[0] & {
+    _libraryCall(
+      name: string,
+      ops: ReadonlyArray<NoInfer<T>>
+    ): NoInfer<T> | undefined;
+    function(name: string, ops: ReadonlyArray<NoInfer<T>>): NoInfer<T>;
+  },
+  name: string,
+  ops: ReadonlyArray<T>
+): T {
+  return (
+    (shadowsLibraryName(ce, name) ? ce._libraryCall(name, ops) : undefined) ??
+    ce.function(name, ops)
+  );
+}
+
+/**
  * True when `node` is a call of the library operator `name`: a library rule
  * (a canonical fold, a simplification rule, a derivative table, a compiled
  * lowering) is a fact about the library operator, and it applies to the node

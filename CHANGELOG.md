@@ -143,6 +143,13 @@
 
 ### Resolved Issues
 
+- **In a scope with a user function named `Power` or `Root`, the reciprocal
+  of a power with a symbolic exponent stays a power** (CE-1793). The
+  reciprocal of the library call `y^x` was a call of the user function: with
+  `Power` defined as `(a, b) ↦ a + b + 100`, it gave `101` at `x = 2`,
+  `y = 3`. It now gives `1/9`. The same applies to the reciprocal of
+  `Root(y, x)`.
+
 - **In a scope with a user function named `Sqrt` or `Root`, a power of a call
   of that function is a power of its value** (CE-1792). After
   `ce.declare('Sqrt', 'function')` and

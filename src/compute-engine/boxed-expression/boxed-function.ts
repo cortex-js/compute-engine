@@ -29,6 +29,7 @@ import {
   isLibraryCall,
   isLibraryOperator,
   libraryFn,
+  libraryFunction,
   markLibraryCall,
   noteStructuralScope,
   sameOperator,
@@ -4441,7 +4442,7 @@ export class BoxedFunction
     if (this.operator === 'Power') {
       const neg = this.op2.neg();
       if (neg.operator !== 'Negate') return this.op1.pow(neg);
-      return this.engine.function('Power', [this.op1, neg]);
+      return libraryFunction(ce, 'Power', [this.op1, neg]);
     }
     if (this.operator === 'Root') {
       // `root()` normalizes a negative index to the reciprocal-of-root form
@@ -4449,7 +4450,7 @@ export class BoxedFunction
       // `Divide(1, Root(x, n))` — no negative-index `Root(a, -n)` (#13).
       const neg = this.op2.neg();
       if (neg.operator !== 'Negate') return this.op1.root(neg);
-      return this.engine.function('Root', [this.op1, neg]);
+      return libraryFunction(ce, 'Root', [this.op1, neg]);
     }
     if (this.operator === 'Exp') return this.engine.E.pow(this.op1.neg());
     if (this.operator === 'Rational') return this.op2.div(this.op1);

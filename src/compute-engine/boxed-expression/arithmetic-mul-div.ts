@@ -31,6 +31,7 @@ import { bignumPreferred, hasAssignedVariable } from './utils.js';
 import {
   isLibraryOperator,
   libraryFn,
+  libraryFunction,
   shadowsLibraryName,
   shadowsLibraryOperator,
 } from '../library-shadowing.js';
@@ -1572,11 +1573,7 @@ function libraryPower(
   base: Expression,
   exponent: Expression
 ): Expression {
-  return (
-    (shadowsLibraryName(ce, 'Power')
-      ? ce._libraryCall('Power', [base, exponent])
-      : undefined) ?? ce.function('Power', [base, exponent])
-  );
+  return libraryFunction(ce, 'Power', [base, exponent]);
 }
 
 function termsAsExpression(
