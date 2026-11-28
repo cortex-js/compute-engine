@@ -7014,11 +7014,7 @@ function lowerOnce(
           // (`let b: list<real> = [1]`): a local of no stated type, whose
           // value proves the stated type (CE-1922). A `List()` in the value
           // has the lane of its place in the stated type (CE-1918).
-          if (
-            stated !== undefined &&
-            !written &&
-            isSubtype(stated, 'list')
-          ) {
+          if (stated !== undefined && !written && isSubtype(stated, 'list')) {
             if (!isSubtype(value.type.type, stated))
               decline(
                 s,

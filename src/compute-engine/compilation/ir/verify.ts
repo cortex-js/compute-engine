@@ -227,9 +227,9 @@ export function verify(p: Program, rows: readonly OperatorRow[]): void {
           const want: FieldType = measured
             ? { ...f!, shape: [n, ...f!.shape.slice(1)] }
             : f!;
-          if (
-            !(isSubType(out, want, constant) && isSubType(want, out, constant))
-          )
+          if (!(
+            isSubType(out, want, constant) && isSubType(want, out, constant)
+          ))
             fail(`field v${i.out}: the result is not ${typeToString(f!)}`);
           return;
         }
