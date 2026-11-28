@@ -25978,7 +25978,11 @@ function enumerateSetComprehension(
         dom,
         ...(condition ? [condition] : []),
       ]),
-      ce
+      ce,
+      'integers',
+      // The retry below evaluates the domain, with the caller's options. A
+      // view that evaluates to itself (`Take(L, 2)`) is not read (CE-1937).
+      false
     );
 
   let result = extract(domain);
@@ -26140,7 +26144,11 @@ async function enumerateSetComprehensionAsync(
   const extract = (dom: Expression) =>
     extractFiniteDomainWithReason(
       ce._fn('Element', [ce.symbol(variable), dom]),
-      ce
+      ce,
+      'integers',
+      // The retry below evaluates the domain asynchronously. A view that
+      // evaluates to itself (`Take(L, 2)`) is not read (CE-1937).
+      false
     );
   let result = extract(domain);
   if (result.status !== 'success') {

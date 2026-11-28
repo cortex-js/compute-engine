@@ -81,11 +81,17 @@ function filterValuesWithCondition(
  * `'real-interval'`. A quantifier uses `'reals'`, so
  * `Exists(Element(x, Interval(1, 2)), x == 1.5)` is not decided from the
  * values 1 and 2 only.
+ *
+ * With `evaluateCalls` (the default), a pure call whose value is a finite
+ * collection (`Element(k, Sort(L))`) is evaluated and its elements are the
+ * values. A caller that does not read the values, or that evaluates the
+ * domain itself, passes `false`, so that the domain is evaluated once.
  */
 export function extractFiniteDomainWithReason(
   condition: Expression,
   ce: ComputeEngine,
-  intervals: 'integers' | 'reals' = 'integers'
+  intervals: 'integers' | 'reals' = 'integers',
+  evaluateCalls = true
 ): ExtractDomainResult {
   // Check for ["Element", var, set] or ["Element", var, set, condition] pattern
   if (condition.operator !== 'Element') {
@@ -354,6 +360,43 @@ export function extractFiniteDomainWithReason(
       domain,
       reason: 'unknown-domain',
     };
+  }
+
+  // A call whose value is a finite collection (`Sort(L)`, `Reverse(L)`,
+  // `Take(L, 2)`): its elements are the values. They are read from the
+  // evaluated collection as they are, so a computed list of two integers is
+  // not read as a range, as a written `[a, b]` is above. Only a pure call is
+  // evaluated: the caller can still give up on the values (a condition or a
+  // predicate that is not decided) and return the call as written, so the
+  // effects of an impure call would run once more at the next evaluation. The
+  // evaluation is synchronous, so a call with only an `evaluateAsync` handler
+  // is not read. A view whose source has no value (`Take(L, 2)` with `L`
+  // declared and not assigned) has a count and no elements: it is not
+  // enumerated.
+  if (
+    evaluateCalls &&
+    isFunction(domain) &&
+    domain.isPure &&
+    !domain.type.matches('number') &&
+    !domain.type.matches('boolean')
+  ) {
+    const value = domain.evaluate();
+    const count = value.count;
+    if (
+      value.isValid &&
+      value.isFiniteCollection === true &&
+      typeof count === 'number'
+    ) {
+      if (count > 1000)
+        return {
+          status: 'non-enumerable',
+          variable,
+          domain,
+          reason: 'domain-too-large',
+        };
+      const values = [...value.each()];
+      if (values.length === count) return successResult(values);
+    }
   }
 
   // Unknown domain structure

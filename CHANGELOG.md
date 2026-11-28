@@ -143,6 +143,15 @@
 
 ### Resolved Issues
 
+- **A sum or a product over a sorted, reversed or shortened list is
+  evaluated** (CE-1820). `Sum(k^2, Element(k, Sort([3, 2, 1])))` stayed
+  unevaluated, and so did the same sum over `Reverse([3, 2, 1])` or
+  `Take([3, 2, 1], 2)`: only a written list, set, range or interval was
+  read. A pure call whose value is a finite collection is now evaluated, and
+  its elements are the values of the index: these sums give `14`, `14` and
+  `13`. `ForAll` and `Exists` read such a collection too. A computed list
+  of two integers is a list: `Sum(k, Element(k, Take([1, 5, 7], 2)))` is
+  `6`, where a written `[1, 5]` is the range from 1 to 5.
 - **The inverse of a matrix that has an infinite entry stays unevaluated**
   (CE-1823). `Inverse([[1.5, +oo, 1], [1, 1, 1], [4, 3, 2]])` gave
   `[[4, -3, -0.5], [-8, 4, 2], [4, 0, -1.5]]` with `evaluate()` and `.N()`,

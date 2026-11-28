@@ -608,8 +608,9 @@ export function classifyBigopDomain(
     if (idx.operator === 'Element') {
       // Only ℕ₀ / ℤ⁺ are converted to a forward iteration (see
       // `convertInfiniteSetToLimits`); other infinite sets stay symbolic on
-      // their own, so they don't need the numeric treatment here.
-      const r = extractFiniteDomainWithReason(idx, ce);
+      // their own, so they don't need the numeric treatment here. The values
+      // are not read: a call domain is not evaluated (the fold evaluates it).
+      const r = extractFiniteDomainWithReason(idx, ce, 'integers', false);
       if (
         r.status === 'non-enumerable' &&
         r.reason === 'infinite-domain' &&
