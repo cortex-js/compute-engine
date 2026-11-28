@@ -1,3 +1,26 @@
+## [Unreleased]
+
+### Improvements
+
+- **JavaScript compiles values of a declared record type.** With
+  `type Fig = record{__tag: string, kind: string, geom: tuple<real, real>}`
+  and its constructor function
+  `function Fig(kind: string, x: real, y: real) { {__tag -> "Figure", kind -> kind, geom -> (x, y)} }`,
+  a call `Fig("dot", t, 0)` declined ("a call of the function Fig of the
+  host"). It now compiles: `run({ t: 2 })` gives
+  `{ __tag: "Figure", kind: "dot", geom: [2, 0] }`, and a host function
+  receives `Fig(Dictionary(…))`, the interpreter's value. The raw payload
+  `Fig({…})` compiles too. A dictionary with a key of the value `Nothing`
+  (`{a -> t, alpha -> nothing}`) declined ("Nothing as a value"); it now
+  gives `{ a: 2, alpha: null }` (CE-1914).
+- **A compiled record with names is an object while the code runs.** A
+  value of a named tuple type or a dictionary was an array of its fields,
+  converted to an object at the result. It is now an object of its fields
+  in declaration order, read by name, and a named tuple input is read with
+  no copy. The result of `run()` is unchanged. A field named `__proto__`
+  now declines in a named tuple and a declared record type, as it did in a
+  dictionary.
+
 ## 0.204.2 _2026-11-27_
 
 ### Improvements

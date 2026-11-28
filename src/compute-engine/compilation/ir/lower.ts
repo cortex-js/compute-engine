@@ -142,6 +142,7 @@ import {
   listedOf,
   POSSIBLE_NOTHING,
   type DeclineReason,
+  declaredRecord,
   STATIC_TYPE_ERROR,
   text,
   tupleBody,
@@ -2605,6 +2606,18 @@ function lowerOnce(
     if ((e.operator === 'D' || e.operator === 'Integrate') && facts(e).answered)
       decline(e, `${e.operator} of an operator that a compile handler lowers`);
     if (!isLibraryOperator(e as never, e.operator)) {
+      // The raw arm of the constructor of a declared record type
+      // (`Fig({…})`): the payload, of that type. Its other calls are calls
+      // of a user function (`userBinding()`).
+      const d = declaredRecord(e);
+      if (d !== undefined) {
+        if (!javascript)
+          decline(
+            e,
+            `a value of the type ${d.nominal}, a record: records compile on javascript only`
+          );
+        return records.payload(e, d);
+      }
       if (isHostDefinition(e)) return hostCall(e, want);
       // The constructor of a named tuple type: a record.
       if (recordConstructor(e) !== undefined) return records.construct(e);
@@ -8729,7 +8742,6 @@ function lowerOnce(
   // The target holds records (JavaScript, not the interval or the
   // `bigint` mode).
   const javascript = options.javascript === true && !bigint && !interval;
-  const fns = functionLowering(cx, lists, javascript);
   // On GLSL, the records of a nominal tuple type of two to four numbers
   // (vectors), in the default mode as for the arrays below.
   const records = recordLowering(
@@ -8737,6 +8749,7 @@ function lowerOnce(
     javascript,
     options.glsl === true && cx.wide !== 'complex'
   );
+  const fns = functionLowering(cx, lists, records, javascript);
   const matches = matchLowering(cx, records);
   const protocols = protocolLowering(cx);
   // The program reads or makes an enclosure (`Program.valueKinds`).

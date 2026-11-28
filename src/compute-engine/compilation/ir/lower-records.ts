@@ -7,12 +7,20 @@
  * (`docs/COMPILATION-MODEL.md`, "Shapes are settled at compile time").
  */
 
-import type { Type, TypeReference } from '../../../common/type/types.js';
+import {
+  isOptionalField,
+  type Type,
+  type TypeReference,
+} from '../../../common/type/types.js';
 import { sumVariantInfo } from '../../sum-representation.js';
 import { isSubtype } from '../../../common/type/subtype.js';
 import { typeToString as engineTypeToString } from '../../../common/type/serialize.js';
 import { unfoldAliasOnDescent } from '../../../common/type/utils.js';
-import { isFunction, isSymbol } from '../../boxed-expression/type-guards.js';
+import {
+  isDictionary,
+  isFunction,
+  isSymbol,
+} from '../../boxed-expression/type-guards.js';
 import type { DictionaryInterface, Expression } from '../../global-types.js';
 import {
   decline,
@@ -21,6 +29,7 @@ import {
   listedOf,
   recordNames,
   tupleBody,
+  type DeclaredRecord,
   type Fn,
   type Lowering,
 } from './lower-context.js';
@@ -74,7 +83,14 @@ export function numericRecordInput(
     body === undefined ||
     body.length < 2 ||
     body.length > 4 ||
-    body.some((x) => x.name === undefined || !isSubtype(x.type, 'real')) ||
+    body.some(
+      (x) =>
+        x.name === undefined ||
+        // The code reads an input object by name, where `__proto__` is
+        // its prototype.
+        x.name === '__proto__' ||
+        !isSubtype(x.type, 'real')
+    ) ||
     sumVariantInfo(engine, nominal.name) !== undefined
   )
     return undefined;
@@ -195,6 +211,15 @@ export function recordLowering(
     head?: IRType['head'],
     resultRecord = false
   ): V => {
+    // A record with names is an object at run time (README, "Records"),
+    // where `"__proto__"` sets the prototype instead of a key.
+    if (nominal?.names?.includes('__proto__'))
+      decline(
+        e,
+        nominal.nominal === undefined
+          ? 'a dictionary with the key __proto__'
+          : `a value of the type ${nominal.nominal}, a record with the field __proto__`
+      );
     const types = values.map((v, k): IRType => {
       const place = `${nominal?.nominal ?? 'record'}.${k}`;
       const t = fields[k] ?? type(v);
@@ -378,16 +403,16 @@ export function recordLowering(
   ): V => {
     if (!javascript)
       decline(e, 'a dictionary, a record: records compile on javascript only');
-    // The result of the code is an object literal of the keys, where
-    // `"__proto__"` sets the prototype instead of a key.
-    if (e.keys.includes('__proto__'))
-      decline(e, 'a dictionary with the key __proto__');
     if (resultRecord && e.hasKey('re') && e.hasKey('im'))
       decline(
         e,
         'a tagged result with fields re and im, reserved for complex results'
       );
     const values = e.values.map((x) => {
+      // A key of the value `Nothing`: the interpreter keeps it, and the
+      // field is of the lane `nothing`, as a field of a named tuple.
+      if (isSymbol(x, 'Nothing'))
+        return b.op('nothing', [], { lane: 'nothing', shape: [] });
       if (
         resultRecord &&
         isFunction(x, 'List') &&
@@ -404,6 +429,78 @@ export function recordLowering(
       return v;
     });
     return make(e, values, { names: e.keys }, [], 'Dictionary', resultRecord);
+  };
+
+  /** The value of the declared record type `d` (`DeclaredRecord`) whose
+   *  payload is the dictionary record `v`, the value of the expression
+   *  `payload`: the record of the same fields, of the nominal type and the
+   *  head `Dictionary`, whose engine value is `Fig(Dictionary(…))`
+   *  (`boxValue()` of `print-js.ts`). The interpreter checks the payload
+   *  against the type when the value is made, so the static type of
+   *  `payload` must prove it, with no key that the type does not have and
+   *  every key that it requires; otherwise the value declines. `e` is the
+   *  site of a decline. */
+  const declared = (
+    e: Expression,
+    payload: Expression,
+    v: V,
+    d: DeclaredRecord
+  ): V => {
+    const t = type(v);
+    const what = `a value of the type ${d.nominal}`;
+    if (
+      t.lane !== 'record' ||
+      t.head !== 'Dictionary' ||
+      t.nominal !== undefined
+    )
+      decline(e, `${what} whose payload is not a dictionary`);
+    const keys = Object.keys(d.def.elements);
+    const names = t.names!;
+    // Each field is proven by its static type, or, when that type is wider
+    // (a local inferred as `number`), by its lane, as in `construct()`: the
+    // interpreter checks the value, which the lane holds.
+    const pt = payload.type.type;
+    const proves = (n: string, k: number): boolean => {
+      const want = d.def.elements[n];
+      const have =
+        typeof pt === 'object' && pt.kind === 'record'
+          ? pt.elements[n]
+          : undefined;
+      return (
+        (have !== undefined && isSubtype(have, want)) ||
+        laneProves(t.fields![k], t.marks?.[k] !== undefined, want)
+      );
+    };
+    if (
+      names.some((n) => !keys.includes(n)) ||
+      keys.some((k) => !isOptionalField(d.def, k) && !names.includes(k)) ||
+      !(isSubtype(pt, d.def) || names.every(proves))
+    )
+      decline(
+        e,
+        `${what} whose payload, of type ${engineTypeToString(payload.type.type)}, does not prove ${engineTypeToString(d.def)}`
+      );
+    return make(
+      e,
+      t.fields!.map((_, k) => field(e, v, k)),
+      { nominal: d.nominal, names },
+      [],
+      'Dictionary'
+    );
+  };
+
+  /** `Fig({…})`, the raw arm of the constructor of the declared record
+   *  type `d` (`rawPayloadCall()`): the value of that type whose payload is
+   *  the dictionary literal, which the interpreter checks and keeps, and
+   *  whose constructor function does not run. */
+  const payload = (e: Fn, d: DeclaredRecord): V => {
+    const x = e.ops[0];
+    if (!isDictionary(x))
+      decline(
+        e,
+        `a value of the type ${d.nominal} whose payload is not a dictionary literal`
+      );
+    return declared(e, x, dictionary(x), d);
   };
 
   /** The field `k` (from 0) of the record `r`: the value it was made of,
@@ -473,5 +570,15 @@ export function recordLowering(
     return field(e, r, k);
   };
 
-  return { construct, literal, dictionary, at, named, make, field };
+  return {
+    construct,
+    literal,
+    dictionary,
+    declared,
+    payload,
+    at,
+    named,
+    make,
+    field,
+  };
 }

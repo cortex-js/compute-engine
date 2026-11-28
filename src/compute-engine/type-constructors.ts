@@ -59,6 +59,10 @@ const MINTED = '_mintedTypeConstructor';
 
 interface MintedMarker {
   [MINTED]?: 'nominal' | 'alias' | 'constructor';
+  /** Of a user constructor function: its literal and the nominal type it
+   * makes, which the compiler lowers as a user function (README of
+   * `compilation/ir`, "Records"). */
+  _constructorFunction?: { literal: Expression; type: TypeReference };
 }
 
 /** Does this scope's binding for `name` hold a constructor WE minted?
@@ -986,6 +990,8 @@ export function installConstructorFunction(
 
   const binding = scope.bindings.get(name);
   if (binding !== undefined && 'operator' in binding) {
-    (binding.operator as unknown as MintedMarker)[MINTED] = 'constructor';
+    const marker = binding.operator as unknown as MintedMarker;
+    marker[MINTED] = 'constructor';
+    marker._constructorFunction = { literal, type: ref };
   }
 }

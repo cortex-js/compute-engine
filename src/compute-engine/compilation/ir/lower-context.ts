@@ -10,7 +10,12 @@ import type {
   FunctionInterface,
   Scope,
 } from '../../global-types.js';
-import type { Type } from '../../../common/type/types.js';
+import type {
+  RecordType,
+  Type,
+  TypeReference,
+} from '../../../common/type/types.js';
+import { typesOverlap } from '../../../common/type/reduce.js';
 import type { CompileDiagnosticKind } from '../types.js';
 import {
   isNumericScalarType,
@@ -619,9 +624,62 @@ export function tupleBody(t: Type) {
   return t.def.elements;
 }
 
+/** A record type that `type Fig = record{…}` declares, with the
+ *  constructor function `function Fig(…) { {…} }` (`installConstructorFunction()`
+ *  of `type-constructors.ts`): the name of the type, its definition, and the
+ *  literal of the constructor, whose body computes the payload. */
+export type DeclaredRecord = {
+  readonly key: object;
+  readonly literal: Fn;
+  readonly nominal: string;
+  readonly def: RecordType;
+};
+
+/** The declared record type whose constructor function the head of `e`
+ *  resolves to (`DeclaredRecord`), not a parameterized one; else
+ *  `undefined`. */
+export function declaredRecord(e: Fn): DeclaredRecord | undefined {
+  const od = e.operatorDefinition as
+    | {
+        _mintedTypeConstructor?: string;
+        _constructorFunction?: { literal: Expression; type: TypeReference };
+      }
+    | undefined;
+  const c = od?._constructorFunction;
+  if (od?._mintedTypeConstructor !== 'constructor' || c === undefined)
+    return undefined;
+  const { literal, type } = c;
+  if (
+    !isFunction(literal, 'Function') ||
+    type.typeParams !== undefined ||
+    typeof type.def !== 'object' ||
+    type.def.kind !== 'record'
+  )
+    return undefined;
+  return { key: od, literal: literal as Fn, nominal: type.name, def: type.def };
+}
+
+/** The call `e` of the constructor of the declared record type `d` takes
+ *  the raw arm, the payload itself (`Fig({…})`; the raw arm of
+ *  `installConstructorFunction()`): one operand that can be a value of the
+ *  record type. The two arms do not overlap, so any other call runs the
+ *  body. */
+export function rawPayloadCall(e: Fn, d: DeclaredRecord): boolean {
+  return e.ops?.length === 1 && typesOverlap(e.ops[0].type.type, d.def);
+}
+
 /** The definition that the head of the call `e` resolves to, when it is a
- *  user function with a function literal, and the literal. */
-export function userBinding(e: Fn): { key: object; literal: Fn } | undefined {
+ *  user function with a function literal, and the literal. The constructor
+ *  function of a declared record type is one (`declared`), but at a call of
+ *  its raw arm (`rawPayloadCall()`). */
+export function userBinding(
+  e: Fn
+): { key: object; literal: Fn; declared?: DeclaredRecord } | undefined {
+  const d = declaredRecord(e);
+  if (d !== undefined)
+    return rawPayloadCall(e, d)
+      ? undefined
+      : { key: d.key, literal: d.literal, declared: d };
   const od = e.operatorDefinition as
     { _isLambda?: boolean; _lambdaLiteral?: Expression } | undefined;
   const key = od?._isLambda ? od : (e.valueDefinition as object | undefined);

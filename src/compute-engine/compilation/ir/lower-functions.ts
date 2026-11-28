@@ -51,6 +51,7 @@ import {
   tupleBody,
   UNSETTLED_SHAPE,
   type Binding,
+  type DeclaredRecord,
   type Fn,
   type Listed,
   type Lowering,
@@ -761,6 +762,10 @@ type UserFunction = {
 export function functionLowering(
   cx: Lowering,
   lists: ReturnType<typeof listLowering>,
+  /** `declared()` of `recordLowering()` (`lower-records.ts`). */
+  records: {
+    declared(e: Expression, payload: Expression, v: V, d: DeclaredRecord): V;
+  },
   /** The target holds records and text (JavaScript, not the interval or
    *  the `bigint` mode). */
   javascript = false
@@ -989,7 +994,8 @@ export function functionLowering(
     literal: Fn,
     sig: ReturnType<typeof signatureTypes>,
     args: V[] | undefined,
-    nanForAbsent: () => boolean
+    nanForAbsent: () => boolean,
+    declared?: DeclaredRecord
   ): UserFunction => {
     begun += 1;
     const {
@@ -1295,12 +1301,18 @@ export function functionLowering(
         }
         // A list of lists of two lengths not stated is read whole: a body of
         // run-time inner lengths is of the lane `rows` (CE-1736).
-        const body =
+        const made =
           grid !== undefined
             ? cx.wholeRows(literal.ops[0])
             : list || open || points !== undefined || shaped || record
               ? cx.value(literal.ops[0])!
               : cx.scalar(literal.ops[0]);
+        // The constructor function of a declared record type: the
+        // dictionary of its body, of that type (README, "Records").
+        const body =
+          declared === undefined
+            ? made
+            : records.declared(literal, literal.ops[0], made, declared);
         const t = type(body);
         // A result that is not a scalar: a record, of the nominal type of
         // the result type when it is one.
@@ -1574,7 +1586,12 @@ export function functionLowering(
    *  `lower.ts`). */
   const call = (
     e: Fn,
-    binding?: { key: object; literal: Fn; implementation?: boolean },
+    binding?: {
+      key: object;
+      literal: Fn;
+      implementation?: boolean;
+      declared?: DeclaredRecord;
+    },
     given?: V[],
     nanForAbsent: () => boolean = () => false
   ): number => {
@@ -1736,12 +1753,28 @@ export function functionLowering(
         if (variants?.get(lane + 'n') === both)
           fn =
             both ??
-            define(e, binding.key, binding.literal, sig, early, nanForAbsent);
+            define(
+              e,
+              binding.key,
+              binding.literal,
+              sig,
+              early,
+              nanForAbsent,
+              binding.declared
+            );
         else {
           const nan = nanForAbsent();
           fn =
             variants?.get(lane + (nan ? 'n' : '')) ??
-            define(e, binding.key, binding.literal, sig, early, () => nan);
+            define(
+              e,
+              binding.key,
+              binding.literal,
+              sig,
+              early,
+              () => nan,
+              binding.declared
+            );
         }
     }
     if (lowering.has(fn)) {

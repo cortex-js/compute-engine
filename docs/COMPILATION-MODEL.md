@@ -3251,8 +3251,14 @@ shape, from its declared type, or, for a field typed `any`, `list` or
 `type P = tuple<x: real, y: real>` and `f(t: real) = P(cos(t), sin(t))`,
 `f(t)` compiles, and `run({ t: 1 })` gives the object `{ x: 0.5403…,
 y: 0.8414… }`; a `Nothing` field is `null`, and a colour field holds the
-compiled colour. A `Tuple` or a `List` of elements of several lanes
-(`[t, "a"]`) is a record with no names, an array at `run()`. A record is read
+compiled colour. In the code, too, a record with names is an object of its
+fields in declaration order, and a field is read by its name (`v1.x`); the
+result of `run()` is that object, rewritten only where a field can hold a
+complex number, which follows the result convention. A field named
+`__proto__` declines, in a named tuple, a declared record type and a
+dictionary: in an object literal it sets the prototype. A `Tuple` or a
+`List` of elements of several lanes (`[t, "a"]`) is a record with no names,
+an array at `run()`. A record is read
 at a constant position only (`p.x`; `q[1]` of a record with no names). Two
 records of one engine type whose fields have different shapes (a filled and
 an unfilled `Figure`) are two shapes, so an `If` with a run-time condition
@@ -3268,10 +3274,39 @@ GLSL" below). These decline too:
   figures) decline at `figureOf(kind: string, geom: list)`;
 - a recursive function whose parameter or result is a record.
 
+A dictionary literal is a record of its keys, and a key of the value
+`Nothing` is a field that is `null`: `{a -> t, alpha -> nothing}` gives
+`{ a: 2, alpha: null }` at `t = 2`, as the interpreter keeps the key.
+
+**Declared record types** (CE-1914). A value of a record type that
+`type Fig = record{…}` declares compiles on JavaScript when its constructor
+function makes it:
+
+```js
+// type Fig = record{__tag: string, kind: string, geom: tuple<real, real>}
+// function Fig(kind: string, x: real, y: real) { {__tag -> "Figure", kind -> kind, geom -> (x, y)} }
+// function useFig(t: real) { Fig("dot", t, 0) }
+compile(ce.box(['useFig', 't'])).run({ t: 2 });
+// { __tag: 'Figure', kind: 'dot', geom: [2, 0] }
+```
+
+The call is compiled as a call of a user function whose result is the
+dictionary of its body. The interpreter checks that value against the type
+when it makes it, so the call declines unless the static type of the body
+proves the type, with no key that the type does not have. The raw payload
+`Fig({…})` does not run the body: it compiles when the operand is a
+dictionary literal that proves the type. A host function receives the
+interpreter's value, `Fig(Dictionary(…))`. A `Fig` and a dictionary of no
+declared type are two types, so an `if` with a run-time condition whose arms
+give one of each declines. The spread copy `{...f, kind -> "x"}` of a `Fig`
+declines (the interpreter gives an error there, CE-1913).
+
 A named tuple of two to four fields declared as real or integer numbers
 can also be a host input. On JavaScript, the input is an object keyed by
-the field names. With `p: P`, `run({ p: { x: 3, y: 4 } })` supplies the same
-object shape as a compiled `P` result. The input report spells the lowered
+the field names, which the code reads by name with no copy. With `p: P`,
+`run({ p: { x: 3, y: 4 } })` supplies the same object shape as a compiled
+`P` result. A field that the host leaves out reads `undefined`: an input
+left out is unspecified. The input report spells the lowered
 type `record`. Code with a record input uses `run()` for each value.
 
 **On GLSL.** A value of a nominal tuple type of two to four fields, each

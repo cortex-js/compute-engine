@@ -239,28 +239,41 @@ const matrixOfRows: RegionSpelling = ({ outs: [out], args: [g] }) => ({
   close: () => [],
 });
 
+/** The key `name` of an object literal: the name, or its quoted text
+ *  when it is not an identifier. */
+const key = (name: string) =>
+  IDENTIFIER.test(name) ? name : JSON.stringify(name);
+
+/** The read of the field `k` of the record `record` of the type `t`: by
+ *  its name for a record with names, an object (`p.x`, `d["a b"]`), by its
+ *  index for one with none, an array (README, "Records"). */
+function fieldOf(record: string, k: number, t: IRType): string {
+  const name = t.names?.[k];
+  // An object literal is not read as a block.
+  const r = record.startsWith('{') ? `(${record})` : record;
+  if (name === undefined) return `${r}[${k}]`;
+  return IDENTIFIER.test(name)
+    ? `${r}.${name}`
+    : `${r}[${JSON.stringify(name)}]`;
+}
+
 /** The text of the result of the entry of the record type `t`, read from
- *  `value`: a record of a named tuple type is an object keyed by the names
- *  of its fields; a record with no names stays the array of its fields; a
- *  record in a field is converted the same way. A field of the lane
- *  `nothing` is `null` in the array already. A field that holds a complex
- *  value gets the result convention (`_SYS.ir.normalize`), which the
- *  boundary does not apply inside an object. `undefined` when no record in
- *  `t` has names: the array is the result. */
+ *  `value`, when a field of a record in `t` can hold a complex value: the
+ *  same record (an object for a record with names, an array for one with
+ *  none) with the result convention (`_SYS.ir.normalize`) applied to that
+ *  field, which the boundary does not apply inside an object. `undefined`
+ *  when no field can hold one: the record is the result as it is. */
 function recordResult(value: string, t: IRType): string | undefined {
-  if (t.lane !== 'record' || t.resultRecord) return undefined;
-  const nested = (t.fields ?? []).map((f, k) =>
-    recordResult(`${value}[${k}]`, f)
-  );
-  if (t.names === undefined && nested.every((x) => x === undefined))
+  if (t.lane !== 'record' || t.resultRecord || !holdsComplex(t))
     return undefined;
-  const fields = (t.fields ?? []).map(
-    (f, k) =>
-      nested[k] ??
-      (holdsComplex(f) ? `_SYS.ir.normalize(${value}[${k}])` : `${value}[${k}]`)
-  );
+  const fields = (t.fields ?? []).map((f, k) => {
+    const x = fieldOf(value, k, t);
+    return (
+      recordResult(x, f) ?? (holdsComplex(f) ? `_SYS.ir.normalize(${x})` : x)
+    );
+  });
   if (t.names !== undefined)
-    return `{ ${t.names.map((n, k) => `${JSON.stringify(n)}: ${fields[k]}`).join(', ')} }`;
+    return `{ ${t.names.map((n, k) => `${key(n)}: ${fields[k]}`).join(', ')} }`;
   return `[${fields.join(', ')}]`;
 }
 
@@ -298,7 +311,9 @@ export const JS: Syntax = deepFreeze({
     'boole': '($0 ? 1 : 0)',
     'elem': '$0[$1]',
     // A record (`README.md`, "Records"): the field at an index from 0, and
-    // `Nothing`.
+    // `Nothing`. The printer spells a field read with `field` of the
+    // syntax, by its name for a record with names; this spelling names the
+    // operands that it reads.
     'field': '$0[$1]',
     'nothing': 'null',
     'at': { text: '_at($0, $1)', helpers: ['_at'] },
@@ -617,20 +632,22 @@ export const JS: Syntax = deepFreeze({
   input: (name) =>
     IDENTIFIER.test(name) ? `_.${name}` : `_[${JSON.stringify(name)}]`,
   positional: (_name, k) => `a${k}`,
-  recordInput: (input, fields) =>
-    `[${fields.map((name) => `${input}[${JSON.stringify(name)}]`).join(', ')}]`,
   length: (list) => `${list}.length`,
   width: (list) => `(${list}.length === 0 ? 0 : ${list}[0].length)`,
   part: (tuple, index) => `${tuple}[${index}]`,
+  // A record with names is an object of its fields in their order, one
+  // with none the array of its fields (README, "Records"). A tagged result
+  // applies the result convention to a complex field where it is made.
   list: (elements, t) =>
-    t.lane === 'record' && t.resultRecord
-      ? `{ ${t
-          .names!.map((name, k) => {
+    t.lane === 'record' && t.names !== undefined
+      ? `{ ${t.names
+          .map((name, k) => {
             const value = elements[k];
-            return `${JSON.stringify(name)}: ${holdsComplex(t.fields![k]) ? `_SYS.ir.normalize(${value})` : value}`;
+            return `${key(name)}: ${t.resultRecord && holdsComplex(t.fields![k]) ? `_SYS.ir.normalize(${value})` : value}`;
           })
           .join(', ')} }`
       : `[${elements.join(', ')}]`,
+  field: fieldOf,
   // An array of the length, filled in index order by a `for` loop: an
   // expression, so a function called at once.
   map: (lengths, body) => {
@@ -972,6 +989,16 @@ function arraySync(ce: ComputeEngine, p: Program): ArraySync | undefined {
   };
 }
 
+/** The field `k` of the record `x` of the IR type `t`: by its name for a
+ *  record with names, an object, by its index for one with none, an
+ *  array (README, "Records"). */
+function recordField(t: IRType, x: unknown, k: number): unknown {
+  const name = t.names?.[k];
+  return name === undefined
+    ? (x as readonly unknown[])[k]
+    : (x as Record<string, unknown>)[name];
+}
+
 /** Whether a value of the IR type `t` holds an array of the engine: an
  *  array, or a record with such a field. */
 function holdsArray(t: IRType): boolean {
@@ -986,8 +1013,7 @@ function holdsArray(t: IRType): boolean {
 function syncValue(t: IRType, x: unknown): void {
   if (t.lane === 'array') return syncArray(x);
   if (t.lane !== 'record') return;
-  const xs = x as readonly unknown[];
-  (t.fields ?? []).forEach((f, k) => syncValue(f, xs[k]));
+  (t.fields ?? []).forEach((f, k) => syncValue(f, recordField(t, x, k)));
 }
 
 /** Actual writes of the current call. Recursive entry from a host callback
@@ -1094,22 +1120,22 @@ function boxValue(
   // An array of the engine: the same reference.
   if (t.lane === 'array') return x as Expression;
   if (t.lane === 'record') {
-    const xs = x as readonly unknown[];
-    // A dictionary literal (CE-1771): the dictionary of its keys.
-    if (t.head === 'Dictionary')
-      return ce.function(
+    const fields = (t.fields ?? []).map((f, k) =>
+      boxValue(ce, f, t.marks?.[k], recordField(t, x, k))
+    );
+    // A dictionary literal (CE-1771): the dictionary of its keys; of a
+    // declared record type, the application of its constructor to it
+    // (CE-1914).
+    if (t.head === 'Dictionary') {
+      const d = ce.function(
         'Dictionary',
-        (t.fields ?? []).map((f, k) =>
-          ce.function('KeyValuePair', [
-            ce.string(t.names![k]),
-            boxValue(ce, f, t.marks?.[k], xs[k]),
-          ])
+        fields.map((y, k) =>
+          ce.function('KeyValuePair', [ce.string(t.names![k]), y])
         )
       );
-    return ce.function(
-      t.nominal ?? t.head!,
-      (t.fields ?? []).map((f, k) => boxValue(ce, f, t.marks?.[k], xs[k]))
-    );
+      return t.nominal === undefined ? d : ce.function(t.nominal, [d]);
+    }
+    return ce.function(t.nominal ?? t.head!, fields);
   }
   if (t.shape.length > 0) {
     const inner: IRType = { lane: t.lane, shape: t.shape.slice(1) };

@@ -89,11 +89,13 @@ export type Syntax = {
   /** The value of an input or a positional parameter of the entry of type
    *  `type`, from its read `text`. Absent: the read. */
   read?(text: string, type: IRType): string;
-  /** Read a host record once into the representation used inside functions. */
-  recordInput?(text: string, fields: readonly string[]): string;
   /** The statements of the entry, from the printed ones. Absent: those. */
   entry?(body: string[]): string[];
   list(elements: string[], type: IRType): string;
+  /** The read of the field `index` (from 0) of the record `record` of the
+   *  type `type` (the operation `field`). Absent: the spelling of the
+   *  operation. */
+  field?(record: string, index: number, type: IRType): string;
   /** An operation applied to each element: `lengths` are the texts of the
    *  lengths, `body` gives the text of one element from its index
    *  variables. Absent: the target has no element-wise operations. */
@@ -341,10 +343,6 @@ export function printProgram(
       return;
     }
     const t = p.types[v];
-    if (t.lane === 'record' && t.names !== undefined && syntax.recordInput) {
-      inputBindings.set(v, syntax.recordInput(input, t.names));
-      return;
-    }
     names.set(
       v,
       entry.lengthOf[k]
@@ -510,6 +508,14 @@ export function printProgram(
         return syntax.call(i.fn, i.args.map(use), i.args.map(type));
       case 'op': {
         const shape = type(i.out);
+        if (i.op === 'field' && syntax.field !== undefined) {
+          const k = index.def.get(i.args[1]);
+          if (k?.k !== 'const' || typeof k.value.value !== 'number')
+            throw new Error(
+              'slice printer: a field at an index that is not a constant'
+            );
+          return syntax.field(use(i.args[0]), k.value.value, type(i.args[0]));
+        }
         // A read of a list in storage is spelled `<op>.<storage kind>`.
         const held = i.args.length > 0 ? type(i.args[0]).storage : undefined;
         const op = held === undefined ? i.op : `${i.op}.${held}`;

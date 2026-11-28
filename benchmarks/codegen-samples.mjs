@@ -13,6 +13,21 @@ const modules = await Promise.all(
     (root) => import(pathToFileURL(resolve(root, 'src/compute-engine.ts')))
   )
 );
+const epsil = await Promise.all(
+  roots.map(
+    (root) => import(pathToFileURL(resolve(root, 'src/epsil/execute-epsil.ts')))
+  )
+);
+// The record cases: a field read in a loop (a record made and passed to a
+// function at each pass), a named tuple input read field by field, and a
+// record result.
+const RECORDS = `
+  type P = tuple<x: real, y: real>
+  function dot(q: P) { q.x * q.y }
+  function loopRec(t: real) { let s = 0; for i in 1..100 { s = s + dot(P(t + i, i)) }; s }
+  function readP(q: P) { q.x + 2 * q.y + q.x * q.y }
+  function mk(t: real) { P(cos(t), sin(t)) }
+`;
 const cases = [
   ['compound square', ['Power', ['Add', 'x', 1], 2], 100000],
   ['compound cube', ['Power', ['Add', 'x', 1], 3], 100000],
@@ -37,14 +52,22 @@ const cases = [
     ['Sum', ['f', 'k'], ['Limits', 'k', 1, 153]],
     10000,
   ],
+  ['record field read in a loop', ['loopRec', 'x'], 10000, RECORDS],
+  ['record input read by field', ['readP', 'p'], 100000, RECORDS],
+  ['record result', ['mk', 'x'], 100000, RECORDS],
 ];
 let checksum = 0;
 const median = (xs) => [...xs].sort((a, b) => a - b)[Math.floor(xs.length / 2)];
 const results = [];
-for (const [name, json, iterations] of cases) {
-  const fns = modules.map(({ ComputeEngine, compile }) => {
+for (const [name, json, iterations, prelude] of cases) {
+  const fns = modules.map(({ ComputeEngine, compile }, k) => {
     const ce = new ComputeEngine();
     ce.assign('f', ce.expr(['Function', ['Add', 't', 1], 't']));
+    if (prelude !== undefined) {
+      ce.declare('x', 'real');
+      epsil[k].executeEpsil(ce, prelude);
+      ce.declare('p', 'P');
+    }
     const result = compile(ce.expr(json), {
       to: 'javascript',
       constantFold: false,
@@ -53,12 +76,17 @@ for (const [name, json, iterations] of cases) {
     return result;
   });
   const evaluate = (fn, count) => {
-    const vars = { x: 0, n: 1000 };
+    const vars = { x: 0, n: 1000, p: { x: 0, y: 2 } };
     let acc = 0;
     for (let i = 0; i < count; i++) {
       vars.x = (i % 1000) / 100 - 5;
+      vars.p.x = vars.x;
       const value = fn.run(vars);
-      acc += Array.isArray(value) ? value[value.length - 1] : Number(value);
+      acc += Array.isArray(value)
+        ? value[value.length - 1]
+        : typeof value === 'object'
+          ? value.x + value.y
+          : Number(value);
     }
     checksum += acc;
     return acc;

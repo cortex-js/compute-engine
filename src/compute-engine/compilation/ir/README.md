@@ -3931,8 +3931,13 @@ two records of one engine type whose fields have different shapes are two IR
 types, and so are records of two nominal types of the same fields. A field is a
 scalar of a lane (a colour, a string), a list or a tuple of stated lengths, a
 record, or the unit type `nothing`: a field whose value is `Nothing`. On
-JavaScript a record is the array of its fields (a `list` instruction of the
-record type), a `nothing` field `null` (the operation `nothing`). Records
+JavaScript a record with names (of a named tuple type, a dictionary, a
+declared record type) is an object of its fields in the order of its names,
+a name that is not an identifier quoted (`{ x: v1, "a b": v2 }`, the `list`
+instruction of the record type), and a record with no names the array of its
+fields; a `nothing` field is `null` (the operation `nothing`). A name
+`__proto__` declines, for every record: in an object literal it sets the
+prototype. Records
 compile on JavaScript only (user decision Q3 of the plan of CE-1652): in the
 interval mode and in the `bigint` mode a constructor declines ("records compile
 on javascript only"), also when a field read would fold the record away, and a
@@ -3949,9 +3954,10 @@ equality of the fields of one nominal type, the declines of a record against a
 tuple, the discharges of `absent()`.
 
 - **Host inputs.** `numericRecordInput()` gives a named tuple of two to four
-  numeric fields its settled record type. JavaScript projects the object's names
-  into the internal array at entry. GLSL reads one vector in declared field
-  order. Both keep the nominal type when the value is passed to a function or
+  numeric fields its settled record type (not a field named `__proto__`).
+  JavaScript reads the host's object by name, with no copy: a field that the
+  host leaves out reads `undefined`, as an input left out is unspecified.
+  GLSL reads one vector in declared field order. Both keep the nominal type when the value is passed to a function or
   compared with another record.
 
 - **Making a record.** The constructor of a nominal tuple type that
@@ -3976,7 +3982,9 @@ tuple, the discharges of `absent()`.
   list of records (an element of a build, a filter or a random frame) declines.
 - **Reading a record.** `Field(r, name)` of a record of a named tuple type and
   `At(r, k)` (`First`, `Last`) of a constant `k` in range give the field (the
-  operation `field`, `r[k]` on JavaScript, with the field's tuple mark); any
+  operation `field`, with the field's tuple mark; on JavaScript `field` of the
+  `Syntax` spells it `r.name`, or `r["a b"]` for a name that is not an
+  identifier, and `r[k]` for a record with no names; GLSL `r[int(k)]`); any
   other index declines. A field of a record made in the same body is the value
   it was made of, so a constant stays a constant: `match fig.kind { … }` keeps
   one case, and an `If` whose condition compares such a field with a literal (or
@@ -4041,7 +4049,28 @@ tuple, the discharges of `absent()`.
   dictionary as their reader), so a `List` or a `Tuple` literal that is a value
   of a dictionary is listed (`Listed`) and a function of the host receives it
   (`figureDraw({p -> (t, 1)})`). A value of a dictionary is not a place where a
-  list of NaN stands for an absent list (`nanForAbsent()`).
+  list of NaN stands for an absent list (`nanForAbsent()`). A value `Nothing`
+  is a field of the lane `nothing` (`null`), as in a named tuple: the
+  interpreter keeps the key (`{a -> 1, alpha -> Nothing}`).
+- **Declared record types** (CE-1914). A record type that `type Fig =
+  record{…}` declares, with its constructor function `function Fig(…) {
+  {…} }` (`declaredRecord()` of `lower-context.ts`; the literal is on the
+  definition, `installConstructorFunction()` of `type-constructors.ts`): a
+  call of the constructor function is a call of a user function
+  (`userBinding()`), whose result is the dictionary record of its body with
+  the nominal name `Fig` (`declared()` of `lower-records.ts`), so a field is
+  read by its key and the value is an object at `run()`. The interpreter
+  checks the payload when it makes the value, so the static type of the body
+  must prove the definition, with no key that it does not have and every key
+  that it requires; otherwise the call declines. A call of the raw arm
+  (`Fig({…})`, one operand that can be a value of the record type,
+  `rawPayloadCall()`) does not run the body: the operand must be a dictionary
+  literal, checked the same way (`payload()`). A `Fig` and a dictionary of
+  no declared type are two record types (`sameFields()` compares `nominal`),
+  so an `If` whose arms give them declines, as the interpreter's value has
+  two types. At a function of the host the value is `Fig(Dictionary(…))`
+  (`boxValue()`). The spread of a `Fig` (`{...f, kind -> "x"}`) declines,
+  as `DictionaryFrom` does (the interpreter gives an error, CE-1913).
 - **Function values given to the host** (CE-1911). On JavaScript, an argument of
   a call of a function of the host that is a function value is passed as an
   expression of the engine, which the call evaluates as the interpreter
@@ -4199,9 +4228,11 @@ tuple, the discharges of `absent()`.
   `HostCall.marks` keep the IR type and the tuple mark of each argument, the row
   takes a list operand whole, and `verify()` checks the operands against those
   types. Before the call, `boxValue()` of `print-js.ts` makes the engine's value
-  from them: a record of a named type is the application of its constructor
+  from them, reading each field of an object by its name: a record of a named
+  type is the application of its constructor
   (`Figure("circle", List(…), Tuple(…), Nothing, …)`), a record of a head the
-  application of the head, a list a `List`, a tuple (the axis of its mark) a
+  application of the head, a value of a declared record type the application
+  of its constructor to the dictionary (`Fig(Dictionary(…))`), a list a `List`, a tuple (the axis of its mark) a
   `Tuple`, a `nothing` field `Nothing`, and a number, a string or a boolean as
   for a scalar argument (a real is its machine number: the interpreter's
   `N(x, 15)` keeps 15 digits, so the two agree within 1e-12, and the
@@ -4231,14 +4262,15 @@ tuple, the discharges of `absent()`.
   run-time length in a rest argument and a lane `rows` decline. The host
   function's static type still must be `real`, `integer`, `boolean` or
   `nothing`.
-- **The result of `run()`.** A record result of the entry is converted once, at
-  the root (`record` of the `Syntax`, from the IR type of the result): a record
-  of a named tuple type is an object keyed by its field names
-  (`f(t) = P(cos(t), sin(t))` gives `{x: 0.54, y: 0.84}` at `t = 1`), a record
-  in a field is converted the same way, a field that can hold a complex value
-  follows the result convention (`{value: 2}`, not `{value: {re: 2, im: 0}}`), a
+- **The result of `run()`.** A record result of the entry is the record as the
+  code holds it: a record of a named tuple type is an object keyed by its field
+  names (`f(t) = P(cos(t), sin(t))` gives `{x: 0.54, y: 0.84}` at `t = 1`), a
   `nothing` field is `null`, a colour keeps its run-time object, and a record
-  with no names stays an array. A record result has no batch: `broadcast()` and
+  with no names is an array. Only a record that has a field that can hold a
+  complex value is rewritten once, at the root (`record` of the `Syntax`,
+  from the IR type of the result): that field follows the result convention
+  (`{value: 2}`, not `{value: {re: 2, im: 0}}`), at any depth. A result is
+  read-only, as a list is. A record result has no batch: `broadcast()` and
   `broadcastAsync()` throw.
 
 ## Arrays

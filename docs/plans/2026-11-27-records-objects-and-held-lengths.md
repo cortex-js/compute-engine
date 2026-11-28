@@ -271,6 +271,14 @@ the interpreter's values. The spread of a `Fig` declines. GLSL is unchanged
   value: search for `lengthValues(` applied to a field type, and for the
   messages that name a record and a length. Make each one accept
   `'carried'`.
+- A parameter of a user function declared with a declared record type
+  (`function g(f: Fig) { f.geom[1] }`, called with `Fig("dot", t, 0)`)
+  declines after stage 1 ("the parameter f of g is not a scalar (Fig)"):
+  `signatureTypes()` (`lower-functions.ts`) gives a record only for a
+  nominal tuple type. Stage 2 admits it, with the same carried-length rules
+  as a nominal tuple parameter. So does a nominal tuple type that has its
+  own constructor function, which stage 1 still lowers as a host call
+  (`declaredRecord()` in `lower-context.ts` admits record definitions only).
 - `nothingRefusal()` and the list refusals of `index.ts:340–445` let a list
   be a field of a record already. Check that they still hold for a carried
   field.
