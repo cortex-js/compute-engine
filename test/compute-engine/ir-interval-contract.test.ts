@@ -1551,7 +1551,7 @@ describe('the interval mode: batch 7, the order of a sum', () => {
     // loop.
     const js = compile(ce.box(json as never), { profile: 'ir', fallback: false } as never) as unknown as Result;
     expect(js.code).toContain(
-      '(((0 + (Math.sin((1 * _.x)) / 1)) + (Math.sin((2 * _.x)) / 2)) + (Math.sin((3 * _.x)) / 3))'
+      '(((0 + Math.sin(_.x)) + (Math.sin((2 * _.x)) / 2)) + (Math.sin((3 * _.x)) / 3))'
     );
     const glsl = compile(ce.box(json as never), { to: 'glsl', profile: 'ir', fallback: false } as never) as unknown as Result;
     expect(glsl.code).toContain('v13 = (v13 + (sin((v6 * x)) / v6));');

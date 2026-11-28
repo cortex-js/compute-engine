@@ -454,16 +454,21 @@ export function printProgram(
     if (spelling === undefined)
       throw new Error(`slice printer: no spelling for the operation ${op}`);
     if (i !== undefined && spelling.text === ARITHMETIC.add) {
-      const right = index.def.get(i.args[1]);
-      if (right?.k === 'const') {
-        const literal = right.value;
+      // `a + (-c)` and `(-c) + a` are `a - c`, the same IEEE value.
+      for (const [k, other] of [
+        [1, 0],
+        [0, 1],
+      ] as const) {
+        const def = index.def.get(i.args[k]);
+        if (def?.k !== 'const') continue;
+        const literal = def.value;
         if (
           (literal.lane === 'real' || literal.lane === 'integer') &&
           typeof literal.value === 'number' &&
           Number.isFinite(literal.value) &&
           (literal.value < 0 || Object.is(literal.value, -0))
         )
-          return `(${operands(0)} - ${syntax.constant({
+          return `(${operands(other)} - ${syntax.constant({
             ...literal,
             value: -literal.value,
           })})`;
@@ -484,11 +489,49 @@ export function printProgram(
         const t = use(v);
         return t.startsWith('-') ? `(${t})` : t;
       };
+      // An inlined product of a scalar by a negative constant:
+      // `a + ((-c) * y)` is `a - (c * y)`, the same IEEE value (the product
+      // of `-c` is the negation of the product of `c`, in every rounding
+      // to nearest, and `a + (-p)` is `a - p`).
+      const scaled = (v: V): string | undefined => {
+        const d = index.def.get(v);
+        if (
+          d?.k !== 'op' ||
+          !inlined.has(v) ||
+          d.args.length !== 2 ||
+          type(v).shape.length !== 0 ||
+          spellingOf(syntax, d.op)?.text !== ARITHMETIC.mul
+        )
+          return undefined;
+        for (const k of [0, 1] as const) {
+          const c = index.def.get(d.args[k]);
+          if (c?.k !== 'const') continue;
+          const literal = c.value;
+          if (
+            (literal.lane === 'real' || literal.lane === 'integer') &&
+            typeof literal.value === 'number' &&
+            Number.isFinite(literal.value) &&
+            literal.value < 0
+          ) {
+            const factor = syntax.constant({
+              ...literal,
+              value: -literal.value,
+            });
+            const y = use(d.args[1 - k]);
+            return k === 0 ? `(${factor} * ${y})` : `(${y} * ${factor})`;
+          }
+        }
+        return undefined;
+      };
       if (type(i.out).shape.length === 0) {
         const b = negated(i.args[1]);
         if (b !== undefined) return `(${operands(0)} - ${subtrahend(b)})`;
         const a = negated(i.args[0]);
         if (a !== undefined) return `(${operands(1)} - ${subtrahend(a)})`;
+        const pb = scaled(i.args[1]);
+        if (pb !== undefined) return `(${operands(0)} - ${pb})`;
+        const pa = scaled(i.args[0]);
+        if (pa !== undefined) return `(${operands(1)} - ${pa})`;
       }
     }
     for (const h of spelling.helpers) helpers.add(syntax.helpers[h]);

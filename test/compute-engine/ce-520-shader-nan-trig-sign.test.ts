@@ -27,14 +27,11 @@ const ce = new ComputeEngine();
 ce.declare('v', 'vector<real^3>');
 
 describe('CE-520 — operands the helpers do not take', () => {
-  it('a complex Sign or Smoothstep declines, as before', () => {
+  it('a complex Smoothstep declines, as before', () => {
     const cz = new ComputeEngine();
     cz.declare('z', 'complex');
     for (const to of ['glsl'] as const) {
-      for (const expr of [
-        ['Sign', 'z'],
-        ['Smoothstep', 0, 1, 'z'],
-      ])
+      for (const expr of [['Smoothstep', 0, 1, 'z']])
         expect(() =>
           compile(cz.box(expr as never), { to, fallback: false } as never)
         ).toThrow(/Could not compile/);

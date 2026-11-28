@@ -346,6 +346,15 @@ const SEEDED_CONSTANT_HEADS = new Set([
   'Open',
   'Tuple',
 ]);
+/** The arithmetic of a held value of seeded draws that is folded with them
+ *  (`seededDraws()` in `lower()`). */
+const SEEDED_ARITHMETIC = new Set([
+  'Add',
+  'Subtract',
+  'Negate',
+  'Multiply',
+  'Divide',
+]);
 /** `x` is a list, at any depth, of finite real numbers. */
 const finiteReals = (x: Expression): boolean =>
   isFunction(x, 'List') &&
@@ -3744,6 +3753,15 @@ function lowerOnce(
           if (n && isNumber(n) && n.im === 0 && Number.isFinite(n.re))
             return number(n);
         }
+        // Draws over literals under a number as the seed, written in place
+        // (`WithRandomSeed(628117, RandomChoice([0, 1), 6561))`): the
+        // interpreter's value, a literal, as for a held value (CE-1943); the
+        // frame would draw its elements again at each call. Not on GLSL,
+        // where the literal is written in the shader and a frame declines.
+        if (want && options.glsl !== true && handled(e) === undefined) {
+          const c = seededValue(e);
+          if (c !== undefined) return value(c, want);
+        }
         const seed = scalar(e.ops[0]);
         if (e.nops !== 2 || !isSubLane(type(seed).lane, 'real'))
           decline(e, 'a seed that is not a number');
@@ -3912,8 +3930,9 @@ function lowerOnce(
         // parameter bound to its argument, each argument evaluated once, in
         // order, before it. (`Apply(g, x)` of a name is the call `g(x)` in
         // the canonical form.) `Apply(Derivative(g, n…), a1, …)` is the
-        // application of the function literal of the derivative, which
-        // declines with none, and at a total order of 3 or more of a large
+        // application of the function literal of the derivative; with none,
+        // the stencil of a first derivative on JavaScript, or a decline; and
+        // at a total order of 3 or more of a large
         // body (the rule of the forward mode, `prefersJetDerivative()`)
         // before the engine is asked. An `Apply` admitted whole passes the
         // admission to the body (`passesWhole()`): a list of rows as its
@@ -3929,7 +3948,53 @@ function lowerOnce(
             .reduce((n, o) => n + Math.floor(o.N().re), 0);
           if (!(k >= 3) || lit === undefined || !prefersJetDerivative(lit, k))
             f = closedForm(g, () => derivativeClosedForm('Derivative', g.ops));
-          if (f === g || f === undefined) decline(g, NO_CLOSED_FORM);
+          if (f === g || f === undefined) {
+            // With no closed form, JavaScript takes the stencil of the
+            // runtime, as for `D(f(x), x)`, at a first derivative of a
+            // function literal of one parameter whose body is a pure real
+            // number: the interpreter's numeric value of `f'(a)` (CE-1945).
+            // The order is the literal 1, and the engine's `Derivative(f, 1)`
+            // stays whole: then the interpreter's `N()` runs the same stencil
+            // (`numericDerivativeOfApply()`). A partial closed form (one that
+            // keeps `Derivative(Min, 1, 0)`) stays unevaluated there, so it
+            // declines.
+            const name =
+              isFunction(lit, 'Function') && lit.nops === 2
+                ? parameterName(lit.ops[1])
+                : undefined;
+            const order = g.ops[1];
+            if (
+              !options.javascript ||
+              g.nops !== 2 ||
+              !isNumber(order) ||
+              order.re !== 1 ||
+              args.length !== 1 ||
+              name === undefined ||
+              !isFunction(lit, 'Function') ||
+              lit.ops[0].isPure !== true ||
+              !isFunction(g.evaluate(), 'Derivative')
+            )
+              decline(g, NO_CLOSED_FORM);
+            const point = scalar(args[0]);
+            if (!isSubLane(type(point).lane, 'real'))
+              decline(e, 'the point of a derivative is not real');
+            // The stencil of the call `f(t)`, not of the body written here:
+            // a call reads the free names of the body where `f` is defined
+            // (a name that this walk binds, a `Sum` index `a`, is not read).
+            // The call holds `h` itself, so its binding is the one the
+            // derivative was admitted for, not the one of a name in scope.
+            const call = ce.function('Apply', [h, ce.symbol(name)]);
+            const effects = b.effects;
+            const [out] = region(
+              'derivative',
+              [point],
+              ...realBody(e, name, call, 'a derivative'),
+              e
+            );
+            if (b.effects !== effects)
+              decline(e, 'a derivative with an effect');
+            return out;
+          }
         }
         // A parameter is a name, or a name with a declared type
         // (`Typed(H, 'list<real>')`).
@@ -5954,16 +6019,30 @@ function lowerOnce(
     }
     return r ?? undefined;
   };
+  /** A frame of draws over literals under a number as the seed, or the
+   *  library's arithmetic of numbers and such frames, with one frame at
+   *  least: `2·WithRandomSeed(7, RandomChoice([0, 1), 3)) - 1`, the Desmos
+   *  `2random(3)-1`. */
+  const seededDraws = (v: Expression, frames = { n: 0 }): boolean => {
+    if (isNumber(v)) return true;
+    if (!isFunction(v) || !isLibrary(v)) return false;
+    if (v.operator === 'WithRandomSeed') {
+      frames.n += 1;
+      return v.nops === 2 && isNumber(v.ops[0]) && seededConstant(v.ops[1]);
+    }
+    return (
+      SEEDED_ARITHMETIC.has(v.operator) &&
+      v.ops.every((x) => seededDraws(x, frames))
+    );
+  };
   const seededFold = (v: Expression): Expression | undefined => {
+    const frames = { n: 0 };
     if (
       options.fold === false ||
       bigint ||
-      interval ||
-      !isFunction(v, 'WithRandomSeed') ||
-      v.nops !== 2 ||
-      !isNumber(v.ops[0]) ||
-      !isLibrary(v) ||
-      !seededConstant(v.ops[1])
+      size(v) > MAX_FOLD_EXPANDED_NODES ||
+      !seededDraws(v, frames) ||
+      frames.n === 0
     )
       return undefined;
     // An evaluation that throws (not a cancellation) keeps the frame.

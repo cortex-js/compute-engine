@@ -102,7 +102,7 @@ describe('IR slice: GLSL text', () => {
         'cpow', 'cexp', 'cln', 'csqrt', 'csin', 'ccos', 'ctan', 'ccot', 'csinh', 'ccosh', 'ctanh', 'cre', 'cim',
         'cconj', 'cabs', 'carg', 'ceq', 'cne', 'mandelbrot', 'julia', 'csec', 'ccsc', 'csech', 'ccsch', 'ccoth',
         'casin', 'cacos', 'catan', 'casinh', 'cacosh', 'catanh', 'cacsc', 'casec', 'casech', 'cacoth', 'clog10',
-        'croot', 'cgamma', 'czeta', 'churwitzzeta', 'cpolygamma', 'clerchphi', 'cpolylog', 'czetagen',
+        'croot', 'csign', 'cgamma', 'czeta', 'churwitzzeta', 'cpolygamma', 'clerchphi', 'cpolylog', 'czetagen',
         'cdigamma'].includes(f))]);
     // The floor division of integers, which only the bigint mode makes.
     const bigintOnly = new Set<string>(['floordiv.int']);

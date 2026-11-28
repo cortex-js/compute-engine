@@ -1240,6 +1240,17 @@ at 200 and 5 times at 50, where the engine's own cost of a call dominates.
 Tycho's codegen audit of CE 0.204.1
 (`~/dev/tycho/_TASK/desmos/desmos-corpus/codegen-audit/2026-11-27-ce-0.204.1-report.md`)
 names the per-operation cost of compiled interval code.
+Tycho's audit of CE 0.204.3 (tycho-f7, 2026-11-28, load 3.9 to 3.3 on 18 cores,
+`~/dev/tycho/scripts/repros/2026-11-28-ce1942-compiled-row-cost.mts`) measures
+the Fourier sums of neyret/0jqrzf0b8u per call, interval-js against
+javascript: the loop form `\sum_{i=0}^{100}\frac{1}{2i+1}\sin((2i+1)x)` 33.6
+against 0.72 µs (46 times), the unrolled form `\sum_{i=1}^{100}\frac1i\cos(ix)`
+26.6 against 0.69 µs (39 times); one frame makes 5,624 interval calls (213 ms).
+Its profile: `nextUp` 11 to 12%, `widenResult` 6 to 7%, `productExactness` 5 to
+7%, `isJump`, `unwrapOrPropagate`, `rounded2`, `widenEndpoint` and `lifted2`
+about 4% each, `sin`/`cosRaw` 5 to 6%, emitted code 4 to 6%, GC 6 to 7%. The
+loop form computes `_IA.div(1, {lo: 2i+1, hi: 2i+1})` 101 times per call,
+independently of `x`.
 
 A compiled interval operation costs several times its arithmetic. Measured on
 two plain intervals: `_IA.mul` about 54 to 60 ns, of which the four endpoint

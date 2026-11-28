@@ -1133,7 +1133,7 @@ guarded arm out of its guard (`m != 0 ∧ Mod(n, m) = 1` at `m = 0` is `False`),
 and `invariants` an operation out of a loop of no pass; the folds of the rows
 compute with doubles, and the lowering has folded the closed nodes exactly
 already. `cse` reads a value that dominates its use, and `strength` rewrites the
-real `pow` only.
+real `pow` and the exact identities `x * 1` and `x / 1`.
 
 Declined, each with its cause: a real or complex value anywhere (an input that
 is not of a subtype of `integer`, a real literal, `Pi`, a row with no integer
@@ -3056,35 +3056,42 @@ or an `if` moves as a whole, and an instruction in an arm of the body stays. A
 `pure` instruction moves out of every loop, unless it holds a call or an
 operation that the pass `plain` of the interval mode makes throw: a `rangecount`
 (`_IA.rangeCount()`), and a `rangestep` or an `elem` whose index is not a
-constant or a loop index (`_IA.number()` of an interval that is not a point). A
-`may-fail` instruction, or a call of a function that is not `effectful` and not
-on a cycle of calls, moves only out of a loop of constant bounds, or a build of
-a constant length, of at least one pass, which is not a `Loop` (a `loop` with
-`passes`), and only when no effectful instruction of the body is before it: if
-it fails before the loop, it failed in the first pass. Out of a loop of a
-run-time count, a build with a pure body over the elements of a list that exists
-(a parameter, the result of a call or of a `filter`, or the shortest of such
-lists, the length of `PointList(A, B)`) moves too, and so does a loop over them,
-except in the interval mode with an `iterationBudget` below 2^32, whose limit
-refuses a loop over a list longer than the budget (the option `listLoops`); a
-`filter` does not (it throws for an undecided condition in the interval mode).
-Out of a `loop` of a run-time count that is not a `Loop`, or a `build`, at the
-place where a `may-fail` instruction would move, a check of two lengths
-(`rows.agree`, `rows.square`: "Lists") moves under the guard that the loop runs
-a pass (`lo <= hi`, `1 <= n`), and its value is 0 where it does not; a length
-plus that value is the length of a list that exists, so the sum or the build
-that reads it moves too (`Sum(i·Dot(L, M), i, 1, n)`). Such a build or loop runs
-once where the program ran it no time, no longer than the list took to make; on
-JavaScript its passes then tick the deadline. So in
-`Sum(Max(Max(L), k), Limits(k, 1, n))` the loop of `Max(L)` runs once, also at
-`n = 0`, and a call in the loop of `Sum(f(x)·k, Limits(k, 1, n))` stays there,
-so that a loop of no pass runs no call. In Tycho's `voronoi-diagram`, the loop
-of `B` (`Sum(…, k = 1..16)`) called `F(x, y)`, `v(x, y)` and `u(x, y)` at each
-pass; they are called once. A moved call counts the passes of its `Loop`s once
-(`iterationBudget`): `Sum(f(x)·k, Limits(k, 1, 3))`, whose `f` runs a `Loop` of
-100 passes, gives its value under a budget of 150, where it threw. Nothing
-effectful moves, so the draws of a seeded frame and its warnings do not change.
-The `bigint` mode does not run the pass.
+constant or a loop index (`_IA.number()` of an interval that is not a point).
+Such a `pure` instruction moves also out of the body of an `integrate`, a
+`derivative` or a `sortby`, which the runtime calls as a function, any number of
+times and possibly never (`CALLBACK_REGIONS`): in
+`∫_x^∞ e^{-y/2} y^{k/2-1} / (Γ(k/2) 2^{k/2}) dy` the denominator is computed
+once, not at each node of the quadrature; no other instruction moves out of
+them. For `inline`, such a body counts as a loop body, so a small user function
+that it calls is copied there and its pure part moves out too. A `may-fail`
+instruction, or a call of a function that is not `effectful` and not on a cycle
+of calls, moves only out of a loop of constant bounds, or a build of a constant
+length, of at least one pass, which is not a `Loop` (a `loop` with `passes`),
+and only when no effectful instruction of the body is before it: if it fails
+before the loop, it failed in the first pass. Out of a loop of a run-time count,
+a build with a pure body over the elements of a list that exists (a parameter,
+the result of a call or of a `filter`, or the shortest of such lists, the length
+of `PointList(A, B)`) moves too, and so does a loop over them, except in the
+interval mode with an `iterationBudget` below 2^32, whose limit refuses a loop
+over a list longer than the budget (the option `listLoops`); a `filter` does not
+(it throws for an undecided condition in the interval mode). Out of a `loop` of
+a run-time count that is not a `Loop`, or a `build`, at the place where a
+`may-fail` instruction would move, a check of two lengths (`rows.agree`,
+`rows.square`: "Lists") moves under the guard that the loop runs a pass
+(`lo <= hi`, `1 <= n`), and its value is 0 where it does not; a length plus that
+value is the length of a list that exists, so the sum or the build that reads it
+moves too (`Sum(i·Dot(L, M), i, 1, n)`). Such a build or loop runs once where
+the program ran it no time, no longer than the list took to make; on JavaScript
+its passes then tick the deadline. So in `Sum(Max(Max(L), k), Limits(k, 1, n))`
+the loop of `Max(L)` runs once, also at `n = 0`, and a call in the loop of
+`Sum(f(x)·k, Limits(k, 1, n))` stays there, so that a loop of no pass runs no
+call. In Tycho's `voronoi-diagram`, the loop of `B` (`Sum(…, k = 1..16)`) called
+`F(x, y)`, `v(x, y)` and `u(x, y)` at each pass; they are called once. A moved
+call counts the passes of its `Loop`s once (`iterationBudget`):
+`Sum(f(x)·k, Limits(k, 1, 3))`, whose `f` runs a `Loop` of 100 passes, gives its
+value under a budget of 150, where it threw. Nothing effectful moves, so the
+draws of a seeded frame and its warnings do not change. The `bigint` mode does
+not run the pass.
 
 `WithRandomSeed(537911, Random())`, the random constant of a host (a number as
 the seed, one `Random()` as the body), gives one value at every call: the
@@ -3093,25 +3100,34 @@ GLSL too (not in the `bigint` and interval modes, not with
 `constantFold: false`, and not when a host's handler answers for the frame or
 the draw). A seed that is not a number literal
 (`WithRandomSeed(Random(), Random())` draws its seed from the frame around it)
-and any other body keep the frame. The held value of a name is the exception
+and any other body keep the frame, except draws over literals (the rule of the
+held value below), which are the interpreter's value as a literal on JavaScript
+and in the interval mode, also written in place
+(`WithRandomSeed(628117, RandomChoice([0, 1), 6561))`, CE-1943): the frame would
+draw its elements again at each call. On GLSL such a frame written in place
+declines, as a frame does. The held value of a name is the exception
 (`expression()` of `lower.ts`), since it declines with an effect: under a number
 as the seed, draws over literals (the library's `Random`, `RandomChoice`,
 `RandomSample`, `List`, `Range`, `Interval`, `Open` and `Tuple`, numbers and the
 library's constants, with a literal count of a draw or a `Range` of at most
 `MAX_FOLD_EXPANDED_NODES`), such as
-`a := WithRandomSeed(7, RandomChoice([0, 1), 3))`, a seeded list of Desmos, give
-their interpreter value as a literal, a real or a list of reals, under the same
-conditions. Every other held value is lowered as written in place, and of its
-effects only the draws of a random frame that it holds are accepted, when the
-frame has one draw site evaluated once (a frame of the next paragraph that has
-no warning): `H := WithRandomSeed(139128, RandomChoice([0, 1), 4N))`, a seeded
-list whose length reads the input `N`, is a function of `N` (`drawSites()` of
-`lower.ts`). On JavaScript, a literal-seeded frame around one built-in choice
-can share its list at a second read in the same region when its inputs and the
-effect count are unchanged. The frame starts at its seed, so the seed can read
-an input too (`WithRandomSeed(N, Random())`). A held value still declines when
-it draws outside a frame (`L := Random() + N`), draws its seed, reads a name of
-`vars`, calls a user function that draws, or holds a frame of the warning
+`a := WithRandomSeed(7, RandomChoice([0, 1), 3))`, a seeded list of Desmos, and
+the library's `Add`, `Subtract`, `Negate`, `Multiply` and `Divide` of numbers
+and such frames (`C := 2·WithRandomSeed(7, RandomChoice([0, 1), 3)) - 1`, the
+Desmos `2random(3)-1`), give their interpreter value as a literal, a real or a
+list of reals, under the same conditions, but also in the interval mode, where
+the literal is a list of point intervals as a written list is (CE-1947). Every
+other held value is lowered as written in place, and of its effects only the
+draws of a random frame that it holds are accepted, when the frame has one draw
+site evaluated once (a frame of the next paragraph that has no warning):
+`H := WithRandomSeed(139128, RandomChoice([0, 1), 4N))`, a seeded list whose
+length reads the input `N`, is a function of `N` (`drawSites()` of `lower.ts`).
+On JavaScript, a literal-seeded frame around one built-in choice can share its
+list at a second read in the same region when its inputs and the effect count
+are unchanged. The frame starts at its seed, so the seed can read an input too
+(`WithRandomSeed(N, Random())`). A held value still declines when it draws
+outside a frame (`L := Random() + N`), draws its seed, reads a name of `vars`,
+calls a user function that draws, or holds a frame of the warning
 `seeded-draw-order` (`WithRandomSeed(5, Random() + Random())`), whose draws can
 differ from the interpreter's. On GLSL, which has no random frame, the frame
 declines. Otherwise:
@@ -3592,23 +3608,32 @@ so do GLSL and the interval mode. The region is `may-fail`, as `integrate`:
 `cse` merges it only with an equal visible region, and it moves out of a loop
 only as a whole. `ND(f, x)` of a function literal of one parameter is the same
 region, the parameter bound at the point: the interpreter's `ND` runs the same
-stencil (`stencilDerivativeAt()`). `EvaluateAt(f, a)` of a function literal of
-one parameter is `Apply(f, a)`, and `EvaluateAt(f, a, b)` is
-`Apply(f, b) - Apply(f, a)`, on every target; at two bounds a function with an
-effect declines (the interpreter applies `f` at `a` first). A `Limit` compiles
-only when it is closed (it reads no input, local, parameter, index or `vars`
-name, and its body is pure): it is the number that `N()` gives at compile time,
-also with a direction. Another `Limit` declines, and so does every `Limit` in
-the interval mode: the interpreter computes a symbolic limit at each point
-first, which no kernel of the runtime reproduces (the numeric limit is NaN at a
-jump near the point: CE-1232). Otherwise the node declines: with no closed form
-(`Apply(Derivative(g), a)` has no stencil, and neither has `D(f, (x, 2))`),
-under an angular unit other than radians, when the node or the result has more
-than `CLOSED_SIZE` nodes counted on every path, and when the result reads a name
-that the walk binds other than as an input and that the node does not read, or
-that a value that the node reaches reads: the body of a user function that it
-calls or names, an expression that a name of it holds (`foreign()`:
-`w(t) = a·t²` in `Sum(Apply(Derivative(w), a), Limits(a, 1, 3))`). An
+stencil (`stencilDerivativeAt()`). `Apply(Derivative(g, 1), a)` of a literal
+order 1, of a user function or a function literal `g` of one parameter whose
+body is pure, is the same region over the call `g(t)` (CE-1945) when the
+engine's `Derivative(g, 1)` stays whole (the differentiation is over its size
+limit): the interpreter's `N()` then runs the same stencil
+(`numericDerivativeOfApply()`), and the call reads the free names of the body
+where `g` is defined, as every call does. A partial closed form (one that keeps
+`Derivative(Min, 1, 0)`) stays unevaluated in the interpreter and declines, and
+so do an order that is not the literal 1, GLSL and the interval mode.
+`EvaluateAt(f, a)` of a function literal of one parameter is `Apply(f, a)`, and
+`EvaluateAt(f, a, b)` is `Apply(f, b) - Apply(f, a)`, on every target; at two
+bounds a function with an effect declines (the interpreter applies `f` at `a`
+first). A `Limit` compiles only when it is closed (it reads no input, local,
+parameter, index or `vars` name, and its body is pure): it is the number that
+`N()` gives at compile time, also with a direction. Another `Limit` declines,
+and so does every `Limit` in the interval mode: the interpreter computes a
+symbolic limit at each point first, which no kernel of the runtime reproduces
+(the numeric limit is NaN at a jump near the point: CE-1232). Otherwise the node
+declines: with no closed form (`D(f, (x, 2))` has no stencil, nor has
+`Apply(Derivative(g, 2), a)`), under an angular unit other than radians, when
+the node or the result has more than `CLOSED_SIZE` nodes counted on every path,
+and when the result reads a name that the walk binds other than as an input and
+that the node does not read, or that a value that the node reaches reads: the
+body of a user function that it calls or names, an expression that a name of it
+holds (`foreign()`: `w(t) = a·t²` in
+`Sum(Apply(Derivative(w), a), Limits(a, 1, 3))`). An
 `Apply(Derivative(g, k…), a…)` of a total order of 3 or more of a body that
 `prefersJetDerivative()` selects for forward mode declines before the engine is
 asked. The time of the engine's differentiation is bounded by its own limit
@@ -4537,10 +4562,12 @@ entry of an array.
   list, an array or a list in storage, the operation declines (`2·E` for
   `E: list<real^65>`), as the text would grow with the length. A reduction or an
   `At` of such a list is a loop or a read and compiles.
-- A loop or a build of 2^32 iterations or more throws on JavaScript; GLSL clamps
-  its `int` bounds to ±2^30. GLSL has no run-time length, region, draw, frame or
-  recursion; a build of a constant length is written out (at most 4,096 elements
-  in a program).
+- A loop or a build of 2^32 iterations or more throws on JavaScript (a build of
+  a literal count below 2^32 prints no test); GLSL clamps its `int` bounds to
+  ±2^30, and writes a literal bound as that `int`. A scalar sum `a + ((-c) · y)`
+  of a negative constant `-c` is printed `a - (c · y)`, the same IEEE value.
+  GLSL has no run-time length, region, draw, frame or recursion; a build of a
+  constant length is written out (at most 4,096 elements in a program).
 - A list of lists of run-time length (other than an input's outer list), a
   string seed and `Random` of a domain decline.
 - A `real` local declared or assigned a value outside its type (NaN, a complex

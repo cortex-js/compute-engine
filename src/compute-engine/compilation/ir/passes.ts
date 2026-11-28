@@ -20,9 +20,11 @@
  *   evaluated when needed); a pure operand is moved out of its arm, and the
  *   conditional becomes the `and` or `or` it is.
  * - `strength`: `pow` with a literal exponent 1 to 16 is a product: the
- *   definition of `pow` (`realPow()`).
+ *   definition of `pow` (`realPow()`). A real or integer scalar `x * 1`
+ *   or `x / 1` is `x` (`identityOperand()`).
  * - `inline`: a call of a small user function is a copy of its body
- *   (`inline` below), so that `cse` and `invariants` see the calls it makes.
+ *   (`inline` below), so that `cse` and `invariants` see the calls it makes;
+ *   the body of a region of `CALLBACK_REGIONS` counts as a loop body.
  * - `cse`: an instruction that repeats an earlier mergeable one whose value
  *   is visible reads that value instead, and so does a call of a function
  *   that is not effectful (also one on a cycle of calls), merged with an
@@ -31,7 +33,9 @@
  *   not effectful, by its structure (`regionKey` below).
  *   No value is moved.
  * - `invariants`: an instruction of a loop body that reads nothing that the
- *   body computes is computed once, before the loop (`invariants` below).
+ *   body computes is computed once, before the loop (`invariants` below);
+ *   so is a pure one of the body of an integrand, a numeric derivative or a
+ *   comparison of a sort (`CALLBACK_REGIONS`).
  * - `forward`: a pure build or filter that one instruction reads is read
  *   where it is, with no list. GLSL runs the statically bounded cases
  *   before scalarization.
@@ -105,6 +109,10 @@ export type PassOptions = {
    *  interval mode with an `iterationBudget`, whose limit refuses a loop of
    *  more passes). */
   listLoops?: boolean;
+  /** An integral with a bound that is a constant ±∞ does not call its
+   *  integrand (the interval mode: `_IA.integrate` answers `entire`), so
+   *  `invariants` moves nothing out of it. */
+  idleInfiniteIntegrals?: boolean;
   /** `forward`: a pure build that one instruction reads is read where it
    *  is, with no list (`forward` below). */
   forward?: boolean;
@@ -226,7 +234,12 @@ export function runPasses(
     if (options.invariants)
       changed =
         run('invariants', (q, r) =>
-          invariants(q, r, options.listLoops !== false)
+          invariants(
+            q,
+            r,
+            options.listLoops !== false,
+            options.idleInfiniteIntegrals === true
+          )
         ) || changed;
     if (options.forward) changed = run('forward', forward) || changed;
     if (gatherMaps)
@@ -625,6 +638,12 @@ const hoist: Pass = (p, rows) => {
 
 const strength: Pass = (p) =>
   rewrite(p, (i, { subst, constants }) => {
+    if (i.k === 'op' && IDENTITY_OPS.has(i.op)) {
+      const x = identityOperand(p, i, constants);
+      if (x === undefined) return undefined;
+      subst.set(i.out, x);
+      return [];
+    }
     if (i.k !== 'op' || i.op !== 'pow') return undefined;
     const [base, exponent] = i.args;
     const n = constants.get(exponent);
@@ -650,6 +669,36 @@ const strength: Pass = (p) =>
     }
     return undefined;
   });
+
+/** The operations of `identityOperand()`. */
+const IDENTITY_OPS = new Set(['mul', 'mul.int', 'div']);
+
+/** The operand `x` of a scalar `x * 1`, `1 * x` or `x / 1` on the real or
+ *  integer lane: the IEEE value of each is `x`, for every `x` (`NaN`,
+ *  `±Infinity` and `-0` too). A complex product by 1 is not `x` when a part is
+ *  infinite. (`x + 0` is not `x` at `-0`, and a `-0` constant does not
+ *  reach the IR: the canonical form makes it `0`.) */
+function identityOperand(
+  p: Program,
+  i: Instr & { k: 'op' },
+  constants: ReadonlyMap<V, unknown>
+): V | undefined {
+  const t = p.types[i.out];
+  if (t.shape.length !== 0 || (t.lane !== 'real' && t.lane !== 'integer'))
+    return undefined;
+  const unit = (v: V) => constants.get(v) === 1;
+  const orders = i.op === 'div' ? [i.args] : [i.args, [...i.args].reverse()];
+  for (const [a, b] of orders) {
+    if (
+      i.args.length === 2 &&
+      unit(b) &&
+      sameLane(p, a, i.out) &&
+      p.types[a].shape.length === 0
+    )
+      return a;
+  }
+  return undefined;
+}
 
 /** The most instructions of an instruction with regions that `cse` keys. */
 const KEYED_SIZE = 1000;
@@ -759,6 +808,11 @@ const repeated = (i: Instr): Region | undefined =>
       ? i.regions[0]
       : undefined;
 
+/** The body of a region that the runtime calls as a function
+ *  (`CALLBACK_REGIONS`). */
+const callback = (i: Instr): Region | undefined =>
+  i.k === 'region' && CALLBACK_REGIONS.has(i.op) ? i.regions[0] : undefined;
+
 /** `t` is a list of a constant length of at most `n` elements. */
 const shortList = (t: IRType, n: number): boolean =>
   n > 0 && t.shape.length > 0 && count(t) <= n;
@@ -800,7 +854,9 @@ const inline = (
   const walk = (fn: string, r: Region, loop: boolean): void =>
     r.body.forEach((i) => {
       if (i.k === 'call') site(i, { fn, loop });
-      regionsOf(i).forEach((x) => walk(fn, x, loop || repeated(i) === x));
+      regionsOf(i).forEach((x) =>
+        walk(fn, x, loop || repeated(i) === x || callback(i) === x)
+      );
     });
   p.functions.forEach((f) => walk(f.name, f.body, false));
   // The functions whose body, or the body of a function it calls, holds an
@@ -920,12 +976,15 @@ function guard(p: Program, x: Instr, passes: V): Instr {
  * - out of a loop that can run no pass (not a `Loop`, at the same place as
  *   the one that can fail), a check of lengths (`lengthCheck()`), under the
  *   guard that the loop runs a pass (`guard()`): the pure sum or build that
- *   reads its value then moves too.
+ *   reads its value then moves too;
+ * - out of the body of a region of `CALLBACK_REGIONS`, which the runtime
+ *   can call no time, a pure instruction only.
  */
 const invariants = (
   p: Program,
   rows: readonly OperatorRow[],
-  listLoops: boolean
+  listLoops: boolean,
+  idleInfiniteIntegrals = false
 ): ReturnType<Pass> => {
   const fx = effects(p, rows);
   const cyclic = recursiveFunctions(p.functions);
@@ -997,7 +1056,7 @@ const invariants = (
   };
   let changed = false;
   /** The instructions that move out of `body`, the body of `loop`. */
-  const moveOut = (loop: Instr, body: Region): Instr[] => {
+  const moveOut = (loop: Instr, body: Region, pureOnly = false): Instr[] => {
     const counted = loop.k === 'loop' && loop.passes === true;
     const lo = loop.k === 'loop' ? integer(loop.lo) : 1;
     const hi = integer(loop.k === 'loop' ? loop.hi : argsOf(loop)[0]);
@@ -1046,10 +1105,16 @@ const invariants = (
       const ok =
         free &&
         ((e === 'pure' && !risky) ||
-          (failing &&
+          (!pureOnly &&
+            failing &&
             (runs || (overList(x) && !risky && regionsOf(x).every(pure)))));
       if (ok) moved.push(x);
-      else if (failing && lengthCheck(x) && runsOne() !== undefined)
+      else if (
+        !pureOnly &&
+        failing &&
+        lengthCheck(x) &&
+        runsOne() !== undefined
+      )
         moved.push(guard(p, x, passes!));
       else {
         kept.push(x);
@@ -1063,12 +1128,23 @@ const invariants = (
     }
     return moved;
   };
+  // An integral that never calls its integrand (`idleInfiniteIntegrals`).
+  const idle = (i: Instr) =>
+    idleInfiniteIntegrals &&
+    i.k === 'region' &&
+    i.op === 'integrate' &&
+    i.args.some((a) => {
+      const c = constants.get(a);
+      return typeof c === 'number' && !Number.isFinite(c) && !Number.isNaN(c);
+    });
   const visit = (r: Region) => {
     const out: Instr[] = [];
     for (const i of r.body) {
       regionsOf(i).forEach(visit);
       const body = repeated(i);
       if (body !== undefined) out.push(...moveOut(i, body));
+      else if (callback(i) !== undefined && !idle(i))
+        out.push(...moveOut(i, callback(i)!, true));
       out.push(i);
     }
     r.body = out;
@@ -1076,6 +1152,13 @@ const invariants = (
   p.functions.forEach((f) => visit(f.body));
   return { changed, resolve: (v) => v };
 };
+
+/** The regions whose body the runtime calls as a function, any number of
+ *  times and possibly never: the integrand of `integrate`, the stencil of
+ *  `derivative`, the comparison of `sortby`. Only a pure instruction moves
+ *  out of them (`invariants`): it is computed once, also where the body
+ *  runs no time, which a pure instruction allows. */
+const CALLBACK_REGIONS = new Set(['integrate', 'derivative', 'sortby']);
 
 /** One backward pass per region: an instruction is kept when one of its
  *  values is read later (or names the length of a value read later), or

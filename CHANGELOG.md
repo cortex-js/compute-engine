@@ -11,6 +11,40 @@
   the value of a string field that every write copies
   (`out = U(out.kind, …)`); a write of another value still compiles, and
   the field is then read at run time.
+- **A compiled integral computes the part of its integrand that does not
+  depend on the variable once.** In
+  `\int_x^\infty \frac{e^{-y/2} y^{k/2-1}}{\Gamma(k/2)\, 2^{k/2}}\,dy`, the
+  denominator was computed at each node of the quadrature on JavaScript
+  (CE-1942); it is now computed once per call, also when it is the body
+  of a small user function (interval-js already did this, except for that
+  body). That integral takes about 0.54 ms per call in place of 1.78 ms,
+  with the same values. The same holds for a numeric derivative and the
+  comparison of a `Sort`.
+- **`Sign` of a complex compiles on GLSL**, as `z/|z|`, and `0` at `0`.
+- **Shorter JavaScript and GLSL code**: `x * 1` and `x / 1` are `x`,
+  `-c + x` is written `x - c` and `1 + (-0.4) * y` is written
+  `1 - 0.4 * y`, a list of a constant length is built without a check of
+  its length, and a GLSL loop of constant bounds has no `clamp`. The
+  values are the same, bit for bit.
+- **A seeded random list compiles on interval-js** (CE-1947). With
+  `h := WithRandomSeed(660536, RandomChoice([0, 1), 400))`, the Desmos
+  `h=random(400)`, a sum that reads `h[i+1]` declined on interval-js ("a
+  list whose length is not one number"). The value of `h` is now the
+  interpreter's, a list of point intervals, as on JavaScript; so is
+  `2·WithRandomSeed(…) - 1`, the Desmos `2random(7)-1`, on both targets.
+- **Seeded draws written in place are computed once** (CE-1943).
+  `At(WithRandomSeed(628117, RandomChoice([0, 1), 6561)), …)`, the Desmos
+  `random(9^4)[8θ]`, drew its 6,561 numbers again at each call of the
+  compiled function, on JavaScript and interval-js; the code now holds the
+  interpreter's list, and a call takes about 0.24 µs in place of 24 µs.
+  GLSL declines as before.
+- **`f'(x)` compiles on JavaScript when the derivative has no closed form**
+  (CE-1945). `Apply(Derivative(f, 1), x)` of a user function `f` whose
+  derivative exceeds the engine's size limit declined; it is now the
+  numeric derivative of the call `f(t)` at `x`, as `D(f(x), x)` already
+  compiled, and gives the interpreter's numeric value. Higher orders, a
+  partial closed form (one that keeps a derivative head), GLSL and
+  interval-js still decline.
 
 ### Bug Fixes
 

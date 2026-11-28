@@ -301,7 +301,7 @@ describe('IR profile, batch G18: Map of a list of a constant length on GLSL', ()
     const json = ['Min', ['Comprehension', sq('k'), ['Element', 'k', ['Range', 1, 16]]]];
     const code = glsl(json).code!;
     expect(code).toMatch(/float v\d+\[16\] = float\[16\]\(/);
-    expect(code).toMatch(/\(-16\.0\) \+ x/);
+    expect(code).toMatch(/\(x - 16\.0\)/);
     // With `constantFold: false`, the count is not folded, and GLSL
     // declines as before.
     expect(failure(() => glsl(json, { constantFold: false }))).toMatch(
