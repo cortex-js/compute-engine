@@ -1014,9 +1014,10 @@ export const DEFINITIONS_OTHERS: LatexDictionary = [
   // Custom LaTeX Dictionary" section in COMPUTE_ENGINE.md for a worked example.
 
   // ---------------------------------------------------------------------------
-  // Geometric primitive heads. Registered as known typed heads so consumers
-  // can branch on the operator name; CE itself doesn't render them. The
-  // library entries (with no evaluator) live in `library/core.ts`.
+  // Geometric primitive head. Registered as a known typed head so consumers
+  // can branch on the operator name; CE itself doesn't render it. The
+  // library entry (with no evaluator) lives in `library/core.ts`. A host
+  // declares its own drawing operators and their LaTeX entries.
   // ---------------------------------------------------------------------------
   {
     name: 'Triangle',
@@ -1024,30 +1025,6 @@ export const DEFINITIONS_OTHERS: LatexDictionary = [
     kind: 'function',
     serialize: (serializer, expr) =>
       '\\operatorname{triangle}' + serializer.wrapArguments(expr),
-  },
-  // Desmos's geometric `vector(p1, p2)` — a directed segment between two
-  // points. Routed to a dedicated head (not the existing column-vector
-  // `Vector`, which has a narrower `(number+) -> vector` signature).
-  {
-    name: 'GeometricVector',
-    latexTrigger: ['\\operatorname{vector}'],
-    kind: 'function',
-    serialize: (serializer, expr) =>
-      '\\operatorname{vector}' + serializer.wrapArguments(expr),
-  },
-  {
-    name: 'Sphere',
-    latexTrigger: ['\\operatorname{sphere}'],
-    kind: 'function',
-    serialize: (serializer, expr) =>
-      '\\operatorname{sphere}' + serializer.wrapArguments(expr),
-  },
-  {
-    name: 'Segment',
-    latexTrigger: ['\\operatorname{segment}'],
-    kind: 'function',
-    serialize: (serializer, expr) =>
-      '\\operatorname{segment}' + serializer.wrapArguments(expr),
   },
   // Desmos point-list surface form: `PointList(...)` zips collection components
   // into a list of point-tuples. Importers emit `\operatorname{PointList}(...)`;

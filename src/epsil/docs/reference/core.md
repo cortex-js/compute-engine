@@ -815,20 +815,6 @@ A parameter is a symbol, `Typed(symbol, type)`, a rest parameter `Spread(symbol)
 // ➔ 6
 ```
 
-### geometricVector
-
-MathJSON `GeometricVector` · `(start: any, end: any) -> expression`
-
-- `start` — The point the vector starts at. Sample: `A`.
-- `end` — The point the vector ends at. Sample: `B`.
-
-Geometric vector (directed segment between two points) — opaque typed head. Distinct from the column-vector `vector` operator.
-
-```epsil
-geometricVector(A, B)
-// ➔ GeometricVector(A, B)
-```
-
 ### graphemeClusters
 
 MathJSON `GraphemeClusters` · `(character | string) -> list<character>`
@@ -1454,19 +1440,6 @@ isError(RuntimeError("oops"))
 // ➔ true
 ```
 
-### segment
-
-MathJSON `Segment` · `(any+) -> expression`
-
-- arguments 1, … — An endpoint of the segment. Sample: `A`.
-
-Segment primitive — opaque typed head.
-
-```epsil
-segment(A, B)
-// ➔ Segment(A, B)
-```
-
 ### Sequence
 
 `function`
@@ -1531,19 +1504,6 @@ solve(x^2 - 1 == 0, x)
 ```epsil
 solve([x + y == 3, x - y == 1], [x, y])
 // ➔ [(2, 1)]
-```
-
-### sphere
-
-MathJSON `Sphere` · `(any+) -> expression`
-
-- arguments 1, … — An element that defines the sphere, such as its center or its radius. Sample: `O`.
-
-Sphere primitive — opaque typed head.
-
-```epsil
-sphere(O, r)
-// ➔ Sphere(O, r)
 ```
 
 ### Spread

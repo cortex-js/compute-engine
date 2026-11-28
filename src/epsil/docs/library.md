@@ -11,7 +11,7 @@ date: Last Modified
 ---
 # Epsil Standard Library
 
-The 749 functions and constants of the standard library, by category.
+The 746 functions and constants of the standard library, by category.
 Each row gives a name, its signature (for a function) or its kind and type
 (for a constant or variable), and the first sentence of its description —
 the same description `epsil doc <name>` prints in full and the editor
@@ -22,7 +22,7 @@ To search the library by concept rather than by name, use
 `epsil doc <keywords>` (see the [CLI](/epsil/cli/)); the
 [guide for agents](/epsil/for-agents/) lists the names most often needed.
 
-- [Core](#core) — 121 definitions · [full reference](/epsil/reference/core/)
+- [Core](#core) — 118 definitions · [full reference](/epsil/reference/core/)
 - [Control structures](#control-structures) — 16 definitions · [full reference](/epsil/reference/control-structures/)
 - [Logic](#logic) — 27 definitions · [full reference](/epsil/reference/logic/)
 - [Collections](#collections) — 127 definitions · [full reference](/epsil/reference/collections/)
@@ -84,7 +84,6 @@ The [Core reference](/epsil/reference/core/) has the full description and the ex
 | `evaluateAt` | `EvaluateAt` | `(f: function, lower: expression, upper: expression?) -> unknown` | Evaluate a function at one point or between two bounds. |
 | `findRoot` | `FindRoot` | `(equations: any, params: any, options: dictionary?) -> dictionary` | FindRoot(equations, params): numerically find parameter values that zero the residuals. |
 | — | `Function` | `(expression, (function \| symbol)*) -> function` | Function(body, param1, param2, …): a function literal. |
-| `geometricVector` | `GeometricVector` | `(start: any, end: any) -> expression` | Geometric vector (directed segment between two points) — opaque typed head. |
 | `graphemeClusters` | `GraphemeClusters` | `(character \| string) -> list<character>` | A collection of grapheme clusters from a string. |
 | `head` | `Head` | `(any) -> symbol` | Return the head of an expression, the name of the operator |
 | — | `Hold` | `(any) -> unknown` | Hold an expression, preventing it from being canonicalized or evaluated until `ReleaseHold` is applied to it |
@@ -131,12 +130,10 @@ The [Core reference](/epsil/reference/core/) has the full description and the ex
 | `replaceAll` | `ReplaceAll` | `(any, any+) -> any` | ReplaceAll(expr, rules): apply one or more replacement rules to `expr`, then evaluate the result (Mathematica `expr /. rules`). |
 | — | `Rule` | `(match: expression, replace: expression, predicate: function?) -> expression` | Pattern replacement rule. |
 | — | `RuntimeError` | `(expression<ErrorCode> \| string) -> never` | Construct an error value when evaluated: the runtime counterpart of a written `Error(…)`, which is a static diagnostic node. |
-| `segment` | `Segment` | `(any+) -> expression` | Segment primitive — opaque typed head. |
 | — | `Sequence` | `function` | Ordered sequence of expressions. |
 | — | `Signature` | `(symbol) -> nothing \| string` | Return the signature string of an operator. |
 | `simplify` | `Simplify` | `(any, assumptions: any?) -> expression` | Simplify(expr): simplify an expression. |
 | `solve` | `Solve` | `(any, any*) -> list` | Solve(equation, unknown): the list of solutions of an equation for the unknown. |
-| `sphere` | `Sphere` | `(any+) -> expression` | Sphere primitive — opaque typed head. |
 | — | `Spread` | `(any) -> unknown` | Spread(t): splice the elements of the tuple `t` into the enclosing argument list (Epsil surface syntax: `f(...t)`). |
 | — | `String` | `(any*) -> string` | A string created by joining its arguments. |
 | `stringCompare` | `StringCompare` | `(character \| string, character \| string) -> integer` | StringCompare(a, b): -1 when `a` sorts before `b`, 0 when they are equal, 1 when `a` sorts after `b`. |

@@ -3614,21 +3614,6 @@
       "description": "Geometric distribution: the number of failures before the first success, each trial a success with probability p (0 < p ≤ 1). The support is {0, 1, 2, …}."
     },
     {
-      "name": "GeometricVector",
-      "category": "Core",
-      "arity": "2",
-      "signature": "(any, any) -> expression",
-      "associative": false,
-      "commutative": false,
-      "idempotent": false,
-      "lazy": false,
-      "broadcastable": false,
-      "description": "Geometric vector (directed segment between two points) — opaque typed head. Distinct from the column-vector `Vector` operator.",
-      "examples": [
-        "GeometricVector(A, B)"
-      ]
-    },
-    {
       "name": "GraphemeClusters",
       "category": "Core",
       "arity": "1",
@@ -8102,21 +8087,6 @@
       ]
     },
     {
-      "name": "Segment",
-      "category": "Core",
-      "arity": "variadic",
-      "signature": "(any+) -> expression",
-      "associative": false,
-      "commutative": false,
-      "idempotent": false,
-      "lazy": false,
-      "broadcastable": false,
-      "description": "Segment primitive — opaque typed head.",
-      "examples": [
-        "Segment(A, B)"
-      ]
-    },
-    {
       "name": "Sequence",
       "category": "Core",
       "arity": "unknown",
@@ -8485,21 +8455,6 @@
       "examples": [
         "Sort([3, 1, 2])",
         "Sort([\"pear\", \"fig\", \"apple\"], Length)"
-      ]
-    },
-    {
-      "name": "Sphere",
-      "category": "Core",
-      "arity": "variadic",
-      "signature": "(any+) -> expression",
-      "associative": false,
-      "commutative": false,
-      "idempotent": false,
-      "lazy": false,
-      "broadcastable": false,
-      "description": "Sphere primitive — opaque typed head.",
-      "examples": [
-        "Sphere(O, r)"
       ]
     },
     {

@@ -3138,7 +3138,7 @@ export interface IComputeEngine {
    * Otherwise returns `{ kind, signature? }` where `kind` is `'function'`
    * when the operator has an `evaluate` or `collection` handler, and
    * `'opaque'` when it is declared as a typed-but-opaque node (e.g.,
-   * `Triangle`, `Sphere`).
+   * `Triangle`, `Angle`).
    *
    * Use this to classify heads encountered in parsed MathJSON without
    * maintaining a parallel list of "known" operators.

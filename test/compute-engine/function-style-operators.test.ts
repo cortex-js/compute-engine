@@ -420,51 +420,26 @@ describe('Geometric primitive heads (opaque)', () => {
     expect(result.ops!.length).toBe(3);
   });
 
-  test('Sphere is recognized', () => {
-    const expr = ce.parse('\\operatorname{sphere}((0, 0, 0), 1)');
-    expect(expr.operator).toBe('Sphere');
-  });
-
-  test('Segment is recognized', () => {
-    const expr = ce.parse('\\operatorname{segment}((0, 0), (1, 1))');
-    expect(expr.operator).toBe('Segment');
+  test('the drawing operators of a host are not in the library', () => {
+    // A host declares `Segment`, `GeometricVector`, `Sphere` and `Polygon`
+    // and their LaTeX entries itself.
+    for (const name of ['Segment', 'GeometricVector', 'Sphere', 'Polygon'])
+      expect(ce.lookupDefinition(name)).toBeUndefined();
+    expect(ce.parse('\\operatorname{segment}((0, 0), (1, 1))').operator).toBe(
+      'segment'
+    );
+    expect(ce.parse('\\operatorname{vector}((0, 0), (1, 1))').operator).toBe(
+      'vector'
+    );
+    expect(ce.parse('\\operatorname{sphere}((0, 0, 0), 1)').operator).toBe(
+      'sphere'
+    );
   });
 
   test('Triangle round-trips through LaTeX', () => {
     const expr = ce.parse('\\operatorname{triangle}(1, 2, 3)');
     expect(expr.operator).toBe('Triangle');
     expect(expr.toLatex()).toContain('\\operatorname{triangle}');
-  });
-});
-
-describe('GeometricVector', () => {
-  // Distinct head from the existing column-vector `Vector` operator. Routed
-  // from `\operatorname{vector}` because Desmos uses `vector(p1, p2)` for
-  // a directed segment between two points, which has different semantics
-  // from CE's `Vector(x, y, z)` column construction.
-
-  test('\\operatorname{vector}(p1, p2) parses to GeometricVector', () => {
-    const expr = ce.parse(
-      '\\operatorname{vector}((0, 0, 0), (1, 2, 3))'
-    );
-    expect(expr.operator).toBe('GeometricVector');
-    expect(expr.ops!.length).toBe(2);
-  });
-
-  test('round-trips through LaTeX', () => {
-    const expr = ce.parse('\\operatorname{vector}((0, 0), (3, 4))');
-    expect(expr.operator).toBe('GeometricVector');
-    expect(expr.toLatex()).toContain('\\operatorname{vector}');
-  });
-
-  test('does not collide with existing Vector operator', () => {
-    // `Vector(x, y, z)` is the column-vector construction operator with a
-    // (number+) -> vector signature; it canonicalizes to a Matrix. The
-    // geometric form has its own head and stays a function call.
-    const colVec = ce.expr(['Vector', 1, 2, 3]);
-    expect(colVec.operator).toBe('Matrix'); // existing canonical form preserved
-    const geom = ce.expr(['GeometricVector', ['Tuple', 0, 0], ['Tuple', 1, 1]]);
-    expect(geom.operator).toBe('GeometricVector');
   });
 });
 

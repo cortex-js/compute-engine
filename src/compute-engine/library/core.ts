@@ -12945,8 +12945,8 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
   // ---------------------------------------------------------------------------
   // Opaque typed heads — registered so the names are in the standard set
   // (consumers can branch on the operator name); CE itself does not evaluate
-  // them. Geometric primitives `Triangle`/`Sphere`/`Segment` and the action
-  // arrow `To` (`a \to b`).
+  // them. The geometric primitive `Triangle` and the action arrow `To`
+  // (`a \to b`). A host declares its own drawing operators.
   // ---------------------------------------------------------------------------
   {
     Triangle: {
@@ -12959,39 +12959,6 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         },
       ],
       examples: ['Triangle(A, B, C)'],
-    },
-    GeometricVector: {
-      description:
-        'Geometric vector (directed segment between two points) — opaque typed head. Distinct from the column-vector `Vector` operator.',
-      signature: '(start: any, end: any) -> expression',
-      parameters: {
-        start: { description: 'The point the vector starts at.', sample: 'A' },
-        end: { description: 'The point the vector ends at.', sample: 'B' },
-      },
-      examples: ['GeometricVector(A, B)'],
-    },
-    Sphere: {
-      description: 'Sphere primitive — opaque typed head.',
-      signature: '(any+) -> expression',
-      parameters: [
-        {
-          description:
-            'An element that defines the sphere, such as its center or its radius.',
-          sample: 'O',
-        },
-      ],
-      examples: ['Sphere(O, r)'],
-    },
-    Segment: {
-      description: 'Segment primitive — opaque typed head.',
-      signature: '(any+) -> expression',
-      parameters: [
-        {
-          description: 'An endpoint of the segment.',
-          sample: 'A',
-        },
-      ],
-      examples: ['Segment(A, B)'],
     },
 
     // Euclidean-geometry notation, transcribed as inert heads (no evaluator);

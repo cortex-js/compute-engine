@@ -8699,7 +8699,7 @@ const NON_APPLICATION_HEADS = new Set([
   'At',
 ]);
 
-/** The LHS is a function application (`f(x)`, `\operatorname{sphere}(u,v)`)
+/** The LHS is a function application (`f(x)`, `\operatorname{triangle}(u,v)`)
  * when it is a compound expression with a symbol head that is not one of the
  * structural non-application heads. Such a call is a valid indexing target
  * (`f(x)[1]` → `At(f(x), 1)`). An undeclared juxtaposition (`g(x)`) never
@@ -8745,7 +8745,7 @@ function parseAt(
     // `Delimiter` with `(` fences (e.g. `(3,4)` → `Delimiter(Sequence(3,4),
     // '(,)')`, `(x+1)` → `Delimiter(Add(x,1))`). A function application
     // reaches us as `[head, ...args]` (e.g. `f(x)` → `["f","x"]`,
-    // `\operatorname{sphere}(u,v)` → `["Sphere","u","v"]`). Only parentheses
+    // `\operatorname{triangle}(u,v)` → `["Triangle","u","v"]`). Only parentheses
     // and calls can present a compound LHS here: a bare compound such as
     // `x+1[2]` binds the bracket to its last operand via precedence, so
     // `Add(x,1)` never reaches us. The Delimiter is left intact and unwrapped

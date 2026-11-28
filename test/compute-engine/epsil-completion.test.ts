@@ -2343,8 +2343,8 @@ describe('EPSIL COMPLETION: NAMES THAT THE ENGINE DEFINES', () => {
     [
       '/// A circle with center `c` and radius `r`.',
       'function circle(c: tuple<real, real>, r: real) { r }',
-      '/// A line segment from `p` to `q`.',
-      'function segment(p: tuple<real, real>, q: tuple<real, real>) { 1 }',
+      '/// A triangle from `p` to `q`.',
+      'function triangle(p: tuple<real, real>, q: tuple<real, real>) { 1 }',
       'let width = 3',
     ].join('\n')
   );
@@ -2363,12 +2363,12 @@ describe('EPSIL COMPLETION: NAMES THAT THE ENGINE DEFINES', () => {
   });
 
   test('a definition of the engine replaces the library item it shadows', () => {
-    const items = at('segm▮').items.filter((i) => i.label === 'segment');
+    const items = at('trian▮').items.filter((i) => i.label === 'triangle');
     expect(items).toHaveLength(1);
     expect(items[0]).toMatchObject({
       kind: 'function',
       detail: '(p: tuple<real, real>, q: tuple<real, real>) -> integer',
-      documentation: 'A line segment from `p` to `q`.',
+      documentation: 'A triangle from `p` to `q`.',
     });
   });
 

@@ -1,5 +1,16 @@
 ## [Unreleased]
 
+### Breaking Changes
+
+- **Hosts now declare the `Segment`, `GeometricVector` and `Sphere`
+  drawing operators.** The standard library and the LaTeX dictionary no
+  longer register them, as for `Polygon` in 0.204.1.
+  `\operatorname{segment}(A, B)` now parses to a call of an undeclared
+  function `segment`, and `\operatorname{vector}(A, B)` and
+  `\operatorname{sphere}(O, r)` likewise. A host that draws these
+  operators declares them, with a `compile` handler when it compiles them,
+  and adds their LaTeX entries. `Triangle` stays in the library.
+
 ### Improvements
 
 - **JavaScript compiles a list of numbers and a string at a parameter

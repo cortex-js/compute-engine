@@ -1208,7 +1208,7 @@ const AT_INDEX_TYPE = parseType(
 
 // True when `expr` is an application of a library OPAQUE HEAD: an operator
 // with no `evaluate` handler whose declared result type is `expression`
-// (`Colon`, `Triangle`, `Segment`, `Perpendicular`, …). Such an application
+// (`Colon`, `Triangle`, `Perpendicular`, …). Such an application
 // never evaluates to anything but itself, so it is never a number, a string,
 // a boolean or a collection, and it can never be a valid `At` index.
 //

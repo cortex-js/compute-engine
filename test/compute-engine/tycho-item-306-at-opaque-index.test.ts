@@ -58,7 +58,7 @@ describe('At refuses an opaque-head index (Tycho item 306)', () => {
   });
 
   test('other opaque heads are refused as an index', () => {
-    const e = ce.box(['At', ['List', 1, 2, 3], ['Segment', 'A', 'B']]);
+    const e = ce.box(['At', ['List', 1, 2, 3], ['Triangle', 'A', 'B', 'C']]);
     expect(e.isValid).toBe(false);
   });
 

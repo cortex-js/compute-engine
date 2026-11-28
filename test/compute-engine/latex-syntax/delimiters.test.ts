@@ -254,10 +254,10 @@ describe('DELIMITERS', () => {
     // A built-in `\operatorname{...}` call (parses to a function head) indexes
     // identically, plain and fenced.
     expect(
-      raw('\\operatorname{sphere}\\left(a,b\\right)\\left[1\\right]')
-    ).toEqual('["At",["Sphere","a","b"],1]');
-    expect(raw('\\operatorname{sphere}(a,b)[1]')).toEqual(
-      '["At",["Sphere","a","b"],1]'
+      raw('\\operatorname{triangle}\\left(a,b\\right)\\left[1\\right]')
+    ).toEqual('["At",["Triangle","a","b"],1]');
+    expect(raw('\\operatorname{triangle}(a,b)[1]')).toEqual(
+      '["At",["Triangle","a","b"],1]'
     );
 
     // A trig-function application is likewise indexable (was an error before).
