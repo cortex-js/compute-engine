@@ -503,10 +503,12 @@ describe('CE-1652 acceptance: declines', () => {
       '(t: real) => if t > 0 { circle((t, 0), 1) } else { label((t, 0), "a") }',
       /arms of two types/
     );
-    // An unfilled and a filled circle are two record types (R3).
-    expectDeclines(
-      '(t: real) => if t > 0 { circle((t, 0), 1) } else { circle((t, 0), 1).fill("red") }',
-      /arms of two types/
+  });
+
+  test('an if with a run-time condition whose arms give a filled and an unfilled circle', () => {
+    // They differ at `fillPaint`, of a union type: one record type.
+    expectValueAgrees(
+      '(t: real) => if t > 0 { circle((t, 0), 1) } else { circle((t, 0), 1).fill("red") }'
     );
   });
 

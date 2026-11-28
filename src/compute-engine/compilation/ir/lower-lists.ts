@@ -18,6 +18,7 @@ import {
   requiredArity,
 } from '../../../common/type/utils.js';
 import {
+  isRecord,
   elementIndex,
   elementType,
   isSubLane,
@@ -1984,11 +1985,35 @@ export function listLowering(cx: Lowering) {
    *  index kept plus 1, or 0. A list with an effect declines (the
    *  interpreter stops at the first match). `Element` and `Contains` of a
    *  string in a `List` literal of strings (not `IndexOf`): the `Or` of its
-   *  equality to each element (CE-1920). */
+   *  equality to each element (CE-1920). A string of a known value in the
+   *  `Keys` of a dictionary literal: a constant. */
   const search = (e: Fn): V => {
     // `Element(v, L)` is `Contains(L, v)`.
     const [l, needle] =
       e.operator === 'Element' ? [e.ops[1], e.ops[0]] : [e.ops[0], e.ops[1]];
+    // A string of a known value in the keys of a dictionary literal (a
+    // record of the head `Dictionary`, CE-1771), whose keys are known when
+    // the code is emitted: a constant (`"content" in keys(opts)`).
+    if (
+      e.operator !== 'IndexOf' &&
+      isFunction(l, 'Keys') &&
+      l.nops === 1 &&
+      cx.isLibrary(l) &&
+      needle.type.matches('string')
+    ) {
+      const d = cx.value(l.ops[0])!;
+      const t = type(d);
+      const key = b.constants.get(cx.scalar(needle));
+      // A test decided when the code is emitted (`typeDecided()`): the arm
+      // not taken is not lowered. The node is lowered again in each
+      // function lowered for other types: its entry is that lowering's.
+      cx.typeTests.delete(e);
+      if (isRecord(t) && t.head === 'Dictionary' && typeof key === 'string') {
+        const verdict = (t.names ?? []).includes(key);
+        cx.typeTests.set(e, verdict);
+        return b.constant(verdict, 'boolean');
+      }
+    }
     // The interpreter compares exact values (`1/3` is not its double, and
     // `3·0.1` in a `Range` is `0.3`): the doubles compare as it does for
     // integers, and for inputs and float literals.

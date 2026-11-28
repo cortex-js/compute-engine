@@ -1655,10 +1655,14 @@ taken does not decline the program
 A second exception is a condition made only of tests that the IR types of a
 function compiled for its argument types decide (`x is T` of a parameter of
 type `any` or of no stated type, `==` of a string and a value that is never a
-string, `==` of two strings whose values are known; `And`, `Or`, `Not` of
+string, `==` of two strings whose values are known, a comparison of a
+`length` that the IR type states with a number literal, `k in keys(d)` of a
+string of a known value and a dictionary literal; `And`, `Or`, `Not` of
 them; CE-1652): the compiler lowers only the
 arm taken, so `if x is Figure { … } else { reduce(x, …) }` compiles for a
-figure. Such a condition declined before.
+figure. Such a condition declined before. When such a condition is false,
+the `if` has no other arm, and its value is not read (a statement in a
+loop), nothing is lowered.
 A name read only in the arm that is not taken is then not an input, and is
 not in `freeSymbols` (`If(1 < 2, x, y)` with `x, y: real` reads `x` only).
 So points of different sizes
@@ -3258,9 +3262,20 @@ dictionary: in an object literal it sets the prototype. A `Tuple` or a
 `List` of elements of several lanes (`[t, "a"]`) is a record with no names,
 an array at `run()`. A record is read
 at a constant position only (`p.x`; `q[1]` of a record with no names). Two
-records of one engine type whose fields have different shapes (a filled and
-an unfilled `Figure`) are two shapes, so an `If` with a run-time condition
-whose arms give them declines (R3). `interval-js` and the `bigint` mode
+records of one engine type whose fields have different shapes are two
+shapes, so an `If` with a run-time condition whose arms give them declines
+(R3). A field declared with a union type (`fillPaint: string | color |
+nothing`) is the exception (user decision, 2026-11-27): on JavaScript it
+holds a string, a boolean, `Nothing`, a number or a flat list of numbers,
+whose JavaScript value is the engine's value, and its value is not part of
+the shape of the record. So a filled and an unfilled `Figure` are one
+shape: a local, a loop and an `if` can hold either. Where the program can
+hold records whose values at such a field differ, the code only copies the
+field into another record (`Figure(self.kind, …, self.fillPaint, …)`);
+any other read declines, also a return of the field or a call of the host
+with it ("a read of the field fillPaint of Figure, of a union type"). The
+record itself is returned and given to the host as any record. A colour or a record at
+such a field keeps the shape of today. `interval-js` and the `bigint` mode
 decline a record (user decision), and so does GLSL, but for a vector ("On
 GLSL" below).
 

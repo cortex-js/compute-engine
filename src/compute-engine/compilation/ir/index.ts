@@ -337,11 +337,13 @@ export function admits(
 
 /**
  * A value of the lane `nothing` (`Nothing`, `README.md`, "Records") is read
- * only as a field of a record that a `list` makes: any other read of it, and
- * a yield of it (an arm, a carried value, the result of a function or of
- * the entry), refuses. A function value (`IRType.engine`; CE-1911) is read
- * also as an argument of a call of a function of the host or of a user
- * function. The passes run before, so a field read only by a type test
+ * only as a field of a record that a `list` makes, or as an argument of a
+ * call of a user function, whose parameter then has the lane `nothing`
+ * (a parameter of type `any`, `held()` of `lower-functions.ts`) and is
+ * read under the same rule: any other read of it, and a yield of it (an
+ * arm, a carried value, the result of a function or of the entry),
+ * refuses. A function value (`IRType.engine`; CE-1911) is read also as an
+ * argument of a call of a function of the host. The passes run before, so a field read only by a type test
  * that the lowering decided is gone.
  */
 function nothingRefusal(p: Program): Refusal | undefined {
@@ -356,7 +358,10 @@ function nothingRefusal(p: Program): Refusal | undefined {
       if (
         !field &&
         argsOf(i).some(
-          (v) => nothing(v) && !(call && p.types[v].engine !== undefined)
+          (v) =>
+            nothing(v) &&
+            i.k !== 'call' &&
+            !(call && p.types[v].engine !== undefined)
         )
       )
         return refusal;
@@ -438,7 +443,9 @@ function stringListRefusal(p: Program): Refusal | undefined {
     p.functions.forEach((f) => note(f.body));
     const yielded = new Set(entry.body.yields);
     const outer = (r: Region): V[] =>
-      r.body.flatMap((i) => regionsOf(i).flatMap((x) => [...x.yields, ...outer(x)]));
+      r.body.flatMap((i) =>
+        regionsOf(i).flatMap((x) => [...x.yields, ...outer(x)])
+      );
     const inner = new Set(outer(entry.body));
     for (const i of [...entry.body.body].reverse()) {
       if (i.k !== 'list' || p.types[i.out].lane !== 'record') continue;
@@ -460,6 +467,7 @@ function stringListRefusal(p: Program): Refusal | undefined {
         made.some((v) => p.types[v].shape.length !== 1) ||
         (made.length > 0 &&
           i.k !== 'list' &&
+          !(i.k === 'op' && i.op === 'field') &&
           !(i.k === 'region' && TEXT_LIST_MAKERS.includes(i.op)))
       )
         return refusal;

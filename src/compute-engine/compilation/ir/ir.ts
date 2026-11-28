@@ -80,10 +80,36 @@ export type Length = number | { readonly v: V };
 export type FieldLength = Length | 'carried';
 
 /** The IR type of a field of a record: the first axis of a list field can
- *  be carried (`FieldLength`). An `IRType` is a `FieldType`. */
+ *  be carried (`FieldLength`). An `IRType` is a `FieldType`.
+ *
+ *  `opaque`: a field declared with a union type (`string | color |
+ *  nothing`; `README.md`, "Records"), which holds a value of any of a few
+ *  lanes whose JavaScript value is the engine's value (`opaqueLane()`).
+ *  `exact`: its lane and shape are those of its value, as for any field.
+ *  `mixed`: the record is one of several whose values there differ (the
+ *  join of the arms of an `if`, a record local that statements replace),
+ *  and its lane and shape are those of one of them: the code only copies
+ *  such a field into another record, and any other read
+ *  declines (`field()` of `lower-records.ts`). Two records whose opaque
+ *  fields differ join to the record whose fields are `mixed`
+ *  (`sameFields()`, `joinType()`). */
 export type FieldType = Omit<IRType, 'shape'> & {
   readonly shape: readonly FieldLength[];
 };
+
+/** A value of the type `t` can be held by an `opaque` field (`FieldType`):
+ *  a string, `Nothing`, a number or a boolean, or a list of numbers or
+ *  booleans of rank 1, whose JavaScript value is the value of the engine
+ *  (`boxValue()` of `print-js.ts` boxes it by its run-time value). A
+ *  colour, a complex number, a record and an array are not. */
+export function opaqueLane(t: FieldType, marked: boolean): boolean {
+  if (marked || t.fields !== undefined || t.array !== undefined) return false;
+  if (t.shape.length === 0)
+    return ['string', 'nothing', 'integer', 'real', 'boolean'].includes(t.lane);
+  return (
+    t.shape.length === 1 && ['integer', 'real', 'boolean'].includes(t.lane)
+  );
+}
 
 /** `storage`: a list that the host holds in a storage of that kind (the
  *  option `storage` of `compile()`), set after the passes; it is read only
@@ -101,6 +127,10 @@ export type FieldType = Omit<IRType, 'shape'> & {
 export type IRType = {
   readonly lane: Lane;
   readonly shape: readonly Length[];
+  /** A field declared with a union type, or a copy of one (`FieldType`):
+   *  `exact` when its lane and shape are those of the value it holds,
+   *  `mixed` when they are those of one of the values it can hold. */
+  readonly opaque?: 'exact' | 'mixed';
   readonly storage?: 'sampler2D' | 'isampler2D';
   readonly fields?: readonly FieldType[];
   readonly marks?: readonly (number | undefined)[];
@@ -112,6 +142,13 @@ export type IRType = {
    *  type of a value never holds it, the lowering keeps the constant of a
    *  value aside (`Lowering.known()`). */
   readonly constant?: string;
+  /** The static type of the expression that made a flat list of numbers
+   *  (`list<finite_integer>` of `[5, 4]`), which the lane of its elements
+   *  does not prove (a real can be `~oo` or `NaN` in the interpreter). Of
+   *  a field of a dictionary literal, and of a parameter of type `any`
+   *  that holds such a list (`held()` of `lower-functions.ts`), where `x is
+   *  T` reads it (`engineTypeOf()` of `lower-match.ts`; CE-1923). */
+  readonly proven?: Type;
   /** A record of no names whose value in the engine is the application of
    *  `head` to its fields (`boxValue()` of `print-js.ts`; CE-1652, step 5):
    *  the arguments of a call of a function with a rest parameter
@@ -471,9 +508,7 @@ export function mapDirectArgs(i: Instr, f: (v: V) => V): void {
  *  a value's own shape. */
 function notCarried(n: Length): { readonly v: V } {
   if (typeof n !== 'object')
-    throw new Error(
-      'IR: a carried length outside the field types of a record'
-    );
+    throw new Error('IR: a carried length outside the field types of a record');
   return n;
 }
 
@@ -509,7 +544,10 @@ export function mapLengths(t: IRType, f: (v: V) => V): IRType {
  *  `head`), so that a list of records and its element are of one record
  *  type (README, "Records"). */
 export function withShape(t: IRType, shape: readonly Length[]): IRType {
-  if (t.lane !== 'record') return { lane: t.lane, shape };
+  if (t.lane !== 'record')
+    return t.proven === undefined || shape.length !== t.shape.length
+      ? { lane: t.lane, shape }
+      : { lane: t.lane, shape, proven: t.proven };
   const { fields, marks, nominal, names, head } = t;
   return {
     lane: t.lane,
@@ -551,9 +589,7 @@ export function sameShape(
   constant: (v: V) => number | undefined = () => undefined
 ): boolean {
   const n = (x: FieldLength) =>
-    typeof x === 'number' || x === 'carried'
-      ? x
-      : (constant(x.v) ?? `v${x.v}`);
+    typeof x === 'number' || x === 'carried' ? x : (constant(x.v) ?? `v${x.v}`);
   return a.length === b.length && a.every((x, i) => n(x) === n(b[i]));
 }
 
@@ -591,11 +627,7 @@ export function isSubType(
  *  (D2 of `docs/plans/2026-11-27-records-objects-and-held-lengths.md`):
  *  a list (no tuple mark at the first axis, `mark`) of one rank whose
  *  inner axes are equal. */
-function widens(
-  x: FieldType,
-  y: FieldType,
-  mark: number | undefined
-): boolean {
+function widens(x: FieldType, y: FieldType, mark: number | undefined): boolean {
   return (
     mark !== 0 &&
     x.shape.length > 0 &&
@@ -633,17 +665,43 @@ export function sameFields(
     f.every(
       (x, k) =>
         m[k] === n[k] &&
-        x.lane === g[k].lane &&
-        (constants === 'sub'
-          ? subShape(x.shape, g[k].shape)
-          : sameShape(x.shape, g[k].shape) ||
-            (constants === 'join' && widens(x, g[k], m[k]))) &&
-        (constants === 'loose' ||
-          constants === 'join' ||
-          x.constant === g[k].constant ||
-          (constants === 'sub' && g[k].constant === undefined)) &&
-        sameFields(x, g[k], constants)
+        (x.opaque || g[k].opaque
+          ? sameOpaque(x, g[k], constants)
+          : x.lane === g[k].lane &&
+            (constants === 'sub'
+              ? subShape(x.shape, g[k].shape)
+              : sameShape(x.shape, g[k].shape) ||
+                (constants === 'join' && widens(x, g[k], m[k]))) &&
+            (constants === 'loose' ||
+              constants === 'join' ||
+              x.constant === g[k].constant ||
+              (constants === 'sub' && g[k].constant === undefined)) &&
+            sameFields(x, g[k], constants))
     )
+  );
+}
+
+/** The opaque fields `x` and `y` (`FieldType`) compare as `sameFields()`
+ *  says: two `exact` fields as any two fields (their lanes and shapes);
+ *  any value stands where a `mixed` field is read (`sub`), and any two
+ *  join (`join`, `loose`), to a `mixed` field where they differ
+ *  (`commonConstants()`). */
+function sameOpaque(
+  x: FieldType,
+  y: FieldType,
+  constants: 'same' | 'sub' | 'loose' | 'join'
+): boolean {
+  if (x.opaque === undefined || y.opaque === undefined) return false;
+  if (constants === 'join' || constants === 'loose') return true;
+  if (y.opaque === 'mixed') return constants === 'sub' || x.opaque === 'mixed';
+  if (x.opaque === 'mixed') return false;
+  return (
+    x.lane === y.lane &&
+    (constants === 'sub'
+      ? subShape(x.shape, y.shape)
+      : sameShape(x.shape, y.shape)) &&
+    (x.constant === y.constant ||
+      (constants === 'sub' && y.constant === undefined))
   );
 }
 
@@ -651,7 +709,23 @@ export function sameFields(
  *  without the constant of each string field that `b` does not have, and
  *  with a carried first axis of each list field whose length differs in
  *  `b`. */
+/** The `mixed` opaque field (`FieldType`): one type whatever values made
+ *  it, of the lane `nothing` and no shape, as the code never reads its
+ *  lane or its shape, only copies its value (`boxOpaque()` boxes it by its
+ *  run-time value). */
+export function mixedField<T extends FieldType>(_a: T): T {
+  return { lane: 'nothing', shape: [], opaque: 'mixed' } as unknown as T;
+}
+
 function commonConstants<T extends FieldType>(a: T, b: FieldType): T {
+  // Two opaque fields of one exact value type stay exact; else `mixed`.
+  if (a.opaque !== undefined)
+    return a.opaque === 'exact' &&
+      b.opaque === 'exact' &&
+      a.lane === b.lane &&
+      sameShape(a.shape, b.shape)
+      ? a
+      : mixedField(a);
   if (a.lane !== 'record') {
     const shape =
       a.shape.length > 0 && !sameShape(a.shape, b.shape)
@@ -659,16 +733,18 @@ function commonConstants<T extends FieldType>(a: T, b: FieldType): T {
         : a.shape;
     if (
       shape === a.shape &&
-      (a.constant === undefined || a.constant === b.constant)
+      (a.constant === undefined || a.constant === b.constant) &&
+      (a.proven === undefined || a.proven === b.proven)
     )
       return a;
-    const { constant, ...rest } = a;
+    const { constant, proven, ...rest } = a;
     return {
       ...rest,
       shape,
       ...(constant === undefined || constant !== b.constant
         ? {}
         : { constant }),
+      ...(proven === undefined || proven !== b.proven ? {} : { proven }),
     } as T;
   }
   // A list of records: its first axis widens as for any list field.
@@ -751,6 +827,8 @@ export function typeToString(
    *  (`tuple<real, real>`) or -1, and a run-time length without its value. */
   axis: number | false = false
 ): string {
+  // An opaque field that can hold values of several types (`FieldType`).
+  if (t.opaque === 'mixed') return 'mixed';
   // A string field of a known value (CE-1652, step 4c).
   if (t.constant !== undefined) return JSON.stringify(t.constant);
   if (t.array !== undefined) return `array<${t.array.cell}>`;

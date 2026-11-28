@@ -1113,12 +1113,26 @@ function arrayMaker(
  * or `False`, and a number a number. `unboxable()` of `lower.ts` admits no
  * other type (a record of no names, a colour, a complex number).
  */
+function boxOpaque(ce: ComputeEngine, x: unknown): Expression {
+  if (x === null || x === undefined) return ce.symbol('Nothing');
+  if (typeof x === 'string') return ce.string(x);
+  if (typeof x === 'boolean') return x ? ce.True : ce.False;
+  if (typeof x === 'number') return ce.number(x);
+  return ce.function(
+    'List',
+    Array.from(x as ArrayLike<unknown>, (y) => boxOpaque(ce, y))
+  );
+}
+
 function boxValue(
   ce: ComputeEngine,
   t: FieldType,
   mark: number | undefined,
   x: unknown
 ): Expression {
+  // An opaque field (`FieldType`): its type does not say which value it
+  // holds, so the value itself does (`opaqueLane()`).
+  if (t.opaque) return boxOpaque(ce, x);
   // An array of the engine: the same reference.
   if (t.lane === 'array') return x as Expression;
   if (isRecord(t)) {

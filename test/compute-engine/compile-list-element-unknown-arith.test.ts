@@ -18,8 +18,8 @@
  *   with the code `untyped-input` and the name `x` in `unsupported`.
  * - `x` declared `real` or `number`: the compiled value equals the
  *   interpreted value (`.N()`). A list `x` declines: `g` over a list gives a
- *   list of lists. The signature `(unknown) -> list` declines: the result of
- *   `g` is not a scalar.
+ *   list of lists. With the signature `(unknown) -> list`, those cases are
+ *   not run.
  *
  * The three signatures of `g` are `(unknown) -> list<unknown>`,
  * `(unknown) -> list` and no declaration (the inferred signature,
@@ -133,22 +133,17 @@ function expectUntypedRefusal(
 }
 
 /** Expect the compilation of `json` to decline because the input `x` is
- * declared `any`. With the signature `(unknown) -> list`, the result of `g`
- * is not a scalar, and the compilation declines on `g` first. */
+ * declared `any`, whatever the signature of `g`: a result declared `list`
+ * holds the list `[t, 2t]` (CE-1921). */
 function expectUnsettledDecline(
   ce: ComputeEngine,
   json: unknown,
-  signature: string
+  _signature: string
 ): void {
   const r = compile(ce.box(json as any), { to: 'javascript' } as never);
   expect(r.success).toBe(false);
-  if (signature === '(unknown) -> list') {
-    expect(r.diagnostic?.code).toBe('unsettled-shape');
-    expect(r.diagnostic?.message).toMatch(/the result of g is not a scalar/);
-  } else {
-    expect(r.diagnostic?.code).toBe('untyped-input');
-    expect(r.unsupported).toContain('x');
-  }
+  expect(r.diagnostic?.code).toBe('untyped-input');
+  expect(r.unsupported).toContain('x');
 }
 
 /** Expect the compilation of `(x, c, z) ↦ json` to decline because the

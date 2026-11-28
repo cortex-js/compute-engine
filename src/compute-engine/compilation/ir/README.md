@@ -3969,8 +3969,16 @@ tuple, the discharges of `absent()`.
   settles an IR type (`real`, `string`, `color`,
   `tuple<real, real, real, real, real, real>`), the field has it (an integer
   operand of a real field is read as is); where it gives no single shape (`any`,
-  `list`, `string | color | nothing`), the field has the shape of the operand,
-  so a filled and an unfilled `Figure` are two record types. `Nothing` is a
+  `list`), the field has the shape of the operand. A field of a union type
+  (`string | color | nothing`) is opaque on JavaScript (`FieldType.opaque`,
+  `opaqueLane()`): it holds a string, a boolean, `Nothing`, a number or a flat
+  list of numbers, `exact` while its lane and shape are those of its value, and
+  `mixed` once two records whose values there differ join (the arms of an `if`,
+  a record local that statements replace; `sameFields()`, `commonConstants()`).
+  A `mixed` field is only copied into a constructor (`field()` declines any
+  other read) and is boxed by its run-time value at a host call
+  (`boxOpaque()` of `print-js.ts`). So a filled and an unfilled `Figure` are one
+  record type, where a colour at such a field still gives two. `Nothing` is a
   field of the type `nothing`. A `Tuple` or a `List` literal whose elements do
   not make a list (two lanes that do not join, lists of two lengths, a tuple and
   a list, a record) is a record with no names (`Tuple("a", t)`, `[t, "a"]`); a
@@ -4021,10 +4029,15 @@ tuple, the discharges of `absent()`.
   whose arms give two record types, or a record and another value) keeps the arm
   taken when the condition is known at compile time (the shapes of the other arm
   do not count). An `If` with a condition known only at run time whose arms give
-  two record types declines ("arms of two types", R3). `MatchesType(x, T)` of a
+  two record types declines ("arms of two types", R3; a filled and an unfilled
+  `Figure` are one type, see the opaque fields above). `MatchesType(x, T)` of a
   field of a record that the static type of `x` does not decide is decided by
   the lane of the field: a field of the lane `nothing`, `string`, `boolean` or
-  `color` is of that engine type (`fig.fillPaint is nothing`). A `Tuple` pattern
+  `color` is of that engine type (`fig.fillPaint is nothing`), and a field that
+  holds a list or a record is of its value's type (`valueTypeOf()`). So are
+  `first(xs)` and `last(xs)` of a list of records, and a parameter that holds a
+  dictionary literal (`dictionary`). `N` of a dictionary literal of scalars is
+  the dictionary, and `N` of `Nothing` is `Nothing`. A `Tuple` pattern
   of a `Match` does not take a value of a named tuple type (the interpreter's),
   and declines on a record with no names. Every other reader declines:
   arithmetic, `Equal`, `Length` (but of the arguments of a rest parameter,
@@ -4093,7 +4106,11 @@ tuple, the discharges of `absent()`.
   lane key (`laneKey()`) holds that type (`typeToString()`: the nominal type,
   the field names, and the IR type and the tuple mark of each field), so two
   calls of records of one IR type call one function and two calls of records of
-  two types (`fill` of an unfilled and of a filled `Figure`) two. Such a
+  two types two. A flat list of numbers at a parameter of type `any` whose
+  static type proves more than its lane (`[5, 4]`, `list<finite_integer>`; or
+  the field of a dictionary literal that holds it) is held too: its IR type
+  carries that type (`IRType.proven`), the lane key holds it, and `x is
+  list<real>` and a field declared `list<real> | nothing` read it (CE-1923). Such a
   parameter's arguments are lowered before the function is chosen at each call.
   A parameter of a nominal tuple type or of a declared record type
   (`isDeclaredRecordType()`, `f: Fig`) takes a record of that nominal type

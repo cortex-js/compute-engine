@@ -41,13 +41,21 @@ import type { Type, TypeReference } from '../../../common/type/types.js';
  *  holds the type of its argument (`Lowering.heldParams`): a scalar of the
  *  lane `string`, `color`, `boolean`, `integer`, `real` or `nothing`, by
  *  that type (a number on such a lane has a static type that proves it,
- *  `held()`); a record, a point or a list by `valueTypeOf()`. Otherwise
+ *  `held()`); a dictionary literal as a dictionary; a list of a proven
+ *  static type (`IRType.proven`) by that type; a record, a point or a
+ *  list by `valueTypeOf()`. Otherwise
  *  `undefined`. */
 function engineTypeOf(
   e: Expression,
   t: IRType,
   mark: number | undefined
 ): Type | undefined {
+  // A dictionary literal (CE-1771): a dictionary.
+  if (isRecord(t) && t.head === 'Dictionary' && t.nominal === undefined)
+    return 'dictionary';
+  // A flat list of numbers of a static type that proves more than its lane
+  // (`IRType.proven`, `held()` of `lower-functions.ts`; CE-1923).
+  if (t.proven !== undefined) return t.proven;
   if (t.lane === 'record' || t.shape.length > 0) return valueTypeOf(e, t, mark);
   return ['string', 'color', 'boolean', 'integer', 'real', 'nothing'].includes(
     t.lane
@@ -191,14 +199,17 @@ export function matchLowering(cx: Lowering, records: RecordReads) {
     // elements (README, "Match, x is T and N"); and a value of no stated
     // type or of type `any` (a parameter that holds the type of its
     // argument, `held()` of `lower-functions.ts`) by its IR type: a real,
-    // an integer, a string, a boolean, a colour (whose `N` is itself), or
-    // a list or a tuple of reals (CE-1652, step 4b).
+    // an integer, a string, a boolean, a colour or `Nothing` (whose `N` is
+    // itself), or a list or a tuple of reals (CE-1652, step 4b).
     const list =
       typeof t === 'object' &&
       ((t.kind === 'list' && isSubtype(t.elements, 'real')) ||
         (t.kind === 'tuple' &&
           t.elements.every((u) => isSubtype(u.type, 'real'))));
-    if (!list && !isUntyped(t))
+    // A dictionary: its record, by the IR type below.
+    const dictionary =
+      typeof t === 'object' && (t.kind === 'record' || t.kind === 'dictionary');
+    if (!list && !dictionary && !isUntyped(t))
       decline(
         e,
         `N of a value of type ${typeToString(t)} (only a number, a string, a boolean, or a list or a tuple of real numbers)`
@@ -209,15 +220,30 @@ export function matchLowering(cx: Lowering, records: RecordReads) {
     const v = cx.value(x, true)!;
     const vt = cx.type(v);
     const reals = vt.lane === 'real' || vt.lane === 'integer';
+    // A dictionary literal (CE-1771) whose values are scalars whose `N` is
+    // the value itself: the interpreter's `N` of the dictionary is the
+    // dictionary (`canvas(figures, {grid -> true})`).
+    if (
+      isRecord(vt) &&
+      vt.head === 'Dictionary' &&
+      vt.nominal === undefined &&
+      (vt.fields ?? []).every(
+        (f, k) =>
+          f.shape.length === 0 &&
+          vt.marks?.[k] === undefined &&
+          ['string', 'boolean', 'nothing', 'integer', 'real'].includes(f.lane)
+      )
+    )
+      return v;
     const ok =
       vt.shape.length === 0
         ? !cx.tuples.has(v) &&
-          (reals || ['string', 'boolean', 'color'].includes(vt.lane))
+          (reals || ['string', 'boolean', 'color', 'nothing'].includes(vt.lane))
         : vt.shape.length === 1 && reals && (cx.tuples.get(v) ?? 0) === 0;
     if (!ok)
       decline(
         e,
-        `N of a value of type ${typeToString(t)}, here ${irTypeToString(vt, cx.tuples.get(v) ?? -1)} (only a number, a string, a boolean, a colour, or a list or a tuple of real numbers)`
+        `N of a value of type ${typeToString(t)}, here ${irTypeToString(vt, cx.tuples.get(v) ?? -1)} (only a number, a string, a boolean, a colour, Nothing, or a list or a tuple of real numbers)`
       );
     return v;
   };
@@ -280,6 +306,33 @@ export function matchLowering(cx: Lowering, records: RecordReads) {
         return b.constant(known, 'boolean');
       }
     }
+    // The first or the last element of a list, of no stated type or of
+    // type `any`, whose value is a record (`last(parts)` of a list of
+    // figures): a record of a named tuple type is a value of that type
+    // (`valueTypeOf()`), and a dictionary literal (CE-1771) a dictionary.
+    if (
+      (isFunction(subject, 'First') || isFunction(subject, 'Last')) &&
+      subject.nops === 1 &&
+      cx.isLibrary(subject) &&
+      isUntyped(s) &&
+      subject.isPure === true
+    ) {
+      const v = cx.value(subject)!;
+      const t = cx.type(v);
+      const held =
+        t.lane !== 'record'
+          ? undefined
+          : isRecord(t) && t.nominal === undefined && t.head === 'Dictionary'
+            ? ('dictionary' as Type)
+            : t.nominal !== undefined
+              ? valueTypeOf(e, t, cx.tuples.get(v))
+              : undefined;
+      const known = held === undefined ? undefined : decide(held);
+      if (known !== undefined) {
+        cx.typeTests.set(e, known);
+        return b.constant(known, 'boolean');
+      }
+    }
     // The lane of a field of a record, which the passes remove when nothing
     // else reads it. The record is lowered once, and the field read from it.
     const read =
@@ -300,17 +353,26 @@ export function matchLowering(cx: Lowering, records: RecordReads) {
             )
           : records.at(read, r, cx.value(read.ops[1])!);
     const lane = v === undefined ? undefined : cx.type(v);
+    // A list or a record held by the field: its value's type
+    // (`valueTypeOf()`), as for a parameter.
+    const value =
+      lane !== undefined && (lane.shape.length > 0 || lane.lane === 'record')
+        ? valueTypeOf(e, lane, cx.tuples.get(v!))
+        : undefined;
     const known =
       lane !== undefined &&
       lane.shape.length === 0 &&
       ['nothing', 'string', 'boolean', 'color'].includes(lane.lane)
         ? decide(lane.lane as Type)
-        : undefined;
+        : value === undefined
+          ? undefined
+          : decide(value);
     if (known === undefined)
       decline(
         e,
         `MatchesType of a value of type ${typeToString(s)}, which neither proves nor excludes ${settled.canonicalText}`
       );
+    cx.typeTests.set(e, known);
     return b.constant(known, 'boolean');
   };
 

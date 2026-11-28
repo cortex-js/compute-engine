@@ -347,8 +347,12 @@ describe('a record declines', () => {
       ['If', ['Greater', 't', 0], ['P', 't', 1], ['nested', 't']],
       /arms of two types/
     );
-    // Two records of one engine type whose fields have different shapes.
-    expectDeclines(ce, ['twoTypes', 't'], /arms of two types/);
+  });
+
+  test('an If whose arms give records that differ at a field of a union type', () => {
+    // `fillPaint` is `string | color | nothing`: a filled and an unfilled
+    // circle are one record type, whose field is copied, not read.
+    expectAgrees(ce, ['twoTypes', 't']);
   });
 
   test('an If whose arms give records of two nominal types of the same fields', () => {
@@ -411,7 +415,12 @@ describe('a record declines', () => {
     for (const to of ['glsl', 'interval-js'] as Target[]) {
       // On GLSL a `P` of two reals is a `vec2` (`ir-records-glsl.test.ts`).
       if (to !== 'glsl') {
-        expectDeclines(ce, ['f', 't'], /records compile on javascript only/, to);
+        expectDeclines(
+          ce,
+          ['f', 't'],
+          /records compile on javascript only/,
+          to
+        );
         // A record that a field read would fold away declines too.
         expectDeclines(
           ce,

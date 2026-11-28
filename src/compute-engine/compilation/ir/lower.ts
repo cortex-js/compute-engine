@@ -99,6 +99,7 @@ import {
   isSubLane,
   isSubType,
   joinType,
+  mixedField,
   widensTo,
   lengthValues,
   mapLengths,
@@ -540,18 +541,33 @@ export const hostCallOp = (k: number) => `call.host${k}`;
  *  depth. A value written is of a subtype of it (`isSubType()`), whose list
  *  fields can have other lengths and whose string fields other values. */
 function looseRecord(t: FieldType): FieldType {
-  const { constant: _, ...rest } = t;
+  // A statement can write a value of another type there; a value of
+  // another static type too (`IRType.proven`, CE-1924).
+  if (t.opaque !== undefined) return mixedField(t);
+  const { constant: _, proven: _q, ...rest } = t;
   if (t.fields === undefined) return rest;
   return {
     ...rest,
     fields: t.fields.map((f, k) => {
       const g = looseRecord(f);
-      return f.shape.length > 0 && t.marks?.[k] !== 0
+      return f.shape.length > 0 && t.marks?.[k] !== 0 && g.opaque !== 'mixed'
         ? { ...g, shape: ['carried', ...f.shape.slice(1)] }
         : g;
     }),
   };
 }
+
+/** The comparisons that a length stated by an IR type can decide
+ *  (`operation()` of `lowering()`), and their verdicts. */
+const ORDER_VERDICT: Record<string, (x: number, y: number) => boolean> = {
+  Less: (x, y) => x < y,
+  LessEqual: (x, y) => x <= y,
+  Greater: (x, y) => x > y,
+  GreaterEqual: (x, y) => x >= y,
+  Equal: (x, y) => x === y,
+  NotEqual: (x, y) => x !== y,
+};
+const ORDER_TESTS = Object.keys(ORDER_VERDICT);
 
 /** Whether the IR operation `op` is a `hostCallOp()`. */
 export const isHostCallOp = (op: string): boolean => /^call\.host\d+$/.test(op);
@@ -1642,6 +1658,35 @@ function lowerOnce(
       );
     const complex = leaves(r, args, node);
     const operation = (given: V[]): V => {
+      // A comparison of the length of a list that its IR type states and a
+      // number (`Length(g) < 2` of `g` of 6 elements, in a function lowered
+      // for its argument types): decided as a test of a type is
+      // (`typeDecided()`), so the arm not taken is not lowered. The node is
+      // lowered again in each function lowered for other types: its entry
+      // is that lowering's.
+      const order = r.head;
+      if (
+        order !== undefined &&
+        ORDER_TESTS.includes(order) &&
+        isFunction(node, order)
+      ) {
+        typeTests.delete(node);
+        const [x, y] = given.map((v) => b.constants.get(v));
+        if (
+          node.nops === 2 &&
+          given.length === 2 &&
+          typeof x === 'number' &&
+          typeof y === 'number' &&
+          node.ops.some((o) => isFunction(o, 'Length') && isLibrary(o)) &&
+          node.ops.every(
+            (o) => isNumber(o) || (isFunction(o, 'Length') && isLibrary(o))
+          )
+        ) {
+          const verdict = ORDER_VERDICT[order](x, y);
+          typeTests.set(node, verdict);
+          return b.constant(verdict, 'boolean');
+        }
+      }
       // Two booleans, and two lists or two tuples of real numbers, have one
       // equality (`equality()`); `NotEqual` is its negation.
       if ((r.head === 'Equal' || r.head === 'NotEqual') && given.length === 2) {
@@ -2299,6 +2344,9 @@ function lowerOnce(
       if (
         m !== undefined &&
         b.isOpen(m.region) &&
+        // A `mixed` opaque field is lowered at each read, where `field()` of
+        // `lower-records.ts` admits only a copy into a constructor.
+        type(m.v).opaque !== 'mixed' &&
         (m.seededAt === undefined ||
           (m.region === b.current() && m.seededAt === b.effects)) &&
         m.reads.every(([n, v]) => bound(n) === v)
@@ -6399,6 +6447,10 @@ function lowerOnce(
       (rest.length > 0 || otherwise !== undefined || first !== undefined)
     )
       return conditional(node, rest, otherwise, want, first, start, whole);
+    // A test decided false by IR types, with no arm after it and no value
+    // read (a statement `if` of no `else`, in a loop over the keys of a
+    // dictionary literal): nothing is evaluated, as in the interpreter.
+    if (typed === false && !want && first === undefined) return undefined;
     const at = b.types.length;
     return branch(
       node,

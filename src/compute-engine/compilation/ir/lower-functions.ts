@@ -851,6 +851,15 @@ export function functionLowering(
    *  complex argument each call a function of the lane of its argument,
    *  and so do a call with a list of reals and a call with a list of
    *  integers at a list parameter of integers. */
+  /** The proven static types of `t` and of its fields, at any depth
+   *  (`IRType.proven`): a part of the lane key, so that a function lowered
+   *  where a type was proven is not called where it is not (CE-1923). */
+  const provenKey = (t: FieldType): string => {
+    const own =
+      t.proven === undefined ? '' : `:${engineTypeToString(t.proven)}`;
+    const fields = (t.fields ?? []).map(provenKey);
+    return fields.some((f) => f !== '') ? `${own}<${fields.join(',')}>` : own;
+  };
   const laneKey = (
     sig: ReturnType<typeof signatureTypes>,
     args?: V[],
@@ -865,8 +874,8 @@ export function functionLowering(
         // A list of records by its record type and its stated length.
         if (h !== undefined)
           return h.lane === 'record' && h.shape.length > 0
-            ? `{${typeToString(withShape(h, []))}[${typeof h.shape[0] === 'number' ? h.shape[0] : ''}]}`
-            : `{${typeToString(h)}}`;
+            ? `{${typeToString(withShape(h, []))}[${typeof h.shape[0] === 'number' ? h.shape[0] : ''}]${provenKey(h)}}`
+            : `{${typeToString(h)}${provenKey(h)}}`;
         // A point, or a flat list that binds whole, at a parameter that
         // takes the shape of its argument (`define()`): one function per
         // shape, beside the one of a scalar (CE-1652, step 4b).
@@ -962,6 +971,34 @@ export function functionLowering(
         : { lane: 'string', shape: [], constant: known };
     }
     if (t.lane === 'record') return t;
+    // A flat list of numbers at a parameter of type `any`, of a static type
+    // that proves more than its lane (`IRType.proven`; CE-1923): one
+    // function per such type, where `x is T` reads it. The static type of
+    // the argument, of the field of a dictionary literal that it reads, or
+    // of the parameter that it is.
+    if (
+      javascript &&
+      'any' in p &&
+      p.any &&
+      t.shape.length === 1 &&
+      (t.lane === 'real' || t.lane === 'integer') &&
+      !cx.tuples.has(v)
+    ) {
+      const def = b.defs.get(v);
+      const index =
+        def?.op === 'field' ? b.constants.get(def.args[1]) : undefined;
+      const record = def?.op === 'field' ? type(def.args[0]) : undefined;
+      const s = op?.type.type;
+      const proven = cx.heldParams.has(v)
+        ? t.proven
+        : record?.head === 'Dictionary' && typeof index === 'number'
+          ? record.fields?.[index]?.proven
+          : s !== undefined && !isUntyped(s) && isSubtype(s, 'list<number>')
+            ? s
+            : undefined;
+      const { proven: _, ...plain } = t;
+      return proven === undefined ? undefined : { ...plain, proven };
+    }
     if (
       !javascript ||
       p.record !== true ||
@@ -987,11 +1024,21 @@ export function functionLowering(
     const read = b.defs.get(v);
     const dictionaryField =
       read?.op === 'field' && type(read.args[0]).head === 'Dictionary';
+    // A field of a dictionary literal: its static type there must prove the
+    // lane (`IRType.proven`), as the interpreter's value of `sqrt(t - 5)`
+    // is not a real (CE-1924).
+    const fieldIndex = dictionaryField
+      ? b.constants.get(read!.args[1])
+      : undefined;
+    const fieldProven =
+      typeof fieldIndex === 'number'
+        ? type(read!.args[0]).fields?.[fieldIndex]?.proven
+        : undefined;
     return 'any' in p &&
       p.any &&
       (t.lane === 'real' || t.lane === 'integer') &&
       (cx.heldParams.has(v) ||
-        dictionaryField ||
+        (fieldProven !== undefined && isSubtype(fieldProven, t.lane)) ||
         (op !== undefined && isSubtype(op.type.type, t.lane)))
       ? { lane: t.lane, shape: [] }
       : undefined;
@@ -1082,6 +1129,18 @@ export function functionLowering(
       const h = held(declared, args?.[i], e.ops[i], `${e.operator}#${i}`);
       if (h === undefined && 'array' in declared && declared.array)
         decline(e, `the parameter ${names[i]} of an array type, with no array`);
+      // A flat list of numbers of a proven static type (CE-1923), bound
+      // whole: a list parameter of its length, which holds that type.
+      if (h?.proven !== undefined) {
+        if (sig.mapsAt(i, false)) return declared;
+        const n = h.shape[0];
+        return {
+          lane: h.lane,
+          shape: [typeof n === 'number' ? n : 'run-time'],
+          type: h,
+          taken: names[i],
+        } as UserFunction['params'][number];
+      }
       if (h !== undefined) {
         // A parameter of a nominal tuple type takes a record of that type
         // only, or of a type that the static type of the argument proves
@@ -1409,7 +1468,8 @@ export function functionLowering(
           // whose lanes it admits, and a record of no names (a list of
           // several lanes) whose elements it admits (CE-1921).
           if (
-            t.lane !== 'record' || (t.shape.length === 0 && isSubtype(r!, 'list'))
+            t.lane !== 'record' ||
+            (t.shape.length === 0 && isSubtype(r!, 'list'))
               ? !isSubtype(r!, 'list') ||
                 !records.listProves(t, cx.tuples.has(body), r!)
               : t.shape.length > 0 && !isSubtype(r!, 'list')
@@ -1460,10 +1520,13 @@ export function functionLowering(
         // A list of elements of no stated type: a flat list of numbers or
         // booleans, or a list of points, of the lengths that it states.
         const axis = cx.tuples.get(body);
-        // No stated result and a body that is a list: the same.
+        // No stated result and a body that is a list: the same. A list of
+        // records (README, "Records") is the body's own type, as a record
+        // is.
+        const recordList = t.lane === 'record' && t.shape.length === 1;
         const listed: typeof shaped =
           shaped ??
-          (r === undefined && t.shape.length > 0 && axis !== 0
+          (r === undefined && t.shape.length > 0 && axis !== 0 && !recordList
             ? {}
             : undefined);
         if (
@@ -1480,7 +1543,8 @@ export function functionLowering(
             `a body of ${e.operator} that is not ${r ? engineTypeToString(r) : 'a scalar, a point, or a list of numbers, booleans or points (a result of no stated type)'}`
           );
         if (
-          (points !== undefined || (open && !listed && t.shape.length > 0)) &&
+          (points !== undefined ||
+            (open && !listed && !recordList && t.shape.length > 0)) &&
           (cx.tuples.get(body) !== 0 ||
             t.shape.length !== 1 ||
             (t.lane !== 'real' && t.lane !== 'integer') ||

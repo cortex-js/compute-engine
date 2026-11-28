@@ -58,6 +58,25 @@
   of a record local (`out.n = 4`) and a write of a record whose fields have
   other types than the first value still decline (CE-1918, CE-1919,
   CE-1920).
+- **JavaScript compiles the options of the figures of a drawing prelude.**
+  With Tycho's `type Figure = tuple<…, fillPaint: string | color | nothing,
+  …>`, `circle((cos(t), sin(t)), 0.2, {fill -> "red", opacity -> t / 4})`
+  declined ("arms of two types"; "a local written with two types"): a
+  filled and an unfilled figure were two record types. A field declared
+  with a union type now holds a string, a boolean, `Nothing`, a number or a
+  list of numbers whatever the record, so a loop that sets the options one
+  by one, and an `if` whose arms give a filled and an unfilled circle,
+  compile and give the interpreter's value. The code only copies such a
+  field: `if t > 0 { c } else { c.fill("red") }.fillPaint` still declines.
+  Also compiled now: `N(nothing)`, `N({grid -> true}, 15)`, a `nothing`
+  argument of a user function, `length(g) < 2` of a list of a known length,
+  `"content" in keys(opts)` of a dictionary literal, `x is dictionary`,
+  `last(parts) is dictionary` of a list of figures, a function of no stated
+  result type that returns a list of figures, and `v is list<real>` of a
+  list literal such as `[5, 4]` given to a parameter of type `any`
+  (`circle(…, {dash -> [5, 4]})`, CE-1923). `group(a, b)`, `group([a, b])`
+  and `canvas([…], {grid -> true})` compile.
+
 
 - **JavaScript compiles a list of records.** With
   `type P = tuple<k: integer, x: real>`, `[P(k, t * k) for k in 1..3]`
@@ -124,6 +143,14 @@
   dictionary.
 
 ### Resolved Issues
+
+- **A number read from a dictionary literal no longer passes a type test that
+  the interpreter refuses.** With `function hr(v: any) -> real { if v is real
+  { 1 } else { 2 } }` and `function lk(opts: dictionary) -> real {
+  hr(opts["n"]) }`, compiled JavaScript gave `1` for `lk({n -> sqrt(t - 5)})`
+  at `t = 3`, where the interpreter gives `2`: `sqrt(-2)` is not a real. The
+  test is now decided only when the static type of the value in the literal
+  proves the type, and the compilation declines otherwise (CE-1924).
 
 - **The limit of a function defined by cases at the boundary of a condition
   is the limit of the branch on that side.** `Limit(If(x < 0, 1, 2), 0, -1)`

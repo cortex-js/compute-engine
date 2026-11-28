@@ -47,6 +47,7 @@ import {
   isSubLane,
   joinType,
   lengthValues,
+  opaqueLane,
   sameShape,
   scalarType,
   typeToString,
@@ -201,11 +202,7 @@ function settledList(
 /** The scalar of the IR type `t` (no tuple mark when `!marked`) is of the
  *  engine type `d`: its lane names an engine type that is a subtype of
  *  `d`. A list, a tuple and a record do not prove a type here. */
-export function laneProves(
-  t: FieldType,
-  marked: boolean,
-  d: Type
-): boolean {
+export function laneProves(t: FieldType, marked: boolean, d: Type): boolean {
   if (t.shape.length > 0 || marked) return false;
   // An array: its type, of its cells (`lower-arrays.ts`).
   if (t.array !== undefined)
@@ -277,6 +274,10 @@ export function recordLowering(
   /** The values of the fields of each record made in this lowering: a
    *  read of a field of one is that value (a constant stays a constant). */
   const parts = new Map<V, V[]>();
+  /** The operand of a constructor at an `opaque` field (`FieldType`)
+   *  while it is lowered: the one read of an opaque field that compiles is
+   *  this expression, a copy of the field into the new record (`field()`). */
+  let copied: Expression | undefined;
 
   /** The record of the values `values`, of the field types `fields` (the
    *  types of the values when absent), of a nominal type and its field
@@ -326,9 +327,9 @@ export function recordLowering(
           'a record with a field of lists of a run-time length (a run-time length of an inner axis)'
         );
       // A string of a known value: the field's type holds it (CE-1652,
-      // step 4c).
+      // step 4c). Not of an opaque field, whose value is not its type.
       const known =
-        t.lane === 'string' && shape.length === 0 && !tuples.has(v)
+        t.lane === 'string' && !t.opaque && shape.length === 0 && !tuples.has(v)
           ? cx.keepKnown(v, place)
           : undefined;
       return {
@@ -446,10 +447,17 @@ export function recordLowering(
     const values = e.ops.map((op, k) => {
       const d = c.types[k];
       const what = `the field ${c.names?.[k] ?? k + 1} of ${e.operator}`;
+      // A field declared with a union type (`string | color | nothing`) is
+      // opaque on JavaScript (`FieldType`): it holds the value of a few
+      // lanes (`opaqueLane()`), whichever it is, and two records whose
+      // values there differ are one type.
+      const opaque = javascript && typeof d === 'object' && d.kind === 'union';
       if (isSymbol(op, 'Nothing')) {
         if (!isSubtype('nothing', d))
           decline(op, `${what}: Nothing, not ${engineTypeToString(d)}`);
-        const t: IRType = { lane: 'nothing', shape: [] };
+        const t: IRType = opaque
+          ? { lane: 'nothing', shape: [], opaque: 'exact' }
+          : { lane: 'nothing', shape: [] };
         fields.push(t);
         return b.op('nothing', [], t);
       }
@@ -465,7 +473,7 @@ export function recordLowering(
       // A list of a settled lane and no stated length (`list<real>`): the
       // field has the lane, and the length of the operand (`make()`); an
       // empty list is the empty list of the lane.
-      const list = open ? undefined : settledList(d, cx.wide);
+      const list = open || opaque ? undefined : settledList(d, cx.wide);
       if (list !== undefined) {
         if (
           isFunction(op, 'List') &&
@@ -489,17 +497,37 @@ export function recordLowering(
         fields.push({ lane: list.lane, shape: t.shape });
         return w;
       }
-      const v = cx.value(op)!;
-      // A list held there (CE-1921): its lanes prove the field's list type.
+      const outer = copied;
+      if (opaque) copied = op;
+      let v: V;
+      try {
+        v = cx.value(op)!;
+      } finally {
+        copied = outer;
+      }
+      // The copy of a `mixed` opaque field (`field()`): the type of the
+      // record it is read from, of the same field, proves it.
+      if (opaque && type(v).opaque === 'mixed') {
+        fields.push(type(v));
+        return v;
+      }
+      // A list held there (CE-1921): its lanes prove the field's list type,
+      // or its proven static type does (`IRType.proven`; CE-1923).
+      const proven = type(v).proven;
       if (
         open &&
         !laneProves(type(v), tuples.has(v), d) &&
-        !listProves(type(v), tuples.has(v), d)
+        !listProves(type(v), tuples.has(v), d) &&
+        !(proven !== undefined && isSubtype(proven, d))
       )
         decline(
           op,
           `${what}: a value of type ${engineTypeToString(op.type.type)}, here ${typeToString(type(v))}, which does not prove ${engineTypeToString(d)}`
         );
+      if (opaque && opaqueLane(type(v), tuples.has(v))) {
+        fields.push({ ...type(v), opaque: 'exact' });
+        return v;
+      }
       const settled = settledType(d, cx.wide);
       fields.push(settled);
       if (settled === undefined) return v;
@@ -544,7 +572,20 @@ export function recordLowering(
         return cx.emptyList(x, 'real');
       return cx.value(x)!;
     });
-    return make(e, values, { names: e.keys }, [], 'Dictionary');
+    // The static type of a number or a flat list of numbers, which its
+    // lane does not prove (`IRType.proven`; CE-1923, CE-1924).
+    const fields = values.map((v, k): IRType | undefined => {
+      const t = type(v);
+      const s = e.values[k].type.type;
+      return t.shape.length <= 1 &&
+        (t.lane === 'real' || t.lane === 'integer') &&
+        !tuples.has(v) &&
+        !isUntyped(s) &&
+        isSubtype(s, t.shape.length === 0 ? 'number' : 'list<number>')
+        ? { ...t, proven: s }
+        : undefined;
+    });
+    return make(e, values, { names: e.keys }, fields, 'Dictionary');
   };
 
   /** The value of the declared record type `d` (`DeclaredRecord`) whose
@@ -630,9 +671,7 @@ export function recordLowering(
     const n = def.elements.length;
     const pt = payload.type.type;
     const values: V[] | undefined =
-      typeof pt !== 'object' ||
-      pt.kind !== 'tuple' ||
-      pt.elements.length !== n
+      typeof pt !== 'object' || pt.kind !== 'tuple' || pt.elements.length !== n
         ? undefined
         : isRecord(t) &&
             t.names === undefined &&
@@ -645,19 +684,13 @@ export function recordLowering(
               t.shape[0] === n &&
               tuples.get(v) === 0
             ? def.elements.map((_, k) =>
-                b.op(
-                  'elem',
-                  [v, b.constant(k, 'integer')],
-                  scalarType(t.lane)
-                )
+                b.op('elem', [v, b.constant(k, 'integer')], scalarType(t.lane))
               )
             : undefined;
     const proves = (x: V, k: number): boolean => {
       const want = def.elements[k].type;
       const have = (pt as TupleType).elements[k].type;
-      return (
-        isSubtype(have, want) || laneProves(type(x), tuples.has(x), want)
-      );
+      return isSubtype(have, want) || laneProves(type(x), tuples.has(x), want);
     };
     if (values === undefined || !values.every(proves))
       decline(
@@ -712,10 +745,26 @@ export function recordLowering(
    *  `Figure("circle", [])`) is read as the empty list of its lane, a build
    *  of no element: no value has a stated length of 0. `e` is the read. */
   const field = (e: Expression, r: V, k: number): V => {
+    const t = type(r);
+    const { constant, opaque, proven, ...g } = t.fields![k];
+    // A `mixed` opaque field (`FieldType`): its type does not say which
+    // value it holds, so the code only copies it into a constructor
+    // (`construct()`), also when the operand of the record is known
+    // (`parts`). An `exact` one is read as any field.
+    if (opaque === 'mixed' && e !== copied)
+      decline(
+        e,
+        `a read of the field ${t.names?.[k] ?? k + 1} of ${t.nominal ?? 'a record'}, of a union type, other than to copy it into a record (its value can be of several types)`
+      );
     const known = parts.get(r)?.[k];
     if (known !== undefined) return known;
-    const t = type(r);
-    const { constant, ...g } = t.fields![k];
+    if (opaque === 'mixed') {
+      return b.op('field', [r, b.constant(k, 'integer')], {
+        lane: g.lane,
+        shape: [],
+        opaque: 'mixed',
+      });
+    }
     if (g.shape.includes(0)) {
       if (g.shape.length !== 1 || t.marks?.[k] !== undefined)
         decline(
