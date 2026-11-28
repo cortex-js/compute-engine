@@ -52,7 +52,7 @@ describe('CE-1467: Integrate on GLSL', () => {
   test('an integral up to an input is its closed form', () => {
     const r = glsl(sinFromZero);
     expect(r.success).toBe(true);
-    expect(r.code).toBe('((-cos(x)) + 1.0)');
+    expect(r.code).toBe('(1.0 - cos(x))');
   });
 
   test('a closed form with a special function', () => {

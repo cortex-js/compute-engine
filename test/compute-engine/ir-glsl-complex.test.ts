@@ -219,8 +219,8 @@ describe('IR profile, complex lane on GLSL: the text', () => {
 
   test('the operations of vec2 are inline', () => {
     expect(glsl(['Add', 'z', 'x']).code).toBe('(vec2(x, 0.0) + z)');
-    // The canonical form of `z - w` is `-w + z`.
-    expect(glsl(['Subtract', 'z', 'w']).code).toBe('((-w) + z)');
+    // The canonical form of `z - w` is `-w + z`, printed as a subtraction.
+    expect(glsl(['Subtract', 'z', 'w']).code).toBe('(z - w)');
     expect(glsl(['Subtract', 'z', 'x']).code).toBe('(vec2((-x), 0.0) + z)');
     expect(glsl(['Negate', 'z']).code).toBe('(-z)');
     expect(glsl(['Add', ['Real', 'z'], ['Imaginary', 'w']]).code).toBe(

@@ -445,9 +445,10 @@ function propagatePartial(args: unknown[], result: unknown): unknown {
  */
 export function liftJump<F extends (...args: never[]) => unknown>(fn: F): F {
   const raw = fn as unknown as (...a: unknown[]) => unknown;
-  const lifted = (...args: unknown[]) => {
+  /** The answer `result` of `raw` for the operands `args`, re-tagged. */
+  const lift = (args: unknown[], result: unknown): unknown => {
     const jumps = args.filter(isJump);
-    const result = propagatePartial(args, raw(...args));
+    result = propagatePartial(args, result);
     if (jumps.length === 0) return result;
     if (typeof result !== 'object' || result === null) return result;
     // A bare `{ lo, hi }` (the collection accessors answer one) or an
@@ -464,6 +465,32 @@ export function liftJump<F extends (...args: never[]) => unknown>(fn: F): F {
     if (bound.lo === bound.hi) return result;
     return { ...earliestJump(jumps), kind: 'singular', value: bound };
   };
+  const lifted = (...args: unknown[]): unknown => lift(args, raw(...args));
+  // The one- and two-operand kernels are the hot path of compiled code. Their
+  // wrapper has a fixed parameter list, so the common call, with no operand
+  // that is a jump or `partial`, allocates no argument array and returns the
+  // kernel's answer as it is (`lift` would return it unchanged). A call with
+  // more arguments than the kernel declares (an optional parameter, as the
+  // `tolerance` of `chop`) takes the general wrapper, so none is dropped.
+  // A rest parameter would allocate on every call: `arguments.length` does not.
+  /* oxlint-disable prefer-rest-params */
+  if (raw.length === 1)
+    return function lifted1(a0: unknown): unknown {
+      if (arguments.length > 1)
+        return lifted(...(arguments as unknown as unknown[]));
+      const result = raw(a0);
+      return isJump(a0) || isPartial(a0) ? lift([a0], result) : result;
+    } as unknown as F;
+  if (raw.length === 2)
+    return function lifted2(a0: unknown, a1: unknown): unknown {
+      if (arguments.length > 2)
+        return lifted(...(arguments as unknown as unknown[]));
+      const result = raw(a0, a1);
+      return isJump(a0) || isPartial(a0) || isJump(a1) || isPartial(a1)
+        ? lift([a0, a1], result)
+        : result;
+    } as unknown as F;
+  /* oxlint-enable prefer-rest-params */
   return lifted as unknown as F;
 }
 

@@ -1716,15 +1716,15 @@ describe('the interval mode: a subtraction and a power of a rational exponent', 
       } as never) as unknown as Result
     ).code;
 
-  // The interval text, the JavaScript and the GLSL text, which the mode's
-  // spellings do not change.
+  // The interval text, the JavaScript and the GLSL text: each target spells
+  // an inlined negation read once as the subtrahend.
   // prettier-ignore
   test.each([
     // A negation read once is the subtrahend of `sub`, in either order.
-    [['Subtract', 'x', 'y'], '_IA.sub(_.x, _.y)', '(_.x + (-_.y))', '(x + (-y))'],
-    [['Add', ['Negate', 'x'], 'y'], '_IA.sub(_.y, _.x)', '((-_.x) + _.y)', '((-x) + y)'],
-    [['Add', ['Negate', 'x'], ['Negate', 'y']], '_IA.sub(_IA.negate(_.x), _.y)', '((-_.x) + (-_.y))', '((-x) + (-y))'],
-    [['Add', 'x', 'y', ['Negate', 'n']], '_IA.add(_IA.sub(_.x, _.n), _.y)', '(((-_.n) + _.x) + _.y)', '(((-n) + x) + y)'],
+    [['Subtract', 'x', 'y'], '_IA.sub(_.x, _.y)', '(_.x - _.y)', '(x - y)'],
+    [['Add', ['Negate', 'x'], 'y'], '_IA.sub(_.y, _.x)', '(_.y - _.x)', '(y - x)'],
+    [['Add', ['Negate', 'x'], ['Negate', 'y']], '_IA.sub(_IA.negate(_.x), _.y)', '((-_.x) - _.y)', '((-x) - y)'],
+    [['Add', 'x', 'y', ['Negate', 'n']], '_IA.add(_IA.sub(_.x, _.n), _.y)', '((_.x - _.n) + _.y)', '((x - n) + y)'],
     // A negation read twice stays.
     [['Add', ['Exp', ['Negate', 'x']], ['Negate', 'x']], '(() => {\n  const v1 = _IA.negate(_.x);\n  return _IA.add(v1, _IA.exp(v1));\n})()', '(() => {\n  const v1 = (-_.x);\n  return (v1 + Math.exp(v1));\n})()', 'float v1 = (-x);\nreturn (v1 + exp(v1));'],
     // A denominator that is a power of 2: the principal power of the double.
@@ -1767,9 +1767,7 @@ describe('the interval mode: a subtraction and a power of a rational exponent', 
       i.k === 'op' ? i.op : i.k
     );
     expect(ops).toEqual(['neg', 'add']);
-    expect(text(['Subtract', 'x', 'y'], 'javascript')).toBe(
-      '(_.x + (-_.y))'
-    );
+    expect(text(['Subtract', 'x', 'y'], 'javascript')).toBe('(_.x - _.y)');
   });
 
   describe('integers, a loop and a negation read twice', () => {

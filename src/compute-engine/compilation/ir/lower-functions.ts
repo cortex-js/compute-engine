@@ -1059,13 +1059,16 @@ export function functionLowering(
           tuple: 1 as const,
           taken: names[i],
         } as UserFunction['params'][number];
-      // A flat list of a stated length, bound whole when the interpreter
-      // does not map the call over it (`listMapsAt()`).
+      // A flat list, bound whole when the interpreter does not map the call
+      // over it (`listMapsAt()`): of its stated length, or, for numbers, of
+      // a run-time length on a target that has them, as a parameter
+      // declared `list<real>` (CE-1908).
       if (
         !sig.mapsAt(i, false) &&
         !cx.tuples.has(v!) &&
         t?.shape.length === 1 &&
-        typeof n === 'number' &&
+        (typeof n === 'number' ||
+          (n !== undefined && cx.runtimeLengths && t.lane !== 'string')) &&
         (t.lane === 'real' ||
           t.lane === 'integer' ||
           // A list of strings (JavaScript only; CE-1652, step 4b).
@@ -1073,7 +1076,9 @@ export function functionLowering(
       )
         return {
           lane: t.lane === 'string' ? t.lane : p.lane,
-          shape: [n],
+          shape: [typeof n === 'number' ? n : 'run-time'] as (
+            number | 'run-time'
+          )[],
           taken: names[i],
         };
       if (p.point !== 'unknown')

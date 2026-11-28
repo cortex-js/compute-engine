@@ -470,18 +470,28 @@ export function printProgram(
             value: -literal.value,
           })})`;
       }
-      const left = index.def.get(i.args[0]);
-      if (
-        type(i.out).shape.length === 0 &&
-        left?.k === 'op' &&
-        spellingOf(syntax, left.op)?.text === ARITHMETIC.neg &&
-        inlined.has(left.out) &&
-        !inlined.has(left.args[0]) &&
-        !inlined.has(i.args[1]) &&
-        index.def.has(left.args[0]) &&
-        right !== undefined
-      )
-        return `(${operands(1)} - ${use(left.args[0])})`;
+      // An inlined negation of a scalar: `a + (-b)` is `a - b`, and
+      // `(-a) + b` is `b - a`, the same IEEE value (negation is exact and
+      // addition commutes). An inlined value is pure (`inlinedValues()`),
+      // so reading `b` before `a` changes nothing.
+      const negated = (v: V): V | undefined => {
+        const d = index.def.get(v);
+        return d?.k === 'op' &&
+          inlined.has(v) &&
+          spellingOf(syntax, d.op)?.text === ARITHMETIC.neg
+          ? d.args[0]
+          : undefined;
+      };
+      const subtrahend = (v: V) => {
+        const t = use(v);
+        return t.startsWith('-') ? `(${t})` : t;
+      };
+      if (type(i.out).shape.length === 0) {
+        const b = negated(i.args[1]);
+        if (b !== undefined) return `(${operands(0)} - ${subtrahend(b)})`;
+        const a = negated(i.args[0]);
+        if (a !== undefined) return `(${operands(1)} - ${subtrahend(a)})`;
+      }
     }
     for (const h of spelling.helpers) helpers.add(syntax.helpers[h]);
     return spelling.text

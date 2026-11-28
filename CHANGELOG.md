@@ -6,13 +6,27 @@
   lists.** A literal list or a supported call that maps over a fixed-length
   list gives one integral per element. For example, integrating
   `[x, 2x, x^2]` from 0 to 2 gives `[2, 4, 8/3]` to quadrature precision.
+- **JavaScript and interval-js compile a function that reads an element of
+  a list argument of a run-time length.** With `m(M, i, j) := M[i+3(j-1)]`
+  and `A` declared `list<real>`, `\sum_{n=1}^3 m(A, 2, n)` declined ("the
+  parameter M of m is not a scalar"). It now compiles, and gives the
+  interpreter's value: 15 for `A = [1.5, 2, 3, 4, 5, 6, 7, 8, 9.25]`
+  (`A[2] + A[5] + A[8]`). A list of a stated length compiled already
+  (CE-1908).
 
 ### Performance
 
+- **Compiled interval code runs about 20% faster.** Each interval operation
+  no longer allocates an argument list to check its operands for a
+  discontinuity or a domain clip. For example, `1000x + \sin(x)^5 - 7 - y +
+  3\cos(u)` takes 0.62 µs per evaluation instead of 0.81 µs.
+- **JavaScript and GLSL emit a subtraction for the addition of a negation
+  or of a negative literal.** `1 - x` compiles to `(1 - _.x)` instead of
+  `((-_.x) + 1)`, `x - y` to `(_.x - _.y)` instead of `(_.x + (-_.y))`, and
+  `x - 7` to `(_.x - 7)` instead of `(_.x + (-7))`. The values are the same.
 - **JavaScript and interval-js return a final function call directly.**
   An expression such as `f(x)` can emit the call without a temporary or an
-  immediately invoked function. JavaScript and GLSL emit subtraction for
-  addition of a negative literal.
+  immediately invoked function.
 - **JavaScript can reuse a literal-seeded random list.** Two reads of the
   same seeded `RandomChoice` in one expression can share the list even
   when the draw count depends on an input.

@@ -1672,6 +1672,9 @@ describe('a list argument of a user function of scalar parameters: the function 
       { x: -1.25, D: [1.5, 2.25, -0.5], G: [1, 2, 3] },
     ];
     againstInterpreter(e, ['f', 'D'], at);
+    // A parameter that the body reads as a list takes the list whole.
+    againstInterpreter(e, ['len', 'D'], at);
+    againstInterpreter(e, ['Add', ['len', 'D'], ['len', 'G']], at);
     againstInterpreter(e, ['h', 'x', 'D'], at);
     againstInterpreter(e, ['h', 'D', 'D'], at);
     againstInterpreter(e, ['Sum', ['twice', 'D']], at);
@@ -1692,6 +1695,42 @@ describe('a list argument of a user function of scalar parameters: the function 
     expect(got[0].value.hi).toBeGreaterThanOrEqual(2);
     expect(got[1].value.lo).toBeLessThanOrEqual(2);
     expect(got[1].value.hi).toBeGreaterThanOrEqual(9);
+  });
+
+  test('a parameter of no stated type read by index takes a list of a run-time length (CE-1908)', () => {
+    // `m` is inferred `(M: dictionary<any> | indexed_collection<any>, …)`.
+    const ce = new ComputeEngine();
+    ce.parse('m(M,i,j) \\coloneq M[i+3(j-1)]').evaluate();
+    ce.declare('A', 'list<real>');
+    ce.declare('D', 'list<real>');
+    ce.declare('S', 'list<string>');
+    ce.assign('len', box(['Function', ['Add', ['Length', 't'], 1], 't'], ce));
+    const sum = ce.parse('\\sum_{n=1}^3 m(A, 2, n)').json as Json;
+    const A = [1.5, 2, 3, 4, 5, 6, 7, 8, 9.25];
+    const r = againstInterpreter(ce, sum, [{ A }]);
+    expect((r.run as (x: unknown) => unknown)({ A })).toBe(15);
+    // A call with a run-time length and a call with a stated length.
+    againstInterpreter(ce, ['Add', ['len', 'D'], ['len', ['List', 1, 2, 3]]], [
+      { D: [] },
+      { D: [0.5, 2] },
+    ]);
+    // A list of strings of a run-time length still declines.
+    expect(() =>
+      compile(box(['len', 'S'], ce), { ...IR, fallback: false } as never)
+    ).toThrow(/the parameter t of len is not a scalar/);
+    // The interval mode: the enclosure of the sum contains 15.
+    const i = compile(box(sum, ce), {
+      ...IR,
+      to: 'interval-js',
+      fallback: false,
+    } as never);
+    expect(i.success).toBe(true);
+    const got = i.run!({
+      A: A.map((a) => ({ lo: a, hi: a })),
+    } as never) as { lo: number; hi: number } | { value: { lo: number; hi: number } };
+    const value = 'value' in got ? got.value : got;
+    expect(value.lo).toBeLessThanOrEqual(15);
+    expect(value.hi).toBeGreaterThanOrEqual(15);
   });
 
   test('one function for a call with a list and a call with a scalar, in either order, and for lists of two lengths', () => {
@@ -1795,7 +1834,6 @@ describe('a list argument of a user function of scalar parameters: the function 
     ['a function whose result is a list (a list of lists)', ['two', ['List', 1, 'x']], /a list argument of two, whose result is not a scalar/],
     ['a recursive call', ['rec', 'x'], /a list argument of a recursive call of rec/],
     ['a list of booleans for a real parameter (the interpreter: a list of errors)', ['f', ['List', 'True', ['Less', 'x', 0]]], /an argument of f that is not real/],
-    ['a parameter that the body reads as a list, of a run-time length (bound whole)', ['len', 'D'], /the parameter t of len is not a scalar/],
   ])('%s declines', (_, json, cause) => {
     expect(message(json)).toMatch(cause);
   });

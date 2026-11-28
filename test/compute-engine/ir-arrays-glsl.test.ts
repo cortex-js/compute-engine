@@ -457,7 +457,7 @@ function opaque() -> Pixel { (1, 2, 3, 4) }
   test('a user function Pixel -> Pixel takes and returns a vec4', () => {
     const r = shader(['invert', ['At', 'src', 'i']]);
     const channel = (k: number) =>
-      `min(max(((-v3[int(${k}.0)]) + 255.0), 0.0), 255.0)`;
+      `min(max((255.0 - v3[int(${k}.0)]), 0.0), 255.0)`;
     expect(r.preamble).toBe(
       [
         texel,
