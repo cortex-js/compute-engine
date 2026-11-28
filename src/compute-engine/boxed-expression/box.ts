@@ -75,6 +75,7 @@ import {
   broadcastableParamSlots,
   paramsAreScalar,
   pointListParamSlots,
+  unknownBesideWholeParameters,
 } from './boxed-function.js';
 import type { CallbackSlot, Threadable } from './generic-instantiation.js';
 import {
@@ -131,6 +132,7 @@ import { typeToString } from '../../common/type/serialize.js';
 import {
   freeTypeVariables,
   groundSkeleton,
+  isPolymorphicType,
   parameterPositions,
   readTypeVariablesAsBounds,
 } from '../../common/type/instantiate.js';
@@ -3299,19 +3301,35 @@ export function validatedLiteralApplicationOperands(
   const annotated = annotatedLiteral(constantFieldLiteral(literal) ?? literal);
   if (annotated === undefined || !annotated.isCanonical) return undefined;
   if (!ops.every((x) => x.isCanonical)) return undefined;
+  const literalType = annotated.type.type;
   const checkedType = pinnedValidationSignature(
-    annotated.type.type,
+    literalType,
     ops.length,
     annotated
   );
   if (typeof checkedType === 'string' || checkedType.kind !== 'signature')
     return undefined;
+  // The gate admits a list where the application of the literal maps it
+  // (`literalMappedParameters`, `library/core.ts`), also at a bare parameter
+  // that `checkedType` relaxes to `any`: at every parameter when all are
+  // scalar by the literal's own signature, and at each scalar parameter when
+  // one typed `unknown` is beside one that binds whole. Beside a parameter
+  // that binds whole with none typed `unknown` (`(p, x: real) ↦ p[1] + x`,
+  // `p` typed `tuple<number>`), the application does not map, and the gate
+  // reads `checkedType`, which refuses a list at `x` (CE-1928).
+  const besideWhole = unknownBesideWholeParameters(literalType);
+  const gate: Threadable =
+    paramsAreScalar(literalType) && !isPolymorphicType(literalType)
+      ? true
+      : besideWhole !== undefined
+        ? (i: number) => besideWhole[i] === true
+        : threadableGate(checkedType, paramsAreScalar(checkedType), true);
   const invalid = validateArguments(
     ce,
     ops,
     checkedType,
     undefined,
-    threadableGate(checkedType, paramsAreScalar(checkedType), true),
+    gate,
     undefined,
     {
       operatorName: 'Apply',
@@ -4528,12 +4546,9 @@ function makeCanonicalFunctionCore(
         // `list<number>` at the second slot unchecked.
         // The gate reads the signature as reported: a placeholder slot read
         // as `any` for validation is still a scalar slot for threading when
-        // its refined type is one.
-        threadableGate(
-          pinned ? checkedType : valueType,
-          paramsAreScalar(pinned ? checkedType : valueType),
-          true
-        ),
+        // its refined type is one, and so is a bare parameter of a pinned
+        // literal, which `pinnedValidationSignature` relaxes to `any`.
+        threadableGate(valueType, paramsAreScalar(valueType), true),
         undefined,
         {
           resolutionOut: valueResolutionOut,

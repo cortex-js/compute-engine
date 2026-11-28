@@ -143,6 +143,15 @@
 
 ### Resolved Issues
 
+- **A function literal applied in place maps a list at a parameter declared
+  as a scalar, as the same function held by a name does.** With
+  `lit = ["Function", ["Add", "k", "x"], "k", ["Typed", "x", "'real'"]]`,
+  `["Apply", lit, ["List", 1, 2], ["List", 10, 20]]` was an
+  `incompatible-type` error; it is now `["List", 11, 22]`. The call of a
+  name declared `function` that holds the literal, and the Epsil call
+  `((k, x: real) => k + x)([1, 2], [10, 20])`, map the same way and no
+  longer report `incompatible-type`.
+
 - **A number read from a dictionary literal no longer passes a type test that
   the interpreter refuses.** With `function hr(v: any) -> real { if v is real
   { 1 } else { 2 } }` and `function lk(opts: dictionary) -> real {
