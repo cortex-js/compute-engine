@@ -114,6 +114,17 @@
   now declines in a named tuple and a declared record type, as it did in a
   dictionary.
 
+### Resolved Issues
+
+- **The limit of a function defined by cases at the boundary of a condition
+  is the limit of the branch on that side.** `Limit(If(x < 0, 1, 2), 0, -1)`
+  was 2, the value at the point; it is now 1, and the limit from above is
+  2. The two-sided limit `Limit(Which(x < 0, 1, True, 2), 0)` was 2; it now
+  stays unevaluated, as the two sides differ. When the two sides agree, the
+  limit is their value: `Limit(If(x^2 > 0, 1, 2), 0)` is 1, where it was 2.
+  `Boole` is read the same way: `Limit(x + Boole(x = 0), 0)` is 0, where
+  it was 1.
+
 ## 0.204.2 _2026-11-27_
 
 ### Improvements

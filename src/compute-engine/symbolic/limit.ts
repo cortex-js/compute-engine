@@ -21,6 +21,7 @@ import {
 } from '../boxed-expression/utils.js';
 import { implicitCompile } from '../implicit-compile.js';
 import { laurentData } from './series.js';
+import { boundVariableNamesInOperand } from '../boxed-expression/binders.js';
 import { expand } from '../boxed-expression/expand.js';
 import { asExactSmallInteger } from '../boxed-expression/numerics.js';
 import {
@@ -36,6 +37,7 @@ import {
   isFunction,
   isNumber,
   isSymbol,
+  sym,
 } from '../boxed-expression/type-guards.js';
 import {
   type UnitEnvironment,
@@ -565,19 +567,7 @@ function substituteAtFinitePoint(
     }
     if (jump === undefined) return substituteAndCheck(current);
     if (dir === 0) return undefined;
-    // The expansion anchor must be EXACT when representable: a machine-float
-    // point (`0.5` parsed from the limit) mixed with the exact subtrahend of
-    // the offset leaves an unfoldable `−1/2 + 0.5` constant term in the
-    // series (machine floats are excluded from canonical `Add` folding), a
-    // broken datum whose sign read declines. Integers and half-integers —
-    // the anchors this code's offsets create — exactify losslessly.
-    let anchor = a;
-    const ar = a.re;
-    if (Number.isFinite(ar) && Number.isInteger(ar * 2))
-      anchor = Number.isInteger(ar)
-        ? ce.number(ar)
-        : ce.box(['Rational', Math.round(ar * 2), 2]);
-    const L = laurentData(offset!, x, anchor, ce, 3);
+    const L = laurentData(offset!, x, exactAnchor(a, ce), ce, 3);
     if (!L) return undefined;
     const s = laurentSignNear(L, dir);
     if (s === undefined) return undefined;
@@ -586,6 +576,365 @@ function substituteAtFinitePoint(
     current = replaceSubterm(current, jump, value);
   }
   return undefined;
+}
+
+/**
+ * The point `a` as an anchor of a Laurent expansion: exact when it is an
+ * integer or a half-integer. A machine-float point (`0.5` parsed from the
+ * limit) mixed with an exact subtrahend leaves an unfoldable `−1/2 + 0.5`
+ * constant term in the series (machine floats are excluded from canonical
+ * `Add` folding), a broken datum whose sign read declines. Integers and
+ * half-integers, the anchors of the jump offsets, exactify losslessly. Past
+ * 2^52 the double reading can be another number than an exact point (the
+ * integer 2^53 + 1 reads as 2^53), so such a point is kept as it is.
+ */
+function exactAnchor(a: Expression, ce: ComputeEngine): Expression {
+  const ar = a.re;
+  if (
+    !Number.isFinite(ar) ||
+    Math.abs(ar) >= 2 ** 52 ||
+    !Number.isInteger(ar * 2)
+  )
+    return a;
+  return Number.isInteger(ar)
+    ? ce.number(ar)
+    : ce.box(['Rational', Math.round(ar * 2), 2]);
+}
+
+/**
+ * The limit at the finite point `a` of an expression that holds a `Which`, an
+ * `If` or a `Boole` whose condition reads `x`, or `'none'` when it holds no
+ * such term. A term of these heads that reads `x` in a form that
+ * `piecewiseConditions` does not read gives `undefined`.
+ *
+ * The substitution `x = a` gives the value of the branch that holds AT the
+ * point, which is not the limit when the point is on the boundary of a
+ * condition: `If(x < 0, 1, 2)` is 2 at 0, but its limit from the left is 1.
+ * So:
+ *
+ * - from one side (`dir = ±1`), the outermost such term
+ *   (`freePiecewiseTerm`) is replaced by the
+ *   branch that holds on that side of the point, near the point
+ *   (`piecewiseBranchNear`), and the limit of the rewritten expression is
+ *   taken. The expression equals the rewritten one on that side, so the two
+ *   limits are equal;
+ * - with no direction, the limits from the two sides are taken, and the
+ *   limit is their common value. Different or unknown sides give
+ *   `undefined`.
+ *
+ * When the branch is not known, the result is `undefined`: the other
+ * strategies substitute the point, and their value would be the value at
+ * the point.
+ */
+function piecewiseLimitAtFinite(
+  e: Expression,
+  x: string,
+  a: Expression,
+  dir: number,
+  ce: ComputeEngine,
+  depth: number
+): Expression | undefined | 'none' {
+  const outermost = freePiecewiseTerm(e, x);
+  if (outermost === 'none' || outermost === undefined) return outermost;
+  if (depth > MAX_DEPTH) return undefined;
+  if (dir === 0) {
+    const below = limitAtFinite(e, x, a, -1, ce, depth + 1);
+    if (below === undefined) return undefined;
+    const above = limitAtFinite(e, x, a, 1, ce, depth + 1);
+    return above !== undefined && below.isSame(above) ? below : undefined;
+  }
+  const branch = piecewiseBranchNear(outermost, x, a, dir, ce, depth);
+  if (branch === undefined) return undefined;
+  return limitDispatch(
+    replaceFreeSubterm(e, outermost, branch, x),
+    x,
+    a,
+    dir,
+    ce,
+    depth + 1
+  );
+}
+
+/** The heads of a function defined by cases. `Boole(c)` is `If(c, 1, 0)`. */
+const PIECEWISE_FNS = ['Which', 'If', 'Boole'];
+
+/**
+ * The first outermost `PIECEWISE_FNS` term of `e` whose condition reads `x`
+ * where `x` is free: the walk does not enter an operand that binds `x` (the
+ * index of a `Sum`, the parameter of a `Function`), as the `x` there is
+ * another variable. A term inside a selected branch is read after the
+ * rewrite, and a term inside a condition by the limit of the condition, so
+ * a term in a branch that does not hold is never read.
+ *
+ * `'none'` when there is no such term, `undefined` when a term of these heads
+ * that reads `x` has a form that `piecewiseConditions` does not read.
+ */
+function freePiecewiseTerm(
+  e: Expression,
+  x: string
+): Expression | undefined | 'none' {
+  if (!isFunction(e) || !e.has(x)) return 'none';
+  if (PIECEWISE_FNS.includes(e.operator)) {
+    const conditions = piecewiseConditions(e);
+    if (conditions === undefined) return undefined;
+    if (conditions.some((c) => c.has(x))) return e;
+    // The conditions do not read `x`: when they select a branch, only that
+    // branch is the value near the point.
+    const selected = constantBranch(e);
+    if (selected !== undefined) return freePiecewiseTerm(selected, x);
+  }
+  for (let i = 0; i < e.ops.length; i++) {
+    if (boundVariableNamesInOperand(e, i).includes(x)) continue;
+    const found = freePiecewiseTerm(e.ops[i], x);
+    if (found !== 'none') return found;
+  }
+  return 'none';
+}
+
+/** The value operand of a `PIECEWISE_FNS` term that its conditions select,
+ * when each condition up to the selected one evaluates to `True` or `False`;
+ * otherwise `undefined`. */
+function constantBranch(e: Expression): Expression | undefined {
+  const ops = oo(e);
+  const pairs: [Expression, Expression | undefined][] =
+    e.operator === 'If'
+      ? [
+          [ops[0], ops[1]],
+          [e.engine.True, ops[2]],
+        ]
+      : e.operator === 'Boole'
+        ? []
+        : ops.flatMap((c, i) =>
+            i % 2 === 0
+              ? [[c, ops[i + 1]] as [Expression, Expression | undefined]]
+              : []
+          );
+  for (const [c, v] of pairs) {
+    const t = sym(c.evaluate());
+    if (t === 'True') return v;
+    if (t !== 'False') return undefined;
+  }
+  return undefined;
+}
+
+/** `e` with each occurrence of `target` (by `isSame`) where `x` is free
+ * replaced by `replacement`. */
+function replaceFreeSubterm(
+  e: Expression,
+  target: Expression,
+  replacement: Expression,
+  x: string
+): Expression {
+  if (e.isSame(target)) return replacement;
+  if (!isFunction(e)) return e;
+  let changed = false;
+  const next = e.ops.map((op, i) => {
+    if (boundVariableNamesInOperand(e, i).includes(x)) return op;
+    const r = replaceFreeSubterm(op, target, replacement, x);
+    if (r !== op) changed = true;
+    return r;
+  });
+  return changed ? e.engine.function(e.operator, next) : e;
+}
+
+/** The conditions of a `PIECEWISE_FNS` term, or `undefined` for a form that
+ * this file does not read (an `If` with fewer than two or more than three
+ * operands, a `Which` with an odd number of operands). */
+function piecewiseConditions(e: Expression): Expression[] | undefined {
+  const ops = oo(e);
+  if (e.operator === 'If')
+    return ops.length === 2 || ops.length === 3 ? [ops[0]] : undefined;
+  if (e.operator === 'Boole') return ops.length === 1 ? [ops[0]] : undefined;
+  if (ops.length === 0 || ops.length % 2 !== 0) return undefined;
+  return ops.filter((_, i) => i % 2 === 0);
+}
+
+/**
+ * The branch of `pw` (a `PIECEWISE_FNS` term) that holds at each point near
+ * `a` on the side `dir` (±1), not counting `a` itself, or `undefined` when
+ * the conditions do not decide it.
+ */
+function piecewiseBranchNear(
+  pw: Expression,
+  x: string,
+  a: Expression,
+  dir: number,
+  ce: ComputeEngine,
+  depth: number
+): Expression | undefined {
+  const ops = oo(pw);
+  // An `If` with no `else` branch has no value where its condition is false:
+  // no branch, and the limit is not known.
+  const pairs: [Expression, Expression][] =
+    pw.operator === 'If'
+      ? ops.length === 3
+        ? [
+            [ops[0], ops[1]],
+            [ce.True, ops[2]],
+          ]
+        : [[ops[0], ops[1]]]
+      : pw.operator === 'Boole'
+        ? [
+            [ops[0], ce.One],
+            [ce.True, ce.Zero],
+          ]
+        : ops.flatMap((c, i) =>
+            i % 2 === 0 ? [[c, ops[i + 1]] as [Expression, Expression]] : []
+          );
+  for (const [c, v] of pairs) {
+    const t = conditionNear(c, x, a, dir, ce, depth);
+    if (t === undefined) return undefined;
+    if (t) return v;
+  }
+  return undefined;
+}
+
+/**
+ * The truth value of the condition `c` at each point near `a` on the side
+ * `dir` (±1), not counting `a` itself, or `undefined` when it is not known
+ * or not the same at all these points.
+ *
+ * A comparison reads the sign of the difference of its two sides near the
+ * point: the sign of its limit, or, when that limit is 0, the sign of the
+ * leading term of its Laurent expansion. That sign is not 0, so `x ≤ 0` and
+ * `x < 0` have the same value near 0, and `x = 0` is false there.
+ */
+function conditionNear(
+  c: Expression,
+  x: string,
+  a: Expression,
+  dir: number,
+  ce: ComputeEngine,
+  depth: number
+): boolean | undefined {
+  if (!c.has(x)) {
+    const v = sym(c.evaluate());
+    if (v === 'True') return true;
+    if (v === 'False') return false;
+    return undefined;
+  }
+  const op = c.operator;
+  const ops = oo(c);
+  if (op === 'Not' && ops.length === 1) {
+    const t = conditionNear(ops[0], x, a, dir, ce, depth);
+    return t === undefined ? undefined : !t;
+  }
+  if (op === 'And' || op === 'Or') {
+    // A false conjunct makes the `And` false, a true disjunct makes the
+    // `Or` true, whatever the other operands are.
+    const decisive = op === 'Or';
+    let known = true;
+    for (const operand of ops) {
+      const t = conditionNear(operand, x, a, dir, ce, depth);
+      if (t === decisive) return decisive;
+      if (t === undefined) known = false;
+    }
+    return known ? !decisive : undefined;
+  }
+  const holds: Record<string, (s: 1 | -1) => boolean> = {
+    Less: (s) => s < 0,
+    LessEqual: (s) => s < 0,
+    Greater: (s) => s > 0,
+    GreaterEqual: (s) => s > 0,
+    Equal: () => false,
+    NotEqual: () => true,
+  };
+  const test = holds[op];
+  if (test === undefined || ops.length < 2) return undefined;
+  if (!ops.every((v) => isRealWherever(v, x))) return undefined;
+  // A chain `a < b < c` holds when each consecutive pair does.
+  for (let i = 0; i + 1 < ops.length; i++) {
+    const s = signNear(
+      ce.function('Subtract', [ops[i], ops[i + 1]]),
+      x,
+      a,
+      dir,
+      ce,
+      depth
+    );
+    if (s === undefined) return undefined;
+    if (!test(s)) return false;
+  }
+  return true;
+}
+
+/** The sign of `d` at each point near `a` on the side `dir` (±1), not
+ * counting `a` itself, or `undefined` when it is not known. */
+function signNear(
+  d: Expression,
+  x: string,
+  a: Expression,
+  dir: number,
+  ce: ComputeEngine,
+  depth: number
+): 1 | -1 | undefined {
+  const l = limitDispatch(d, x, a, dir, ce, depth + 1);
+  if (l === undefined || !l.isValid || l.isNaN === true) return undefined;
+  let s: 1 | -1 | undefined;
+  if (l.isPositive === true) s = 1;
+  else if (l.isNegative === true) s = -1;
+  else if (l.is(0) === true) {
+    const L = laurentData(d, x, exactAnchor(a, ce), ce, 3);
+    s = L ? laurentSignNear(L, dir) : undefined;
+  }
+  return s;
+}
+
+/** The heads whose value is real, where it is defined, when their operands
+ * are real. */
+const REAL_CLOSED_FNS = new Set([
+  'Add',
+  'Subtract',
+  'Negate',
+  'Multiply',
+  'Divide',
+  'Square',
+  'Abs',
+  'Sign',
+  'Heaviside',
+  'Floor',
+  'Ceil',
+  'Round',
+  'Max',
+  'Min',
+  'Exp',
+  'Sin',
+  'Cos',
+  'Tan',
+  'Arctan',
+  'Sinh',
+  'Cosh',
+  'Tanh',
+]);
+
+/**
+ * Whether `e` is real at each real value of `x` where it is defined, read
+ * from its form: a real constant, `x`, a power with an integer exponent, a
+ * `REAL_CLOSED_FNS` application or a case of real operands. A comparison
+ * of values that are not real is false (`√x < √x + 1` for `x < 0`), so a
+ * comparison is read near the point only when its operands pass this test.
+ * Any other form (`√x`, `ln x`) is not known to be real.
+ */
+function isRealWherever(e: Expression, x: string): boolean {
+  if (!e.has(x)) {
+    if (e.type.matches('real')) return true;
+    const v = e.N();
+    return isNumber(v) && v.im === 0;
+  }
+  if (isSymbol(e)) return e.symbol === x;
+  if (!isFunction(e)) return false;
+  const op = e.operator;
+  if (op === 'Power')
+    return (
+      isNumber(e.op2) && e.op2.isInteger === true && isRealWherever(e.op1, x)
+    );
+  if (op === 'Boole') return true;
+  if (op === 'If' || op === 'Which') {
+    const values =
+      op === 'If' ? e.ops.slice(1) : e.ops.filter((_, i) => i % 2 === 1);
+    return values.every((v) => isRealWherever(v, x));
+  }
+  return REAL_CLOSED_FNS.has(op) && e.ops.every((v) => isRealWherever(v, x));
 }
 
 /**
@@ -892,6 +1241,13 @@ function limitAtFinite(
   ce: ComputeEngine,
   depth: number
 ): Expression | undefined {
+  // 0. A `Which`, an `If` or a `Boole` whose condition reads `x`: the
+  //    branch that holds on each side of the point
+  //    (`piecewiseLimitAtFinite`). The steps below substitute the point, and
+  //    would give the value AT the point.
+  const piecewise = piecewiseLimitAtFinite(e, x, a, dir, ce, depth);
+  if (piecewise !== 'none') return piecewise;
+
   // 1. Direct substitution (continuous case) — through the jump-aware
   //    substitution, which resolves a `JUMP_FNS` subterm sitting on its
   //    jump per direction instead of reading its value AT the point
