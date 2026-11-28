@@ -2,6 +2,16 @@
 
 ### Improvements
 
+- **The agent cards are package exports** (CE-1948).
+  `@cortex-js/compute-engine/for-agents.md` is the Epsil card and
+  `@cortex-js/compute-engine/compute-engine-for-agents.md` the Compute Engine
+  card, so a host that puts a card in a prompt reads it with
+  `require.resolve` or `import.meta.resolve` instead of an internal path of the
+  package. The Epsil card has a new section, "Order of Preference": a library
+  function, then broadcasting, then a pipeline, then a loop, which functions
+  broadcast over a list or a range, and loops rewritten as library calls
+  (`nthPrime(1..100) |> sum`). Its one loop example, the Collatz path, is a
+  loop that the other forms cannot replace.
 - **JavaScript compiles a figure with options, then transformed.** With
   Tycho's drawing prelude, `polygon(pts, {fill -> "red"}).rotate(t)` and
   `circle(c, r, {fill -> "red"}).rotate(t)` declined ("the parameter x of
