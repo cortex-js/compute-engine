@@ -143,6 +143,13 @@
 
 ### Resolved Issues
 
+- **A numerical integral of a lone symbol that holds a number gives a
+  number** (CE-1788). With `c := 5`, `NIntegrate(c, 0, 2)` gave `NaN`,
+  because `c` was read as the name of a function. It now gives `10`: the
+  symbol is the body of a constant function, as for `ND` and `NLimit`.
+  `NIntegrate(Pi, 0, 2)` gives about `6.2832` (2π). The value is read at
+  evaluation, so a later assignment to `c` changes the result.
+
 - **The count of a reversed, rotated, sorted or shuffled string that is not
   evaluated yet is no longer larger than the string has** (CE-1770). The
   characters of such a string are grouped again: with `m` the combining

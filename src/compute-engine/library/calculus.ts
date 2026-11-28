@@ -2393,6 +2393,27 @@ function functionLiteralOfName(
 }
 
 /**
+ * The constant literal `t ↦ c` for the integrand `c` of `NIntegrate`, when
+ * `c` is a symbol whose value is a number (`c := 5`, `Pi`); otherwise
+ * `undefined`. Such a symbol holds no formula (`loneSymbolFormula()`), so it
+ * is the body of a constant function, as for `ND` and `NLimit`:
+ * `NIntegrate(c, 0, 2)` is 10. Without the literal, `functionLiteralOfName()`
+ * reads `c` as the name of a function, and every sample of `c(t)` is `NaN`.
+ * The literal reads the value of `c` at each sample, not at boxing.
+ */
+function constantLiteralOfNumberSymbol(
+  ce: ComputeEngine,
+  f: Expression
+): Expression | undefined {
+  if (!isSymbol(f)) return undefined;
+  const def = ce.lookupDefinition(f.symbol);
+  if (!isValueDef(def)) return undefined;
+  const value = def.value.value;
+  if (value === undefined || !value.type.matches('number')) return undefined;
+  return ce.expr(['Function', f.symbol, NINTEGRATE_VARIABLE]);
+}
+
+/**
  * The function literal `(p_1, …, p_n) ↦ body`, where the parameter named
  * `params[i]` replaces each occurrence of the symbol named `holes[i]` in
  * `body`, typed `types[i]` when `types` has that entry. Returns `undefined`
@@ -10193,10 +10214,14 @@ volumes
         // `G := sin(x)`, `NIntegrate(x ↦ G, 0, 1)` is `1 − cos(1)`
         // (`literalWithFormulaValues`). A lone symbol that holds a formula is
         // read as its value: `NIntegrate(G, 0, 1)` is `1 − cos(1)` too
-        // (`loneFormulaLiteral`).
+        // (`loneFormulaLiteral`). A lone symbol that holds a number is the
+        // body of a constant function: with `c := 5`, `NIntegrate(c, 0, 2)`
+        // is 10 (`constantLiteralOfNumberSymbol`).
         f = literalWithFormulaValues(
           engine,
-          loneFormulaLiteral(engine, f) ?? f
+          loneFormulaLiteral(engine, f) ??
+            constantLiteralOfNumberSymbol(engine, f) ??
+            f
         );
 
         // Uses compiled JS functions (machine arithmetic). The bounds are
