@@ -143,6 +143,14 @@
 
 ### Resolved Issues
 
+- **In a scope with a user function named `Sqrt` or `Root`, a power of a call
+  of that function is a power of its value** (CE-1792). After
+  `ce.declare('Sqrt', 'function')` and
+  `ce.assign('Sqrt', ce.expr(['Function', ['Add', 'a', 100], 'a']))`,
+  `ce.expr(['Sqrt', 'x']).pow(2)` gave `x`, and the product of the call with
+  itself gave `1` at `x = 1`. It now gives `10201`. The same applies to a
+  power of a call of a user function `Root`.
+
 - **At machine precision, an integer that a function computes gives the
   value of the same integer written as a number** (CE-1790). In
   `ce.box(['Power', 1.1, ['Add', 4, 5]]).evaluate()`, the exponent `9`

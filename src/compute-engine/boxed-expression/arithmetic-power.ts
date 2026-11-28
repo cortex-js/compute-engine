@@ -2062,7 +2062,8 @@ export function pow(
   }
 
   // (√a)^b -> a^(b/2) or √(a^b)
-  if (isFunction(x, 'Sqrt')) {
+  // A call of a user function `Sqrt` is a value, not a square root.
+  if (isFunction(x, 'Sqrt') && isLibraryOperator(x, 'Sqrt')) {
     // (√a)^2 -> a (integer outer exponent, always safe)
     if (e === 2) return x.op1;
     // (√a)^{2k} -> a^k (even integer outer exponent, always safe)
@@ -2153,7 +2154,8 @@ export function pow(
 
   // (a^(1/b))^c -> a^(c/b) — combines exponents, only safe when
   // base is non-negative or outer exponent c is integer
-  if (isFunction(x, 'Root')) {
+  // A call of a user function `Root` is a value, not a root.
+  if (isFunction(x, 'Root') && isLibraryOperator(x, 'Root')) {
     const [base, rootIdx] = x.ops;
     const expIsInteger =
       typeof exp === 'number' ? Number.isInteger(exp) : exp.isInteger === true;
