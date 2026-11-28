@@ -53,7 +53,6 @@ import {
   LANE_MISMATCH,
   listedOf,
   tupleBody,
-  isDeclaredRecordType,
   UNSETTLED_SHAPE,
   type Binding,
   type DeclaredRecord,
@@ -535,15 +534,14 @@ function signatureTypes(
           // No stated type, or `number`: the lane of a scalar argument,
           // a real or a complex (`laneKey()`).
           open: present(t) === 'unknown' || present(t) === 'number',
-          // No stated type, `any`, a nominal tuple type or a declared record
-          // type: the type of a record argument (`held()`); `true` for any
-          // record, else the nominal type that the record must have. A
-          // dictionary type: the record of a dictionary literal only
-          // (`dictionary`).
+          // No stated type, `any`, or a nominal tuple type: the type of a
+          // record argument (`held()`); `true` for any record, else the
+          // nominal type that the record must have. A dictionary type: the
+          // record of a dictionary literal only (`dictionary`).
           record:
             isUntyped(t) || isDictionaryType(t)
               ? (true as const)
-              : tupleBody(t) !== undefined || isDeclaredRecordType(t)
+              : tupleBody(t) !== undefined
                 ? (t as TypeReference)
                 : undefined,
           // Of type `any`: also the lane of a number (`held()`).
@@ -1580,10 +1578,10 @@ export function functionLowering(
 
   /** The record of the values `values` of the arguments of the call `e` of
    *  a function with a rest parameter, the `Tuple` to which the interpreter
-   *  binds the parameter (`IRType.head`; CE-1652, step 5). A field of a
-   *  run-time length or of the lane `rows` declines (a record that a
-   *  constructor makes carries a run-time length, `make()` of
-   *  `lower-records.ts`; the arguments of a rest parameter do not). */
+   *  binds the parameter (`IRType.head`; CE-1652, step 5). As
+   *  for a record that a constructor makes (`make()` of
+   *  `lower-records.ts`), a field of a run-time length or of the lane
+   *  `rows` declines. */
   const restRecord = (e: Fn, values: V[]): V => {
     const fields = values.map((v): IRType => {
       const t = type(v);
