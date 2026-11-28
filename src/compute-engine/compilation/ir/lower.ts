@@ -839,6 +839,15 @@ function lowerOnce(
   // the read.
   const scanned = new WeakSet<object>();
   const stateOf = (key: object) => stateUses.get(key) ?? noState;
+  // The call of the implementation that a call of a protocol method
+  // selects (`protocols.dispatch()`), and the key of that implementation:
+  // the user function that the call lowers (`calleeKey()`, CE-1917).
+  const dispatchedKeys = new WeakMap<Expression, object>();
+  /** The key of the user function that the call `e` lowers: its binding
+   *  (`userBinding()`), or the implementation of a protocol method that
+   *  it calls. */
+  const calleeKey = (e: Fn): object | undefined =>
+    userBinding(e)?.key ?? dispatchedKeys.get(e);
   /** The user function that the symbol `x` names, as an operand
    *  (`Map(f, L)`): the binding that its call `f(…)` reads
    *  (`operatorLiteral()` of `lower-lists.ts`). */
@@ -1457,9 +1466,16 @@ function lowerOnce(
     const target = isFunction(sum, 'At') ? sum.ops[0] : sum;
     if (isSymbol(target)) info.writes.add(target.symbol);
     // A call of a user function reads and writes the variables of the
-    // engine that its body does (`stateOf()`, CE-1776).
-    if (user) {
-      const s = stateOf(userBinding(e)!.key);
+    // engine that its body does (`stateOf()`, CE-1776); a call of a
+    // protocol method, those of each implementation that it can select
+    // (CE-1917).
+    const callees = user
+      ? [userBinding(e)!]
+      : stateUses.size > 0
+        ? (protocols.implementations(e) ?? [])
+        : [];
+    for (const { key } of callees) {
+      const s = stateOf(key);
       for (const x of s.uses) info.names.add(x.name);
       for (const n of s.writes) info.writes.add(n);
     }
@@ -2588,6 +2604,7 @@ function lowerOnce(
     // interpreter selects for every value of its type (`lower-protocols.ts`).
     const dispatched = user === undefined ? protocols.dispatch(e) : undefined;
     if (dispatched !== undefined) {
+      dispatchedKeys.set(dispatched.call, dispatched.binding.key);
       reachBody(dispatched.binding.literal.ops[0]);
       // A method whose declared result is `nothing`: as a user function
       // of that result, below.
@@ -5203,7 +5220,7 @@ function lowerOnce(
     // assigns, in the binding that the function reads: its value here
     // (CE-1776), of a function that `assignedNames()` scanned.
     const state = assigns.find((x) => x.name === name);
-    const callee = userBinding(e)?.key;
+    const callee = calleeKey(e);
     if (state !== undefined && (callee === undefined || !scanned.has(callee)))
       decline(
         e,
@@ -7943,8 +7960,8 @@ function lowerOnce(
       );
     // A `Loop` carries the variable (`loop()`); a frame of a loop (the
     // body of a `Sum`, of a callback of `Map`) does not.
-    const user = userBinding(e);
-    const host = user === undefined ? undefined : stateOf(user.key).host;
+    const callee = calleeKey(e);
+    const host = callee === undefined ? undefined : stateOf(callee).host;
     if (known.outer)
       decline(
         e,
@@ -9477,29 +9494,36 @@ function lowerOnce(
       if (isDictionary(x))
         x.values.forEach((v) => visit(v, bound, helper, outer));
       if (!isFunction(x) && named === undefined) return;
-      // A call of a user function: its body, once.
+      // A call of a user function: its body, once. A call of a protocol
+      // method: the body of each implementation that it can select
+      // (`implementations()` of `lower-protocols.ts`, CE-1917).
       const user = isFunction(x) ? userBinding(x) : named;
+      const dispatched =
+        user === undefined && isFunction(x)
+          ? protocols.implementations(x)
+          : undefined;
       if (
         helper !== undefined &&
         user === undefined &&
+        dispatched === undefined &&
         isFunction(x) &&
         isHostBoundary(x)
       )
         helper.host ??= x.operator;
-      if (user !== undefined) {
-        scanned.add(user.key);
-        helper?.calls.push(user.key);
-        if (!touched.has(user.key)) {
+      for (const callee of dispatched ?? (user === undefined ? [] : [user])) {
+        scanned.add(callee.key);
+        helper?.calls.push(callee.key);
+        if (!touched.has(callee.key)) {
           const t: Touch = { reads: new Set(), writes: new Set(), calls: [] };
-          touched.set(user.key, t);
-          const params = user.literal.ops
+          touched.set(callee.key, t);
+          const params = callee.literal.ops
             .slice(1)
             .map((p) => parameterName(p) ?? '');
           visit(
-            user.literal.ops[0],
+            callee.literal.ops[0],
             new Set(params),
             t,
-            user.literal.localScope
+            callee.literal.localScope
           );
         }
       }
@@ -9701,7 +9725,12 @@ function lowerOnce(
     // builds the list where it stands.
     for (const { x, bound } of views)
       if (
-        reachesStateIn(x, (k) => stateUses.has(k), namedUser) &&
+        reachesStateIn(
+          x,
+          (k) => stateUses.has(k),
+          namedUser,
+          protocols.implementations
+        ) &&
         !readsVariableIn(x, bound)
       )
         decline(
@@ -9897,17 +9926,20 @@ function lowerOnce(
  *  of its name in the local scope `scope` or in a scope that encloses it,
  *  as the interpreter finds it (CE-1776). */
 /** Whether `x` calls or names a user function that reads or writes a
- *  variable of the engine (`stateUses`). */
+ *  variable of the engine (`stateUses`). `dispatched`: the implementations
+ *  that a call of a protocol method can select (CE-1917). */
 function reachesStateIn(
   x: Expression,
   has: (key: object) => boolean,
-  named: (x: Expression & { symbol: string }) => { key: object } | undefined
+  named: (x: Expression & { symbol: string }) => { key: object } | undefined,
+  dispatched: (x: Fn) => readonly { key: object }[] | undefined
 ): boolean {
   if (isSymbol(x)) return has(named(x)?.key ?? {});
   if (!isFunction(x)) return false;
   const user = userBinding(x);
   if (user !== undefined && has(user.key)) return true;
-  return x.ops.some((op) => reachesStateIn(op, has, named));
+  if (user === undefined && dispatched(x)?.some((c) => has(c.key))) return true;
+  return x.ops.some((op) => reachesStateIn(op, has, named, dispatched));
 }
 
 /** `readsVariable()` of `library/core.ts`, for a variable of the engine

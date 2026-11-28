@@ -42,6 +42,63 @@ export function protocolLowering(cx: Lowering) {
     Map<string, { key: object; literal: Fn; implementation: true }>
   >();
 
+  /** The implementation of `member` on the edge `edge`, made canonical as
+   *  the interpreter makes it canonical to apply it, with `Self` replaced
+   *  by the target of the edge. `undefined` when it is not a function
+   *  literal. */
+  const implementation = (
+    ce: IComputeEngine,
+    edge: ConformanceRecord,
+    member: string
+  ): { key: object; literal: Fn; implementation: true } | undefined => {
+    let byMember = literals.get(edge);
+    if (byMember === undefined) literals.set(edge, (byMember = new Map()));
+    let binding = byMember.get(member);
+    if (binding === undefined) {
+      const raw = implementationLiteralAt(ce, edge, member);
+      const literal = raw === null ? undefined : canonicalFunctionLiteral(raw);
+      if (!isFunction(literal, 'Function')) return undefined;
+      // Its result is the one its body declares, at `Self` = the target
+      // (`signatureTypes()`): the interpreter checks the value against it.
+      binding = { key: {}, literal: literal as Fn, implementation: true };
+      byMember.set(member, binding);
+    }
+    return binding;
+  };
+
+  /** A call `e` of the dispatcher of a protocol member: the bindings of
+   *  every implementation, not of the host, that a value of the static
+   *  type of its first operand can select (all of them when that type is
+   *  not stated), with the keys that `dispatch()` gives them. A superset
+   *  of the one that `dispatch()` selects: the scan of the variables of
+   *  the engine that the bodies of the called functions read and write
+   *  visits each (`assignedNames()` of `lower.ts`, CE-1917). `undefined`
+   *  when the head of `e` is not a dispatcher. */
+  const implementations = (
+    e: Fn
+  ): { key: object; literal: Fn; implementation: true }[] | undefined => {
+    if (
+      e.operatorDefinition === undefined ||
+      !isProtocolDispatcher({ operator: e.operatorDefinition } as never)
+    )
+      return undefined;
+    const ce = e.engine as unknown as IComputeEngine;
+    const receiver = e.ops[0]?.type.type;
+    const out: { key: object; literal: Fn; implementation: true }[] = [];
+    for (const c of protocolDispatchCandidates(ce, e.operator) ?? []) {
+      if (c.host) continue;
+      if (
+        receiver !== undefined &&
+        !isUntyped(receiver) &&
+        !typesOverlap(c.widest, receiver)
+      )
+        continue;
+      const binding = implementation(ce, c.edge, e.operator);
+      if (binding !== undefined) out.push(binding);
+    }
+    return out;
+  };
+
   /** A call `e` of the dispatcher of a protocol member: the call of the
    *  implementation that the interpreter selects, with every argument that
    *  the implementation takes, and the binding of that implementation
@@ -118,21 +175,9 @@ export function protocolLowering(cx: Lowering) {
     const filled = protocolCallArguments(ce, c.record, member, e.ops);
     if (typeof filled === 'string') decline(e, `${what}: ${filled}`);
     const { args, defaults } = filled;
-    // The implementation, `Self` replaced by the target of the edge, made
-    // canonical as the interpreter makes it canonical to apply it.
-    let byMember = literals.get(c.edge);
-    if (byMember === undefined) literals.set(c.edge, (byMember = new Map()));
-    let binding = byMember.get(member);
-    if (binding === undefined) {
-      const raw = implementationLiteralAt(ce, c.edge, member);
-      const literal = raw === null ? undefined : canonicalFunctionLiteral(raw);
-      if (!isFunction(literal, 'Function'))
-        decline(e, `${what}: an implementation that is not a function literal`);
-      // Its result is the one its body declares, at `Self` = the target
-      // (`signatureTypes()`): the interpreter checks the value against it.
-      binding = { key: {}, literal: literal as Fn, implementation: true };
-      byMember.set(member, binding);
-    }
+    const binding = implementation(ce, c.edge, member);
+    if (binding === undefined)
+      decline(e, `${what}: an implementation that is not a function literal`);
     // The interpreter checks each argument against the requirement: the
     // static type of each must prove it, or, of no stated type or `any` (a
     // parameter that holds the type of its argument), its lane. Each
@@ -229,5 +274,5 @@ export function protocolLowering(cx: Lowering) {
     return { call: ce._fn(member, args) as Fn, binding, values };
   };
 
-  return { dispatch };
+  return { dispatch, implementations };
 }

@@ -4621,9 +4621,15 @@ in `adapter.ts` (JavaScript), `adapter-glsl.ts` and `adapter-interval.ts`, and
   rebinds the names (`Lowering.stateWrite()`). A `Loop` carries such a name, as
   it carries a local (`loop()`). A function named as an operand (`Map(f, L)`,
   `namedUser()`) is scanned as a call, and the facts of the symbol count its
-  names; a call of a function that the scan did not reach (a function value)
-  that reads such a name declines (`free()`), and so does a lazy collection that
-  reaches such a function and reads no variable of the engine
+  names. A call of a protocol method is scanned as a call of each
+  implementation that a value of the static type of its receiver can select
+  (`implementations()` of `lower-protocols.ts`, with the keys that
+  `dispatch()` gives them; CE-1917), and its facts count their names. Of a
+  receiver of no stated type, every implementation is scanned, so one that the
+  call never selects can make the compilation decline. A call of a function
+  that the scan did not reach (a function value) that reads such a name
+  declines (`free()`), and so does a lazy collection that reaches such a
+  function (a call of a protocol method too) and reads no variable of the engine
   (`readsVariableIn()`, the interpreter's rule of listing, without the names
   that the program binds). A write in a loop frame (a `Sum`, a callback of
   `Map`), a call that maps over a list (`mapOver()`), a recursive writer and a

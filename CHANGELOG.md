@@ -13,6 +13,16 @@
 
 ### Improvements
 
+- **JavaScript compiles a call of a protocol method in a function that
+  assigns a variable of the engine.** With a method
+  `function touch(self: Box) -> nothing { hostTouch(self.cells) }`, the
+  frame callback `(t: integer) => do { gen = gen + 1; box.touch(); gen }`
+  declined ("a write of the variable gen of the engine where a local or a
+  parameter hides it"), where the same call through a plain function
+  compiled. It now compiles and gives the interpreter's values, also for a
+  method that reads or assigns `gen` itself. This is the shape of a frame
+  callback that counts its frames and calls a raster method such as
+  `board.compute(next)`.
 - **JavaScript compiles a list of numbers and a string at a parameter
   declared `list`.** With `type T = tuple<k: string, geom: list>` and
   `function wrap(geom: list) { T("x", geom) }`, `wrap([t, 2, "a"])`
