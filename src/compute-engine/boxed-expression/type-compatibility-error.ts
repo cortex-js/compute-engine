@@ -19,6 +19,7 @@ import {
   isSymbol,
 } from './type-guards.js';
 import { restrictionParts } from './conditional-value.js';
+import { errorValue } from './error-value.js';
 
 /**
  * Raised when a value cannot be installed under a symbol's DECLARED type:
@@ -52,7 +53,12 @@ export class TypeCompatibilityError extends Error {
     message: string,
     /** An actionable near-miss explanation ({@link unboundSignatureHint}),
      * carried so the `Assign`/`Declare` error-value route can repeat it. */
-    readonly hint?: string
+    readonly hint?: string,
+    /** The first error in the body of a function literal value whose body
+     * holds an error, with its breadcrumb. The `DefineFunction` operator
+     * route answers with it: the body is the problem, not the type of the
+     * literal. */
+    readonly bodyError?: Expression
   ) {
     super(message);
   }
@@ -139,7 +145,10 @@ export function unboundSignatureHint(
   if (typeof declared === 'string' || declared.kind !== 'signature')
     return undefined;
   // A function-valued mismatch (wrong arity, wrong parameter types) is a
-  // different problem with its own, better messages.
+  // different problem with its own, better messages. A function literal is
+  // a function, also when its body holds an error under an `If`, which types
+  // it `unknown`: the error inside it is the problem to report.
+  if (isExpression(value) && isFunction(value, 'Function')) return undefined;
   const actual = value.type.type;
   if (actual === 'function') return undefined;
   // An invalid value (for example a lambda whose body holds an `Error`) has
@@ -544,7 +553,10 @@ export function declaredTypeError(
         : `The value "${value.toString()}" of type "${value.type}" is not compatible with the type "${declaredType}"`,
       ...(hint !== undefined ? [hint] : []),
     ].join('\n|   '),
-    hint
+    hint,
+    isExpression(value) && isFunction(value, 'Function')
+      ? (errorValue(value) ?? value.errors[0])
+      : undefined
   );
 }
 

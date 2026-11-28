@@ -8220,8 +8220,13 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
           // for a program those are error VALUES — the same conversion as
           // the `Assign` operator's evaluate.
           if (isEffectContractError(e)) return effectContractErrorValue(ce, e);
+          // A literal whose body holds an error (the body read against the
+          // signature now installed, `let y = f(t - 1)` then `y + 1` under
+          // `-> nothing`) answers with that error, as a body that holds it
+          // when the statement is boxed does. A mismatch of the signature of
+          // such a literal shows when the body is correct.
           if (isTypeCompatibilityError(e))
-            return typeCompatibilityErrorValue(ce, e);
+            return e.bodyError ?? typeCompatibilityErrorValue(ce, e);
           // The definition is installed, but a definition that waited on
           // this name could not be rebuilt: its error is the value.
           if (isDependentRebuildError(e)) return e.errorValue;

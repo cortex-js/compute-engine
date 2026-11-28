@@ -143,6 +143,16 @@
 
 ### Resolved Issues
 
+- **A function definition whose body holds an error is refused with that
+  error** (CE-1748). With a host function `draw` of result `nothing`, the
+  Epsil definition `function rec(t: real) -> nothing { if t > 0 {
+  let y = rec(t - 1); draw(y + 1) } else { draw(0) } }` was refused with
+  "expected `(t: real) -> nothing`, got `unknown`" and the explanation that
+  the initializer is not a function. It is now refused with the error of
+  its body, "expected `number`, got `nothing` at `y`", as when `rec` calls a
+  function defined before it. A declaration of a function signature no
+  longer says that a function literal is not a function when its body
+  holds an error inside an `if`.
 - **In Epsil, the message of an error in a unary minus in the second
   operand of a subtraction names the subtraction** (CE-1783). With `w`
   holding `"s"`, the runtime error of `1 - (2 - -ln(w))` said "in Ln

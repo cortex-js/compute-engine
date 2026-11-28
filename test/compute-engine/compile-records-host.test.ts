@@ -342,20 +342,21 @@ describe('a rest parameter or a host argument that declines', () => {
 
 describe('a function of declared result nothing', () => {
   test('a recursive call whose value Nothing is read declines', () => {
-    // The interpreter stops at the error of `y + 1` after one host call.
-    // `rec3` is declared in an engine of its own: after another statement
-    // of the same program, its declaration is refused (see the issue filed
-    // with CE-1652 step 5).
+    // `rec3` is declared in an engine of its own, with no prelude.
     const ce = new ComputeEngine();
     ce.declare('figureDraw', {
       signature: '(any) -> nothing',
       pure: false,
       evaluate: () => ce.symbol('Nothing'),
     });
+    // A body that reads `Nothing + 1` is refused when the definition runs,
+    // with the error of the body (CE-1748), so it has nothing to compile.
+    // The interpreter passes the `Nothing` of `y` to the host function, and
+    // the compiled code cannot.
     expect(
       executeEpsil(
         ce,
-        'function rec3(t: real) -> nothing { if t > 0 { let y = rec3(t - 1)\n figureDraw(y + 1) } else { figureDraw(0) } }'
+        'function rec3(t: real) -> nothing { if t > 0 { let y = rec3(t - 1)\n figureDraw(y) } else { figureDraw(0) } }'
       ).diagnostics
     ).toEqual([]);
     const r = compileTo(ce, '(t: real) => rec3(t)');
