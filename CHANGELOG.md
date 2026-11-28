@@ -143,6 +143,13 @@
 
 ### Resolved Issues
 
+- **A sum or a product with an `Element` clause and a range of very large
+  integers gives an error instead of stopping the process** (CE-1768). The
+  evaluation of `["Sum", ["Multiply", "j", "k"], ["Element", "k", ["List",
+  1, 2]], ["Limits", "j", ["Power", 2, 60], ["Add", ["Power", 2, 60], 2]]]`
+  ran out of memory. It now gives the `out-of-range` error ("a bound with
+  magnitude at most 9007199254740991") that the same sum with only the
+  `Limits` clause gives.
 - **A function definition whose body holds an error is refused with that
   error** (CE-1748). With a host function `draw` of result `nothing`, the
   Epsil definition `function rec(t: real) -> nothing { if t > 0 {

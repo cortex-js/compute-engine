@@ -4983,13 +4983,16 @@ export const NON_ENUMERABLE_BOUNDS = Symbol('non-enumerable-bounds');
 /**
  * Build the error expression a Sum/Product returns when `reduceBigOp` reports
  * `NON_ENUMERABLE_BOUNDS`. `indexes` are the raw (un-normalized) indexing set
- * operands, as the evaluate handlers have them.
+ * operands, as the evaluate handlers have them. Only the `Limits` clauses are
+ * read: an `Element` clause is not a range.
  */
 export function bigOpBoundsError(
   ce: ComputeEngine,
   indexes: ReadonlyArray<Expression>
 ): Expression {
-  const set = nonEnumerableIndexingSet(normalizeIndexingSets(indexes));
+  const set = nonEnumerableIndexingSet(
+    normalizeIndexingSets(indexes.filter((x) => x.operator === 'Limits'))
+  );
   return ce.error([
     'out-of-range',
     `a bound with magnitude at most ${Number.MAX_SAFE_INTEGER}`,
@@ -5558,6 +5561,9 @@ export function* reduceBigOp<T>(
         // Signal that the domain is non-enumerable
         return NON_ENUMERABLE_DOMAIN;
       }
+      if (typedResult.status === 'non-enumerable-bounds') {
+        return NON_ENUMERABLE_BOUNDS;
+      }
       // Error case - return undefined (will become NaN)
       return undefined;
     }
@@ -5622,6 +5628,7 @@ export function* reduceBigOp<T>(
 export type ReduceElementResult<T> =
   | { status: 'success'; value: T }
   | { status: 'non-enumerable'; reason: string; domain?: Expression }
+  | { status: 'non-enumerable-bounds' }
   | { status: 'error'; reason: string };
 
 /**
@@ -5713,12 +5720,25 @@ function* reduceElementIndexingSets<T>(
 
   // If we have mixed Element and Limits sets, we need to handle both
   if (limitsSets.length > 0) {
+    // Above `Number.MAX_SAFE_INTEGER`, `i++` below does not change `i`: the
+    // loop never ends and the list grows until the heap is full. Report the
+    // bounds as the path with only `Limits` clauses does.
+    if (nonEnumerableIndexingSet(limitsSets)) {
+      if (returnReason)
+        return {
+          status: 'non-enumerable-bounds',
+        } as ReduceElementResult<T>;
+      return undefined;
+    }
     // Mixed case: combine Element domains with Limits ranges
     // Convert Limits to a similar format
     for (const limits of limitsSets) {
       const values: Expression[] = [];
       for (let i = limits.lower; i <= limits.upper; i++) {
         values.push(ce.number(i));
+        // A one-term range above the safe-integer range (`2^60..2^60`)
+        // passes the check above, and `i++` does not leave it.
+        if (i === limits.upper) break;
       }
       elementDomains.push({ variable: limits.index!, values });
     }

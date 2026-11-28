@@ -1624,6 +1624,47 @@ describe('SUM', () => {
     expect(ce.expr(['Product', 'j', reversed]).evaluate().re).toBe(1);
   });
 
+  // CE-1768: with an `Element` clause, a `Limits` clause above 2^53 was
+  // turned into a list by a loop whose `i++` did not change `i`: the list
+  // grew until the heap was full.
+  it('reports large bounds next to an Element clause as an error', () => {
+    const p60 = ['Power', 2, 60];
+    const k = ['Element', 'k', ['List', 1, 2]];
+    const sum = ce
+      .expr([
+        'Sum',
+        ['Multiply', 'j', 'k'],
+        k,
+        ['Limits', 'j', p60, ['Add', p60, 2]],
+      ])
+      .evaluate();
+    expect(sum.toString()).toMatchInlineSnapshot(
+      `Error(ErrorCode("out-of-range", "a bound with magnitude at most 9007199254740991", "1152921504606846976..1152921504606846978"))`
+    );
+    expect(
+      ce
+        .expr([
+          'Product',
+          ['Multiply', 'j', 'k'],
+          k,
+          ['Limits', 'j', p60, ['Add', p60, 2]],
+        ])
+        .evaluate().operator
+    ).toBe('Error');
+    // A one-term range whose bound is a double has its one term.
+    expect(
+      ce
+        .expr(['Sum', ['Multiply', 'j', 'k'], k, ['Limits', 'j', p60, p60]])
+        .evaluate().re
+    ).toBe(3 * 2 ** 60);
+    // Small bounds keep working.
+    expect(
+      ce
+        .expr(['Sum', ['Multiply', 'j', 'k'], k, ['Limits', 'j', 1, 3]])
+        .evaluate().re
+    ).toBe(18);
+  });
+
   // Regression tests for issue #252: Sum with free variables
   it('should handle sum with free variable (issue #252)', () =>
     expect(
