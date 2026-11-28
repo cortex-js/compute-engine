@@ -4095,13 +4095,25 @@ tuple, the discharges of `absent()`.
   A parameter of a nominal tuple type or of a declared record type
   (`isDeclaredRecordType()`, `f: Fig`) takes a record of that nominal type
   only, or of a nominal type that the static type of the argument proves a
-  subtype of it; any other record declines (R5). A parameter declared `list` takes no
-  record: Tycho's `label` (the geometry `[x, y, text]`) and `group` (a list of
-  figures) decline at `figureOf(kind: string, geom: list)` ("the parameter geom
-  of figureOf is not a scalar"). In a constructor, an operand of no stated type
-  or of type `any` (such a parameter) proves the declared type of its field by
-  its lane (a string, a colour, a boolean, a number, `nothing`) in the function
-  lowered for it. A field of a record parameter is read as on a local record
+  subtype of it; any other record declines (R5). A parameter of a list type
+  that settles no IR type (`list`, `list<real | string>`; `listType` of
+  `signatureTypes()`, CE-1921) holds the type of a record of no names (a `List`
+  literal of mixed lanes, not a dictionary or the arguments of a rest
+  parameter) or of a list of records, as a parameter of type `any` does, when
+  the type admits its lanes (`listProves()` of `lower-records.ts`: each field
+  a scalar whose lane proves the element type, any field for `list`) and the
+  static type of the argument, when it has one, is within the declared type:
+  Tycho's `label` passes `[x, y, text]` to
+  `figureOf(kind: string, geom: list)`. A `Tuple` of mixed lanes has the
+  same IR type, so one held at `any` is admitted where the interpreter gives
+  `incompatible-type`; that error is one the static type does not show, and
+  the value is unspecified. A result of such a type takes the
+  record of its body, and a flat list of numbers, booleans or strings whose
+  lane the type admits (`g(geom: list) { geom }` of `[t, 2]`). In a
+  constructor, an operand of no stated type or of type `any` (such a
+  parameter) proves the declared type of its field by its lane (a string, a
+  colour, a boolean, a number, `nothing`) in the function lowered for it, and a
+  field of a list type by `listProves()`. A field of a record parameter is read as on a local record
   (the operation `field`), so `x is T` of a field is decided by its lane and a
   `match` on a field compares at run time. A recursive call on a cycle of calls
   through a function whose parameter or declared result is a record, or whose

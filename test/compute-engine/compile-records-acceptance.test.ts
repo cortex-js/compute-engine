@@ -478,16 +478,16 @@ describe('CE-1652 acceptance: the Game of Life state update', () => {
 
 describe('CE-1652 acceptance: declines', () => {
   // Plan section 7 expected `draw(circle(…), label(…))` and
-  // `fill(rgb(…))` through `draw` to compile. The steps decline them: a
-  // label's geometry `[x, y, text]` is a list of two types, which the
-  // parameter `geom: list` of `figureOf` does not take (step 5), and the
-  // compiled colour is in OKLCh where the interpreter keeps `Rgb(…)`, so a
-  // colour is not given to the host (step 5).
-  test('a label: its geometry is a list of two types', () => {
-    expectDeclines(
-      '(t: real) => draw(circle((0, 0), 1), label((0, 1), "a"))',
-      /the parameter geom of figureOf is not a scalar \(list\)/
+  // `fill(rgb(…))` through `draw` to compile. A label compiles since
+  // CE-1921 (its geometry `[x, y, text]`, a list of two types, at the
+  // parameter `geom: list` of `figureOf`); the compiled colour is in OKLCh
+  // where the interpreter keeps `Rgb(…)`, so a colour is not given to the
+  // host (step 5).
+  test('a label: its geometry is a list of two types (CE-1921)', () => {
+    expectHostAgrees(
+      '(t: real) => draw(circle((0, 0), 1), label((0, 1), "a"))'
     );
+    expectHostAgrees('(t: real) => draw(label((t, 0), "a"))');
   });
 
   test('a colour given to the host', () => {
@@ -498,10 +498,10 @@ describe('CE-1652 acceptance: declines', () => {
   });
 
   test('an if with a run-time condition whose arms give two figure types', () => {
-    // The label declines first, at its geometry.
+    // A circle and a label are two record types (R3).
     expectDeclines(
       '(t: real) => if t > 0 { circle((t, 0), 1) } else { label((t, 0), "a") }',
-      /the parameter geom of figureOf is not a scalar \(list\)/
+      /arms of two types/
     );
     // An unfilled and a filled circle are two record types (R3).
     expectDeclines(
@@ -511,19 +511,22 @@ describe('CE-1652 acceptance: declines', () => {
   });
 
   test('a figure of kind group', () => {
-    // Plan section 4.4 names the recursive `figureBox` of a group; the
-    // compilation declines before it, at the geometry of the group, a list
-    // of figures, which the parameter `geom: list` of `figureOf` does not
-    // take.
-    for (const source of [
-      '(t: real) => draw(group(circle((t, 0), 1), circle((0, t), 1)))',
+    // The geometry of a group, a list of figures, at the parameter
+    // `geom: list` of `figureOf` compiles since CE-1921.
+    expectHostAgrees(
+      '(t: real) => draw(group(circle((t, 0), 1), circle((0, t), 1)))'
+    );
+    // Plan section 4.4 names the recursive `figureBox` of a group, which
+    // the pivot of a rotation and the centre read: a `reduce` over the list
+    // of figures at `x: any` declines, and so does the recursive call.
+    expectDeclines(
       '(t: real) => draw(group(circle((t, 0), 1), circle((0, t), 1)).rotate(t))',
+      /x: a scalar where a list is required/
+    );
+    expectDeclines(
       '(t: real) => group(circle((t, 0), 1)).center()',
-    ])
-      expectDeclines(
-        source,
-        /the parameter geom of figureOf is not a scalar \(list\)/
-      );
+      /a recursive call of figureBox, on a cycle of calls with a record parameter/
+    );
   });
 
   test('a dash of a list of a run-time length, carried by the record', () => {

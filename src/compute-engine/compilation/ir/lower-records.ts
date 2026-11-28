@@ -223,6 +223,44 @@ export function laneProves(
   return e !== undefined && isSubtype(e, d);
 }
 
+/** A value of the IR type `t` (no tuple mark when `!marked`) is a list of
+ *  the declared list type `d` (`list`, `list<real | string>`; CE-1921) by
+ *  its lanes: a flat list of a lane that proves the element type, a record
+ *  of no names (a `List` literal of mixed lanes, not a dictionary nor the
+ *  arguments of a rest parameter) each of whose fields does, or a list of
+ *  records. An element type `any` or `unknown` (`list`) admits every
+ *  element; another one a scalar field only (`laneProves()`).
+ *
+ *  A `Tuple` of mixed lanes has the same IR type as such a `List`: a
+ *  caller refuses it by its static type where it has one (`held()`). Held
+ *  at `any`, it is admitted, where the interpreter gives `incompatible-type`:
+ *  an error that the static type does not show, so the value is
+ *  unspecified (AGENTS.md). */
+export function listProves(t: FieldType, marked: boolean, d: Type): boolean {
+  const x =
+    d === 'list'
+      ? 'any'
+      : typeof d === 'object' && d.kind === 'list' && d.dimensions === undefined
+        ? d.elements
+        : undefined;
+  if (x === undefined || marked) return false;
+  const admits = (f: FieldType, mark: number | undefined) =>
+    isUntyped(x) || laneProves(f, mark !== undefined, x);
+  if (isRecord(t))
+    return (
+      t.names === undefined &&
+      t.nominal === undefined &&
+      (t.head === undefined || t.head === 'List') &&
+      (t.fields ?? []).every((f, k) => admits(f, t.marks?.[k]))
+    );
+  if (t.shape.length !== 1) return false;
+  if (t.lane === 'record') return isUntyped(x);
+  return (
+    ['real', 'integer', 'boolean', 'string'].includes(t.lane) &&
+    admits({ ...t, shape: [] }, undefined)
+  );
+}
+
 /** `javascript`: the target holds records (JavaScript, not the interval
  *  or the `bigint` mode). Elsewhere a constructor declines and a `Tuple`
  *  or a `List` of several lanes is lowered as before (user decision Q3 of
@@ -452,7 +490,12 @@ export function recordLowering(
         return w;
       }
       const v = cx.value(op)!;
-      if (open && !laneProves(type(v), tuples.has(v), d))
+      // A list held there (CE-1921): its lanes prove the field's list type.
+      if (
+        open &&
+        !laneProves(type(v), tuples.has(v), d) &&
+        !listProves(type(v), tuples.has(v), d)
+      )
         decline(
           op,
           `${what}: a value of type ${engineTypeToString(op.type.type)}, here ${typeToString(type(v))}, which does not prove ${engineTypeToString(d)}`
@@ -757,5 +800,6 @@ export function recordLowering(
     named,
     make,
     field,
+    listProves,
   };
 }

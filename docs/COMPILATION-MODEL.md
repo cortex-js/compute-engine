@@ -3299,9 +3299,8 @@ carried) and a string field another value. These decline:
 - a whole value written to a record local whose fields have other lanes or
   ranks than its first value (`let out = V("c", Nothing); out = V("c",
   "red")` of a field `fill: any`): the local would hold two shapes (R3);
-- a record or a list of several lanes given to a parameter declared `list`:
-  Tycho's `label` (the geometry `[x, y, text]`) and `group` (a list of
-  figures) decline at `figureOf(kind: string, geom: list)`;
+- a held list that the declared list type does not admit, and a `Length`
+  of a list of several lanes (`length(geom)` of `geom` given `[t, 2, "a"]`);
 - a recursive function whose parameter or result is a record.
 
 A dictionary literal is a record of its keys, and a key of the value
@@ -3437,7 +3436,11 @@ r.code;
 also a string or a colour), and the function is compiled once for each type
 of record it is given: with `shift(p: P, d: real) = P(p.x + d, p.y)`,
 `shift(P(cos(t), sin(t)), 1)` compiles. A parameter of a named tuple type
-takes a record of that type only (R5). A list of elements of several lanes
+takes a record of that type only (R5). A parameter or a result declared
+`list` (or a list type whose elements admit the elements, `list<real | string>`)
+takes a list of elements of several lanes and a list of records (CE-1921):
+with `figureOf(kind: string, geom: list) = Figure(kind, geom)`,
+`figureOf("label", [t, 2, "a"])` compiles. A list of elements of several lanes
 given to a parameter that the interpreter maps over a list
 (`tag(x) = ("sample", x)`, `tag([t, "a"])`) declines; a tuple there is passed
 whole (`tag((t, "a"))` compiles). A local declared with no type widens a real

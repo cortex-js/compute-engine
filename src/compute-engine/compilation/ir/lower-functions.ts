@@ -38,6 +38,7 @@ import {
   sameShape,
   scalarType,
   typeToString,
+  type FieldType,
   type IRFunction,
   type IRType,
   withShape,
@@ -550,6 +551,10 @@ function signatureTypes(
                 : undefined,
           // Of type `any`: also the lane of a number (`held()`).
           any: isUntyped(t) && present(t) !== 'unknown',
+          // A list type that settles no IR type (`list`,
+          // `list<real | string>`): a record of no names or a list of
+          // records whose lanes it admits (`held()`; CE-1921).
+          listType: isSubtype(t, 'list') && !isUntyped(t) ? t : undefined,
           dictionary: isDictionaryType(t),
         };
   });
@@ -798,9 +803,11 @@ type UserFunction = {
 export function functionLowering(
   cx: Lowering,
   lists: ReturnType<typeof listLowering>,
-  /** `declared()` of `recordLowering()` (`lower-records.ts`). */
+  /** `declared()` and `listProves()` of `recordLowering()`
+   *  (`lower-records.ts`). */
   records: {
     declared(e: Expression, payload: Expression, v: V, d: DeclaredRecord): V;
+    listProves(t: FieldType, marked: boolean, d: Type): boolean;
   },
   /** The target holds records and text (JavaScript, not the interval or
    *  the `bigint` mode). */
@@ -928,6 +935,17 @@ export function functionLowering(
     }
     if (t.lane === 'array' || t.engine !== undefined)
       return 'record' in p && p.record === true ? t : undefined;
+    // A parameter of a list type that settles no IR type (`list`): a
+    // record of no names or a list of records, whose lanes the type admits
+    // and, where the argument has a static type, that type too (CE-1921).
+    if ('listType' in p && p.listType !== undefined) {
+      const s = op?.type.type;
+      return t.lane === 'record' &&
+        records.listProves(t, cx.tuples.has(v), p.listType) &&
+        (s === undefined || isUntyped(s) || isSubtype(s, p.listType))
+        ? t
+        : undefined;
+    }
     const text =
       javascript &&
       t.lane === 'string' &&
@@ -1386,10 +1404,15 @@ export function functionLowering(
         // A result that is not a scalar: a record, of the nominal type of
         // the result type when it is one.
         if (record) {
-          // A list of records where a list type is declared only.
+          // A list of records where a list type is declared only. A list
+          // type that settles no IR type (`list`) also takes a flat list
+          // whose lanes it admits, and a record of no names (a list of
+          // several lanes) whose elements it admits (CE-1921).
           if (
-            t.lane !== 'record' ||
-            (t.shape.length > 0 && !isSubtype(r!, 'list'))
+            t.lane !== 'record' || (t.shape.length === 0 && isSubtype(r!, 'list'))
+              ? !isSubtype(r!, 'list') ||
+                !records.listProves(t, cx.tuples.has(body), r!)
+              : t.shape.length > 0 && !isSubtype(r!, 'list')
           )
             scalarOf(literal, r!, `the result of ${e.operator}`);
           const nominal = tupleBody(r!) && (r as TypeReference).name;

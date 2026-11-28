@@ -7,12 +7,30 @@
  * Run: npx tsx scripts/repros/2026-11-27-ce1921-bare-list-parameter.mts
  *
  * Each line prints the compiled value at t = 3 and the interpreter's, or the
- * decline. The last line is READY when every case marked `compile` compiles
- * and gives the interpreter's value.
+ * decline, and WRONG VALUE where the two differ. The last line is READY when
+ * every case compiles and gives the interpreter's value.
  */
 import { ComputeEngine } from '../../src/compute-engine';
 import { executeEpsil } from '../../src/epsil';
 import { compile } from '../../src/compile';
+import {
+  isFunction,
+  isNumber,
+  isString,
+} from '../../src/compute-engine/boxed-expression/type-guards';
+
+/** The JavaScript value that `run()` gives for the interpreter's value
+ *  `v`: a list is an array, a value of `T` the object of its fields. */
+function hostValue(v: any): unknown {
+  if (isString(v)) return v.string;
+  if (isNumber(v)) return v.re;
+  if (isFunction(v)) {
+    const items = v.ops.map(hostValue);
+    if (v.operator === 'List') return items;
+    if (v.operator === 'T') return { k: items[0], geom: items[1] };
+  }
+  return `no host value for ${v.toString()}`;
+}
 
 const PRELUDE = `
 type T = tuple<k: string, geom: list>
@@ -36,14 +54,15 @@ for (const c of cases) {
   const ce = new ComputeEngine();
   executeEpsil(ce, PRELUDE);
   const fn = executeEpsil(ce, `(t: integer) => ${c.call}`).value;
-  const expected = ce.expr(['Apply', fn, 3]).evaluate().json;
+  const evaluated = ce.expr(['Apply', fn, 3]).evaluate();
+  const expected = evaluated.json;
   let out: string;
   let ok = false;
   try {
     const r = compile(fn, { to: 'javascript', fallback: false } as any) as any;
     const value = r.run(3);
-    out = `compiles, ${JSON.stringify(value)} (interpreter ${JSON.stringify(expected)})`;
-    ok = true;
+    ok = JSON.stringify(value) === JSON.stringify(hostValue(evaluated));
+    out = `${ok ? 'compiles' : 'WRONG VALUE'}, ${JSON.stringify(value)} (interpreter ${JSON.stringify(expected)})`;
   } catch (e) {
     out = `DECLINE ${(e as Error).message.split('\n')[0]}`;
   }

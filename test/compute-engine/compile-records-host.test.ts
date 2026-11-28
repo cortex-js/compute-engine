@@ -303,12 +303,10 @@ describe('a rest parameter or a host argument that declines', () => {
     // A constant: the lowering reads its value, not a literal of the
     // program.
     expectDeclines('(t: real) => figureDraw(pair)', /a record of no names/);
-    // Tycho's label: its geometry is a list of two types, which the
-    // parameter `geom: list` of `figureOf` does not take.
-    expectDeclines(
-      '(t: real) => draw(label((t, 0), "a"))',
-      /the parameter geom of figureOf is not a scalar/
-    );
+  });
+
+  test("Tycho's label: its geometry, a list of two types, at the parameter geom: list of figureOf (CE-1921)", () => {
+    expectHostAgrees('(t: real) => draw(label((t, 0), "a"))');
   });
 
   test('a colour, which the code holds in OKLCh', () => {

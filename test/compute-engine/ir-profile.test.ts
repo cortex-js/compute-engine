@@ -1939,6 +1939,11 @@ describe('a user function whose result is a list of elements of no stated type: 
     );
   });
 
+  test('a result whose inferred elements are a union of a number and a list, from a flat list body (CE-1921)', () => {
+    for (const k of [1, 2])
+      againstInterpreter(e, ['At', ['uu', 'x', 'y'], k], points);
+  });
+
   test('a parameter that the body reads as a list takes the list of the first call whole', () => {
     // The interpreter binds the list whole (`paramsAreScalar()` is false).
     againstInterpreter(e, ['R', ['List', -0.57, 2.8], 'x'], points);
@@ -1961,7 +1966,6 @@ describe('a user function whose result is a list of elements of no stated type: 
   test.each([
     ['a recursive function with an open list result', ['At', ['rl', 'x', 'y'], 1], /a recursive call of rl, a function with a list or tuple result/],
     ['a declared settled result that the body contradicts', ['At', ['vd', 'x', 'y'], 1], /a body of vd that is not vector<real\^3>/],
-    ['a result whose elements are a union of a number and a list', ['At', ['uu', 'x', 'y'], 1], /the result of uu is not a scalar \(list<list<any> \| number>\)/],
   ])('%s declines', (_, json, cause) => {
     expect(message(json)).toMatch(cause);
   });

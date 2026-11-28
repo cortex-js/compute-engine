@@ -2,6 +2,19 @@
 
 ### Improvements
 
+- **JavaScript compiles a list of numbers and a string at a parameter
+  declared `list`.** With `type T = tuple<k: string, geom: list>` and
+  `function wrap(geom: list) { T("x", geom) }`, `wrap([t, 2, "a"])`
+  declined ("the parameter geom of wrap is not a scalar (list)"), and so
+  did Tycho's `label(p, text)`, which passes `[x, y, text]` to
+  `figureOf(kind: string, geom: list)`. It now gives
+  `{ k: "x", geom: [3, 2, "a"] }` at `t = 3`. A parameter declared `list`
+  also takes a list of records. A function `g(geom: list) { geom }` now
+  returns `[3, 2]` for `g([t, 2])`, where its result declined, and a
+  parameter of type `any` that holds `[t, 2, "a"]` fills a field declared
+  `list`. A list type whose elements do not admit the elements still
+  declines (`list<real>` given `[t, "a"]`), as the interpreter gives an
+  error there.
 - **JavaScript compiles the figure constructors of a drawing prelude:
   an empty list in a record, a record local that a loop replaces, and a
   loop over the keys of a dictionary.** Three shapes declined:
