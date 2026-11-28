@@ -143,6 +143,14 @@
 
 ### Resolved Issues
 
+- **The test that a value is an element of a sorted list, and the GCD and
+  the LCM of a sorted list, are found when an element is a variable**
+  (CE-1824). With `x` declared `real` and `n` declared `integer`,
+  `Element(1, Sort([3, x, 1]))`, `GCD(Sort([6, n, 4]))` and
+  `LCM(Sort([6, n, 4]))` stayed unevaluated. They now give `True`,
+  `GCD(2, n)` and `LCM(12, n)`, as for the list without `Sort`.
+  `NotElement` gives `False` for the same list.
+
 - **The sum, the product, the maximum, the minimum and the count of a value
   of a reversed sorted list are found when an element is a variable**
   (CE-1821). With `x` declared `real`, `Sum(Reverse(Sort([3, x, 1])))` and

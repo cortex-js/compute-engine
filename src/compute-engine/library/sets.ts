@@ -86,6 +86,10 @@ import {
 import { smallCount } from '../boxed-expression/collection-count.js';
 import { isMergeable } from '../boxed-expression/effects-of.js';
 import { firstFailedElementError } from '../boxed-expression/error-value.js';
+import {
+  orderIndependentSource,
+  peekMembershipPreserving,
+} from './order-wrappers.js';
 
 function typeIntersection(a: Type, b: Type): Type {
   return reduceType({ kind: 'intersection', types: [a, b] });
@@ -1017,6 +1021,10 @@ export const SETS_LIBRARY: SymbolDefinitions = {
       // Note: condition is only used during Sum/Product iteration,
       // not for standalone Element evaluation
       if (!collection) return undefined;
+      // Membership does not depend on the order of the elements, so a `Sort`
+      // that could not order them (`Sort([3, x, 1])`) is read as its source,
+      // also under a `Unique`, as for `Contains`.
+      collection = orderIndependentSource(collection, peekMembershipPreserving);
 
       // A `Tuple`/`List`/`Sequence` of plain SYMBOLS against a scalar (number)
       // collection is the universal math idiom "a, b ∈ ℤ": distribute the
@@ -1098,6 +1106,9 @@ export const SETS_LIBRARY: SymbolDefinitions = {
     },
     evaluate: ([value, collection], { engine: ce }) => {
       if (!collection) return undefined;
+      // As for `Element`: a `Sort` that could not order its elements is read
+      // as its source.
+      collection = orderIndependentSource(collection, peekMembershipPreserving);
       // An absent value is an ordinary element to search for (see `Element`).
       const result = membershipKleene(ce, value, collection);
       if (result === true) return ce.False;

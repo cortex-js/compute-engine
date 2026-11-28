@@ -83,8 +83,8 @@ import { appliesJumpFunction } from '../jump-functions.js';
 import {
   reduceCollection,
   enumerationDeclinedAfterWalk,
-  orderIndependentSource,
 } from './collections.js';
+import { orderIndependentSource } from './order-wrappers.js';
 import { extractFiniteDomainWithReason } from './logic-analysis.js';
 import {
   canonicalValueOperand,

@@ -5337,6 +5337,37 @@ describe('PEEK THROUGH COUNT/MEMBERSHIP-PRESERVING WRAPPERS', () => {
       expect(local.expr(input).evaluate().json).toEqual(expected);
     });
 
+    // Membership, the GCD and the LCM do not depend on the order of the
+    // elements either (CE-1824).
+    local.declare('n', 'integer');
+    const sortedIntegers: Expression = ['Sort', ['List', 6, 'n', 4]];
+    test.each<[Expression, Expression]>([
+      [['Element', 1, sorted], 'True'],
+      [['Element', 'x', sorted], 'True'],
+      [['NotElement', 1, sorted], 'False'],
+      [['Element', 1, 'd'], 'True'],
+      [['Element', 1, ['Reverse', sorted]], 'True'],
+      [['Element', 1, ['Unique', sorted]], 'True'],
+      [['NotElement', 1, ['Unique', sorted]], 'False'],
+      // `x` can be 2: the membership stays undecided, as for the list.
+      [
+        ['Element', 2, sorted],
+        ['Element', 2, sorted],
+      ],
+      [['GCD', sortedIntegers], ['GCD', 2, 'n']],
+      [['LCM', sortedIntegers], ['LCM', 12, 'n']],
+      [['LCM', ['Reverse', sortedIntegers]], ['LCM', 12, 'n']],
+    ])('%j evaluates to %j', (input, expected) => {
+      expect(local.expr(input).evaluate().json).toEqual(expected);
+    });
+
+    test.each<[Expression]>([
+      [['Element', 1, ['Sort', 'L']]],
+      [['GCD', ['Sort', 'L']]],
+    ])('%j stays unevaluated for a list with no value', (input) => {
+      expect(local.expr(input).evaluate().json).toEqual(input);
+    });
+
     test('the asynchronous route gives the same values', async () => {
       const sum = await local.expr(['Sum', sorted]).evaluateAsync();
       expect(sum.json).toEqual(['Add', 'x', 4]);

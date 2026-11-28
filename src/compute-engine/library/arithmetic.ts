@@ -474,8 +474,11 @@ import {
   enumerationDeclinedAfterWalk,
   compiledMapDoubles,
   compiledMapDoublesSteps,
-  orderIndependentSource,
 } from './collections.js';
+import {
+  orderIndependentSource,
+  peekCountPreserving,
+} from './order-wrappers.js';
 import {
   rangeExtremumClosedForm,
   rangeSumClosedForm,
@@ -15867,7 +15870,9 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       evaluate: (xs, { engine, numericApproximation, expression }) => {
         // Under `.N()`, an exact integer operand is read exactly
         // (`exactIntegerOriginals()`): the float of `2^100` has no unit digit.
-        xs = exactIntegerOriginals(xs, expression, numericApproximation);
+        // A `Sort` that could not order its elements is read as its source
+        // (`gcdLcmOperands()`).
+        xs = gcdLcmOperands(xs, expression, numericApproximation);
         // Integer operands take the fast numeric path. Otherwise, attempt a
         // univariate polynomial GCD (e.g. GCD(x²+3x+2, x²+4x+3) → x+1),
         // falling back to the numeric path — which folds any integer operands
@@ -15917,7 +15922,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       evaluate: (xs, { engine, numericApproximation, expression }) =>
         evaluateGcdLcm(
           engine,
-          exactIntegerOriginals(xs, expression, numericApproximation),
+          gcdLcmOperands(xs, expression, numericApproximation),
           'LCM'
         ),
     },
@@ -19811,6 +19816,41 @@ function exactIntegerOriginals(
     replaced[i] = exact;
   });
   return replaced ?? xs;
+}
+
+/**
+ * The operands that `GCD` and `LCM` fold. The result does not depend on the
+ * order of the elements, so a `Sort` that could not order its elements
+ * (`Sort([6, n, 4])` for a variable `n`) is read as its source
+ * (`orderIndependentSource()`). Under `.N()`, the exact integers are read
+ * from the operands as written (`exactIntegerOriginals()`): the written
+ * operand of such a `Sort` is read through the same wrappers, so that its
+ * elements are in the order of the source. Under `.N()`, a `Sort` whose
+ * written source is not a literal list (`GCD(d).N()` with `d` assigned
+ * such a `Sort`) is kept: its elements are rounded, and the float of
+ * `2^100` has no unit digit.
+ */
+function gcdLcmOperands(
+  xs: ReadonlyArray<Expression>,
+  expression: Expression | undefined,
+  numericApproximation: boolean | undefined
+): ReadonlyArray<Expression> {
+  const sources = xs.map((x) => orderIndependentSource(x));
+  if (!numericApproximation) return sources;
+  if (!isFunction(expression) || expression.nops !== xs.length) return xs;
+  const writtenOps = expression.ops.map((w, i) =>
+    sources[i] === xs[i] ? w : peekCountPreserving(w)
+  );
+  const operands = sources.map((source, i) =>
+    source === xs[i] || isFunction(writtenOps[i], 'List') ? source : xs[i]
+  );
+  const written = expression.engine._fn(
+    expression.operator,
+    writtenOps.map((w, i) =>
+      operands[i] === sources[i] && w !== undefined ? w : expression.ops[i]
+    )
+  );
+  return exactIntegerOriginals(operands, written, numericApproximation);
 }
 
 function evaluateGcdLcm(

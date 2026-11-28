@@ -196,6 +196,33 @@ describe('Mod, GCD and LCM under .N() with huge or out-of-range operands', () =>
     expect(s.isExact).toBe(true);
   });
 
+  // A `Sort` whose key cannot order the elements is read as its source
+  // (CE-1824). The elements of the source as written are read exactly: the
+  // floats gave `NaN`.
+  test('GCD and LCM of a Sort that cannot order its elements read the elements exactly', () => {
+    const local = new ComputeEngine();
+    local.declare('a', 'real');
+    const sorted = [
+      'Sort',
+      ['List', ['Power', 2, 100], ['Power', 6, 50]],
+      ['Function', ['Multiply', 'a', 't'], 't'],
+    ];
+    const gcd = local.box(['GCD', sorted]).N();
+    expect(gcd.json).toBe(1125899906842624);
+    expect(gcd.isExact).toBe(true);
+    const lcm = local.box(['LCM', sorted]).N();
+    expect(
+      lcm.isSame(
+        local.box(['LCM', ['Power', 2, 100], ['Power', 6, 50]]).evaluate()
+      )
+    ).toBe(true);
+    // A `Sort` held by a symbol has no written list to read exactly: it is
+    // kept, and does not give the `NaN` of the rounded elements.
+    local.assign('d', local.box(sorted));
+    expect(local.box(['GCD', 'd']).N().operator).toBe('GCD');
+    expect(local.box(['LCM', 'd']).N().operator).toBe('LCM');
+  });
+
   test('a float beyond the range of a double is not read as an exact integer', () => {
     // `N(10^400)` is a float whose digits are rounded. It is beyond the
     // range of the float lane, and before it was folded as the exact
