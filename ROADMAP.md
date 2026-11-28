@@ -1233,3 +1233,43 @@ at 200 and 5 times at 50, where the engine's own cost of a call dominates.
   Bernoulli coefficients grow past 10^p), the coefficients converted once per
   grid width. The remaining factor of about 1.5 is V8 `BigInt` against GMP and
   needs a different bigint backend (for example WASM GMP).
+
+### CE-1916. Lower the cost of the soundness layers of the interval runtime
+
+**Status:** waits for user (approval); performance, M. **Witness:** corpus;
+Tycho's codegen audit of CE 0.204.1
+(`~/dev/tycho/_TASK/desmos/desmos-corpus/codegen-audit/2026-11-27-ce-0.204.1-report.md`)
+names the per-operation cost of compiled interval code.
+
+A compiled interval operation costs several times its arithmetic. Measured on
+two plain intervals: `_IA.mul` about 54 to 60 ns, of which the four endpoint
+products are about 9 ns, the exactness prover (`exactMul`, Dekker's split per
+candidate pair) about 18 ns, the two ulp steps (`nextUp`, `nextDown`) about 10
+ns, and the unwrap of the operands (`unwrapOrPropagate`) about 9 ns; `_IA.add`
+about 34 to 38 ns. A whole program (`1000x + \sin(x)^5 - 7 - y + 3\cos(u)`)
+takes about 0.65 µs per evaluation. A CPU profile of that program spreads the
+time over about ten functions of the outward step and the jump tracking
+(`nextUp` 7%, `widenResult` 4%, `widenEndpoint`, `isJump`, `lifted2`,
+`resultInterval`, `operandInterval`, `productExactness`, 1 to 2% each), and the
+entry of `run()` (`processVars`, 6%).
+
+Two changes that give the same values gave no measurable gain on whole programs:
+a fast path past `unwrapOrPropagate` for two plain operands of `add`, `sub`,
+`mul` and `div`, with the four products of `_mul` passed to
+`Math.min`/`Math.max` without a spread (11% per operation, none per program),
+and a `nextUp` that steps the bits of the double (no faster than the current
+one). A gain needs a change of design, for example one of:
+
+- a fused kernel per operation that takes the plain operands, computes the
+  endpoints, proves and steps them in one function, with no wrapper chain
+  (`liftJump`, `decorate`, `widenResult`), and falls back to the chain for a
+  kinded operand;
+- a cheaper prover: a test that rejects most inexact products before Dekker's
+  split;
+- a `run()` entry that converts the inputs once per batch instead of once per
+  call.
+
+Every change keeps the enclosure of each result equal, endpoint for endpoint, to
+that of the current runtime; the interval contract tests
+(`test/compute-engine/ir-interval-contract.test.ts`) and a comparison over
+random operands check it.
