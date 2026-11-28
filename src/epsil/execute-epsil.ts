@@ -1490,8 +1490,9 @@ function narrowErrorRange(
  * of a name, or the right side of an assignment to a name. In it, the walk
  * reads three forms:
  *
- * - A list or a tuple literal, when the node of `value` at its place has the
- *   same operator. The positions of the value are mapped to the written
+ * - A list or a tuple literal, or a call of `Range` or `Linspace`
+ *   ({@link POSITIONAL_RANGES}), when the node of `value` at its place has
+ *   the same operator. The positions of the value are mapped to the written
  *   elements by {@link heldIndex}.
  * - The assignment to an element, `m[k] = x`, which is
  *   `m = ReplaceAt(m, k, x)`: when `k` is an integer ({@link numberOperand})
@@ -1553,13 +1554,18 @@ function heldElement(
       elementwise += 1;
       continue;
     }
-    if (head !== 'List' && head !== 'Tuple') break;
+    if (head !== 'List' && head !== 'Tuple' && !POSITIONAL_RANGES.has(head))
+      break;
     if (!isFunction(node, head)) break;
-    const held = heldIndex(ops, node.ops, holds, read);
+    // The canonical form of `Range(x)` is `Range(1, x)`: the written operand
+    // is the second operand of the value.
+    const skip =
+      head === 'Range' && ops.length === 1 && node.nops === 2 ? 1 : 0;
+    const held = heldIndex(ops, node.ops.slice(skip), holds, read);
     if (held === undefined) break;
     result = { element: ops[held.index], elementwise };
     written = ops[held.index];
-    node = node.ops[held.position];
+    node = node.ops[held.position + skip];
   }
   return result;
 }
@@ -1639,6 +1645,11 @@ function elementReader(
  * `[g(1), y + Ln(w)] + u`, and in `Map((x) => [x, Ln(w)] + u, [1])`: the
  * parameter `x` has no value after the statement, and its argument can be
  * an error made in a function body (`Map((x) => [Ln(y) + 1, x]^2, [g("a")])`).
+ *
+ * The operands of a call of a collection operator ({@link isCollectionCall})
+ * are read as the elements of a literal: `Range(y + 1, g("a"))` and
+ * `Union(Set(y + 1), Set(g("a")))` record no frame for the operand that
+ * holds the error either.
  */
 function isAcrossElements(
   ce: ComputeEngine,
@@ -1651,7 +1662,12 @@ function isAcrossElements(
     const node = pending.pop()!;
     const head = operator(node);
     const ops = operands(node);
-    if (head === 'List' || head === 'Tuple' || head === 'Set') {
+    if (
+      head === 'List' ||
+      head === 'Tuple' ||
+      head === 'Set' ||
+      isCollectionCall(ce, head)
+    ) {
       const at = ops.findIndex((op) => {
         const o = sourceOffsetsOf(op);
         return o !== undefined && o[0] <= range[0] && range[1] <= o[1];
@@ -1666,6 +1682,31 @@ function isAcrossElements(
   }
   return false;
 }
+
+/**
+ * Whether `head` is a library collection operator whose evaluation adds no
+ * frame for an operand that holds an error, and whose operands are
+ * collections or numbers (`FRAMELESS_COLLECTION_CALLS`): the value of
+ * `Range(1, g("a"))` keeps the error as its operand 2, and `Union` gives the
+ * error of `Set(g("a"))` with only the frames of the body of `g`.
+ *
+ * `Map` and the other operators with a function operand are not read: the
+ * frames of the error can be frames of the written body of the function
+ * literal, which the range then selects correctly
+ * (`[w, 2] |> Map((e) => Ln(e) + y, _)` underlines `e`).
+ */
+function isCollectionCall(ce: ComputeEngine, head: string): boolean {
+  return FRAMELESS_COLLECTION_CALLS.has(head) && ce._isLibraryFunction(head);
+}
+
+const FRAMELESS_COLLECTION_CALLS = new Set([
+  'Range',
+  'Linspace',
+  'Union',
+  'Intersection',
+  'SetMinus',
+  'SymmetricDifference',
+]);
 
 /**
  * Whether a part of the written value of `region` (raw MathJSON, see
@@ -1925,6 +1966,18 @@ function valueCount(
     ? [0, 1]
     : unknown;
 }
+
+/**
+ * The collection operators whose value, when an operand holds an error, is
+ * the same call with the value of each operand at the position of the
+ * operand: the value of `Range(1, y + g("a"))` is `Range(1, Error)`. The
+ * evaluation of such a call adds no frame for the operand
+ * ({@link isCollectionCall}), and {@link heldElement} finds the operand by its
+ * position. The canonical form of another collection operator can move its
+ * operands (a `Set`), or its evaluation can give another operator (a
+ * `Union` gives a set).
+ */
+const POSITIONAL_RANGES = new Set(['Range', 'Linspace']);
 
 /**
  * The calls that apply to each element of a list operand, when their other

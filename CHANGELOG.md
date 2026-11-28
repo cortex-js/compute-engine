@@ -153,6 +153,15 @@
   user function named `Sqrt`, `Multiply`, `Negate`, `Rational`, `Complex` or
   `Add` is declared. `subs()` of a number literal now returns the number,
   not its structural form.
+- **In Epsil, an error in a function that an operand of `Range` or `Union`
+  calls no longer underlines another operand** (CE-1786). With
+  `function g(x) { Ln(x) + 1 }` and `let y = 5`, both
+  `let v = Range(y + 1, g("a"))` and
+  `let v = Union(Set(y + 1), Set(g("a")))` underlined `y`. The first now
+  underlines `g("a")`, as does `let v = Range(1, y + g("a"))`; the same
+  applies to `Linspace`. The second underlines the whole statement, as do
+  the same statements with `Intersection`, `SetMinus` and
+  `SymmetricDifference`.
 
 - **A sum or a product with an `Element` clause and a range of very large
   integers gives an error instead of stopping the process** (CE-1768). The

@@ -206,6 +206,30 @@ describe('an error in an element of a written list or tuple', () => {
       'let v = Map((x) => [Ln(y) + 1, x]^2, [g("a")])',
       'let v = Map((x) => [Ln(y) + 1, x]^2, [g("a")])',
     ],
+    // A `Range` or a `Linspace` keeps the error at the position of its
+    // operand, with no frame: the operand is found by its position.
+    ['let v = Range(y + 1, g("a"))', 'g("a")'],
+    ['let v = Range(1, y + g("a"))', 'g("a")'],
+    ['let v = Range(g("a"), y + 1, 2)', 'g("a")'],
+    // The canonical form of `Range(x)` is `Range(1, x)`.
+    ['let v = Range(y + g("a"))', 'g("a")'],
+    ['let v = Linspace(y + 1, g("a"))', 'g("a")'],
+    ['let v = [Range(y + 1, g("a")), 2]', 'g("a")'],
+    // Another collection operator records no frame for its operand either,
+    // and its value does not show the operand that holds the error.
+    [
+      'let v = Union(Set(y + 1), Set(g("a")))',
+      'let v = Union(Set(y + 1), Set(g("a")))',
+    ],
+    [
+      'let v = Intersection(Set(y + 1), Set(g("a")))',
+      'let v = Intersection(Set(y + 1), Set(g("a")))',
+    ],
+    [
+      'let v = SetMinus(Set(y + 1), Set(g("a")))',
+      'let v = SetMinus(Set(y + 1), Set(g("a")))',
+    ],
+    ['let w: any = "s"\nlet v = Union(Set(y + 1), Set(Ln(w)))', 'w'],
   ])('%s underlines %s', (stmt, expected) => {
     expect(underlines(`${fn}${stmt}\n0`)).toEqual([expected]);
   });
