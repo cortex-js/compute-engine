@@ -541,6 +541,27 @@ export function literalParameterDefault(
   return undefined;
 }
 
+/** The {@link ParameterDefault} of the default operand `op` of a parameter
+ * of a function literal that is not canonical, or `undefined` as for
+ * {@link literalParameterDefault}. Only the shapes that must be canonical to
+ * be read are canonicalized: a `["List"]` or a `["Dictionary"]` with no
+ * operand (a raw `["Dictionary"]` is an empty dictionary only once it is
+ * canonical), a `Negate` of a number and a `Delimiter` around a number.
+ * Every other operand is read as written. A compound operand is not a valid
+ * default, and the parameter check refuses it; to canonicalize it here
+ * would declare its symbols in the enclosing scope, also when the literal is
+ * refused. */
+export function uncanonicalParameterDefault(
+  op: Expression
+): ParameterDefault | undefined {
+  const canonicalize =
+    ((isFunction(op, 'List') || isFunction(op, 'Dictionary')) &&
+      op.nops === 0) ||
+    (isFunction(op, 'Negate') && op.nops === 1 && isNumber(op.op1)) ||
+    (isFunction(op, 'Delimiter') && op.nops >= 1 && isNumber(op.op1));
+  return literalParameterDefault(canonicalize ? op.canonical : op);
+}
+
 /**
  * Check the default of the optional parameter `param` and throw when it is
  * not a constant or does not fit the parameter type.

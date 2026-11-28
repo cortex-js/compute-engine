@@ -12,6 +12,15 @@
   (`out = U(out.kind, …)`); a write of another value still compiles, and
   the field is then read at run time.
 
+### Bug Fixes
+
+- **A protocol member with the default `{}` can be implemented.** An
+  implementation that repeated the default of
+  `function f(self: Self, opts: dictionary = {}) -> integer` was refused
+  ("argument 2 declares a default value; the requirement declares {}"), and
+  the type then implemented no member of the protocol. The implementation
+  now matches.
+
 ## 0.204.3 _2026-11-28_
 
 ### Breaking Changes

@@ -110,7 +110,7 @@ import { flatten } from './boxed-expression/flatten.js';
 import {
   boxParameterDefault,
   checkParameterDefaultsUnboxed,
-  literalParameterDefault,
+  uncanonicalParameterDefault,
 } from './boxed-expression/parameter-defaults.js';
 import { settleTypeText } from './library/type-value-utils.js';
 import { apply, exactArgumentSources, lookup } from './function-utils.js';
@@ -3991,7 +3991,9 @@ function declaredImplementationSignature(
     if (isFunction(operand, 'Optional')) {
       if (operand.nops < 2) defaults.push(false);
       else {
-        const d = literalParameterDefault(operand.op2);
+        // The literal is not canonical: its `{}` is a raw `["Dictionary"]`
+        // (CE-1941).
+        const d = uncanonicalParameterDefault(operand.op2);
         defaults.push(d === undefined ? null : parameterDefaultToString(d));
       }
     } else defaults.push(undefined);

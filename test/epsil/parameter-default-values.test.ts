@@ -705,6 +705,23 @@ scale(Money(4))`)
     ).toBe(8);
   });
 
+  test('an implementation may repeat the default `{}` or `[]`', () => {
+    // CE-1941: the literal of the implementation is not canonical, and its
+    // `{}` is a raw `["Dictionary"]`, read as the empty dictionary.
+    expect(
+      value(`protocol P {
+  function f(self: Self, opts: dictionary = {}, xs: list = []) -> integer
+  function g(self: Self) -> integer
+}
+type Q = tuple<n: integer>
+type Q is P {
+  function f(self: Q, opts: dictionary = {}, xs: list = []) -> integer { length(xs) + self.n }
+  function g(self: Q) -> integer { 7 }
+}
+[Q(1).g(), Q(1).f(), f(Q(2), {"a" -> 1}, [5, 6])]`)
+    ).toEqual(['List', 7, 1, 4]);
+  });
+
   test('an implementation that leaves out the parameter with a default is refused', () => {
     const r = run(`${SCALABLE}type Money is Scalable {
   function scale(self: Money) -> number { self.cents }
