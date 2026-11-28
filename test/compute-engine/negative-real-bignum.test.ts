@@ -122,10 +122,13 @@ describe('HurwitzZeta at a negative a, non-integer s', () => {
 });
 
 describe('GammaUpper at a negative z', () => {
-  test('declines above machine precision instead of answering in doubles', () => {
+  test('is computed in big decimals above machine precision', () => {
     ce.precision = 30;
     const e = ce.expr(['Gamma', 2.5, -1.5]);
-    expect(e.N().toString()).toEqual('Gamma(2.5, -1.5)');
+    // mpmath 1.3
+    expect(e.N().toString()).toEqual(
+      '(1.32934038817913702047362561251 - 3.37301032391024194767565314917i)'
+    );
   });
 });
 

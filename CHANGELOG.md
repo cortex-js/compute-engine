@@ -1,3 +1,20 @@
+## [Unreleased]
+
+### Resolved Issues
+
+- **`Gamma(s, z)` at a real `z < 0` is computed in big decimals at the engine
+  precision.** Since #612 it stayed unevaluated above 15 digits. The value is on
+  the principal branch: for a positive integer `s`, `(s − 1)! e⁻ᶻ Σ zᵏ/k!`
+  (DLMF 8.4.8), real and exactly 0 at its roots (`Gamma(2, -1)`); for a
+  non-positive integer `s`, `−Ei(−z) − iπ` and the downward recurrence (DLMF
+  8.4.15); otherwise `Γ(s) − γ(s, z)` (DLMF 8.7.1), with the digits lost to
+  cancellation added to the working precision. `N(Gamma(1/2, -2.5))` at 30
+  digits is `1.77245385090551602729816748334 − 9.87350823887727804137255293439i`.
+  An order past 10 000 or a `z` past the work budget stays unevaluated.
+  Measured against mpmath, every part has at least 29.4 correct digits at 30
+  and 49.4 at 50. `Gamma(a, z0, z1)` with negative points answers too.
+  (#666, contributed by [enumeratio](https://github.com/enumeratio))
+
 ## 0.204.3 _2026-11-28_
 
 ### Breaking Changes

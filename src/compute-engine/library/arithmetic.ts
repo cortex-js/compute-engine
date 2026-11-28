@@ -143,6 +143,7 @@ import {
   estimatedFactorialDigits,
   incompleteGammaUpper,
   bigIncompleteGammaUpper,
+  bigIncompleteGammaUpperNegative,
   bigGamma,
   bigGammaln,
   bigLnAbsGammaNegative,
@@ -8628,16 +8629,35 @@ function evaluateGamma(
       const closed = incompleteGammaClosedForm(engine, s, z);
       if (closed !== undefined) return closed;
     }
+    // z < 0: the value is complex, and the bignum kernel answers or the call
+    // stays unevaluated (doubles would give 15 digits at any precision).
+    if (
+      shouldNumericize(numericApproximation, s, z) &&
+      bignumPreferred(engine) &&
+      isNumber(s) &&
+      isNumber(z) &&
+      !s.isComplex &&
+      !z.isComplex &&
+      z.re < 0 &&
+      Number.isFinite(s.re) &&
+      Number.isFinite(z.re)
+    ) {
+      const v = bigIncompleteGammaUpperNegative(
+        engine,
+        s.bignumRe ?? engine.bignum(s.re),
+        z.bignumRe ?? engine.bignum(z.re),
+        engine.precision
+      );
+      if (v === undefined) return undefined;
+      return engine.number(
+        engine._inexactNumericValue(v.im.isZero() ? v.re : v)
+      );
+    }
     return shouldNumericize(numericApproximation, s, z)
       ? applyN(
           [s, z],
           (s, z) => incompleteGammaUpper(s, z),
-          // z < 0: the value is complex and no bignum kernel exists, so it
-          // declines (`null`) instead of answering in doubles.
-          (s, z) =>
-            z.isNegative()
-              ? null
-              : bigIncompleteGammaUpper(engine, s, z, engine.precision),
+          (s, z) => bigIncompleteGammaUpper(engine, s, z, engine.precision),
           (s, z) => incompleteGammaUpperComplex(s, z)
         )
       : undefined;
