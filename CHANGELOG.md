@@ -77,7 +77,6 @@
   (`circle(…, {dash -> [5, 4]})`, CE-1923). `group(a, b)`, `group([a, b])`
   and `canvas([…], {grid -> true})` compile.
 
-
 - **JavaScript compiles a list of records.** With
   `type P = tuple<k: integer, x: real>`, `[P(k, t * k) for k in 1..3]`
   declined ("a record made in a build, a filter or a random frame"). It now
