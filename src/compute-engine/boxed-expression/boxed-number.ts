@@ -57,13 +57,11 @@ import {
 import type {
   BoxedRuleSet,
   BoxedSubstitution,
-  CanonicalOptions,
   EvaluateOptions,
   IComputeEngine as ComputeEngine,
   Metadata,
   Rule,
   Sign,
-  Substitution,
   Expression,
   PatternMatchOptions,
   ReplaceOptions,
@@ -1292,16 +1290,11 @@ export class BoxedNumber
     return [num, den];
   }
 
-  subs(
-    sub: Substitution,
-    options?: { canonical?: CanonicalOptions }
-  ): Expression {
-    if (this.isStructural) return this;
-    // Apply the substition to the structural version of the number.
-    // For example, `3/4` will be replaced by
-    // ["Rational", 3, 4].subs({ "Rational": "Divide" }) -> ["Divide", 3, 4]
-    return this.structural.subs(sub, options);
-  }
+  // `subs()` is the inherited one, which returns the number. A number holds
+  // no symbol, and a substitution does not replace the head of a function.
+  // The structural form of an exact number (`Divide(Sqrt(2), 2)` for `√2/2`)
+  // is not rebuilt: boxed by name, its heads would bind to a user function
+  // that shadows the library operator, such as a user `Divide`.
 
   replace(
     rules: BoxedRuleSet | Rule | Rule[],

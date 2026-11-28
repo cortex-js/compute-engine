@@ -143,6 +143,17 @@
 
 ### Resolved Issues
 
+- **In a scope with a user function named `Divide`, an exact radical
+  number keeps its value under `subs()`** (CE-1785). After
+  `ce.declare('Divide', 'function')` and
+  `ce.assign('Divide', ce.expr(['Function', 1000, 'u', 'v']))`,
+  `ce.expr(['Multiply', 'x', ['Power', ['Sqrt', 2], -1]]).subs({ x: 2 }).evaluate()`
+  gave `2000`: the number `√2/2` was rebuilt as a call of the user
+  function. It now gives `√2`. The same applies to a number made before a
+  user function named `Sqrt`, `Multiply`, `Negate`, `Rational`, `Complex` or
+  `Add` is declared. `subs()` of a number literal now returns the number,
+  not its structural form.
+
 - **A sum or a product with an `Element` clause and a range of very large
   integers gives an error instead of stopping the process** (CE-1768). The
   evaluation of `["Sum", ["Multiply", "j", "k"], ["Element", "k", ["List",
