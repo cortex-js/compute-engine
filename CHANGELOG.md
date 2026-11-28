@@ -2,6 +2,22 @@
 
 ### Improvements
 
+- **JavaScript compiles a call that gives a function to a function of the
+  host.** With `inc = (i: integer) => i + 1` and a protocol method
+  `apply(self: Box, f: any) -> nothing { hostApply(self.cells, f) }`,
+  `(t: integer) => box.apply(inc)` declined ("the value of inc, which reads i
+  of another binding"), also inside a loop or an `if`. It now compiles: the
+  host receives the function, as from the interpreter, and a variable that the
+  function reads is read when the host calls it. The function can be a name,
+  a user function or a function literal, given directly or through a
+  parameter of no stated type or of type `any`. A literal that reads a
+  parameter of the compiled function still declines (CE-1911).
+- **JavaScript compiles a function with a `dictionary` parameter.** With
+  `withOpts(n: integer, opts: dictionary = {->})`, `withOpts(t)` and
+  `withOpts(t, {smooth -> true})` declined ("the parameter opts of withOpts
+  is not a scalar"). They now compile, and the function can pass the
+  dictionary on to a function of the host (CE-1911).
+
 - **JavaScript compiles definite integrals of short, fixed-length numeric
   lists.** A literal list or a supported call that maps over a fixed-length
   list gives one integral per element. For example, integrating

@@ -4034,16 +4034,35 @@ tuple, the discharges of `absent()`.
   have, and a dictionary with the key `__proto__` (an object literal of the
   result would set the prototype). `MatchesType` of a dictionary is not decided
   by its IR type (`valueTypeOf()` gives `undefined`). A parameter of no stated
-  type or `any` holds a dictionary as it holds another record; one whose stated
-  or inferred type is a `dictionary` or a `record` type declines ("not a
-  scalar"). As the result of the code a dictionary is an object of its keys, and
-  at a function of the host it is the engine's dictionary of its keys
-  (`boxValue()` of `print-js.ts`). The values of a dictionary are nodes of the
-  program (`readers` of `lower.ts`, with the dictionary as their reader), so a
-  `List` or a `Tuple` literal that is a value of a dictionary is listed
-  (`Listed`) and a function of the host receives it
+  type or `any` holds a dictionary as it holds another record, and so does a
+  parameter of a `dictionary` type (CE-1911), which takes the record of a
+  dictionary literal only (`held()`): another record declines there. A parameter
+  of a `record` type declines ("not a scalar"). As the result of the code a
+  dictionary is an object of its keys, and at a function of the host it is the
+  engine's dictionary of its keys (`boxValue()` of `print-js.ts`). The values of
+  a dictionary are nodes of the program (`readers` of `lower.ts`, with the
+  dictionary as their reader), so a `List` or a `Tuple` literal that is a value
+  of a dictionary is listed (`Listed`) and a function of the host receives it
   (`figureDraw({p -> (t, 1)})`). A value of a dictionary is not a place where a
   list of NaN stands for an absent list (`nanForAbsent()`).
+- **Function values given to the host** (CE-1911). On JavaScript, an argument of
+  a call of a function of the host that is a function value is passed as an
+  expression of the engine, which the call evaluates as the interpreter
+  evaluates the argument (`engineArgument()` of `lower.ts`, `HostCall.values`,
+  `hostCaller()` of `print-js.ts`): a name whose static type is a function type
+  and that the program does not bind (`inc`, a user function), or a function
+  literal. The function, and each function value that it reads or calls, must
+  read only names that the engine holds; one that reads a parameter or a local
+  of the program, or an input of the compilation (a name with no value),
+  declines. A name of the engine that the literal reads is read when the host calls
+  the function; the code publishes an assigned variable before the call. The
+  value is of the lane `nothing` with `IRType.engine`, the index of its
+  expression: the code holds nothing at run time. A parameter of no stated type
+  or `any` of a user function or of a protocol method holds it, one IR function
+  per value (`held()`, `laneKey()`), and passes it on to the host or to another
+  such function. Any other read of it declines (`nameValue()`), and so does a
+  call of it (`f(3)`) and a value of the lane `nothing` that the program reads
+  elsewhere (`nothingRefusal()` of `index.ts`).
 - **Protocol methods.** A call whose head is the dispatcher of a protocol member
   (`rotateAbout(c, a, p)`, and the member call `c.rotateAbout(a, p)`, which has
   the same canonical form) and whose first operand is a record of a named type

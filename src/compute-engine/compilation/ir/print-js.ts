@@ -1158,19 +1158,23 @@ function hostCaller(
   return (...args) => {
     // The stores of the unit before the call (`arrayNote()`).
     before?.();
+    // A function value (`IRType.engine`; CE-1911): its expression, which
+    // the evaluation of the call evaluates, as the interpreter's does.
     const ops = args.map((x, k) =>
-      h.types[k].shape.length > 0 ||
-      h.marks[k] !== undefined ||
-      h.types[k].lane === 'record' ||
-      h.types[k].lane === 'array'
-        ? boxValue(ce, h.types[k], h.marks[k], x)
-        : h.args[k] === 'boolean'
-          ? x
-            ? ce.True
-            : ce.False
-          : h.args[k] === 'string'
-            ? ce.string(x as string)
-            : ce.number(x as number)
+      h.values?.[k] !== undefined
+        ? h.values[k]
+        : h.types[k].shape.length > 0 ||
+            h.marks[k] !== undefined ||
+            h.types[k].lane === 'record' ||
+            h.types[k].lane === 'array'
+          ? boxValue(ce, h.types[k], h.marks[k], x)
+          : h.args[k] === 'boolean'
+            ? x
+              ? ce.True
+              : ce.False
+            : h.args[k] === 'string'
+              ? ce.string(x as string)
+              : ce.number(x as number)
     );
     const value = call._withSameBinding(ops).evaluate();
     // The arrays that the call marked stale: those it received, and those

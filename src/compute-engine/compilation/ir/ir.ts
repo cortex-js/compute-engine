@@ -113,6 +113,13 @@ export type IRType = {
   readonly head?: 'Tuple' | 'List' | 'Dictionary';
   /** A value of the lane `array` (shape `[]`): its cells. */
   readonly array?: ArrayCells;
+  /** A value of the engine that the code does not hold (lane `nothing`,
+   *  shape `[]`; CE-1911): a function value given to a function of the
+   *  host, the index of its expression in the lowering. Two such values are
+   *  two types, so that a user function that passes one on is lowered once
+   *  per value. Only the argument of a call reads it (`engineArgument()`
+   *  of `lower.ts`). */
+  readonly engine?: number;
 };
 
 /** A typed literal. An integer beyond the safe integers is a `bigint`
@@ -332,6 +339,10 @@ export type HostCall = {
   readonly args: readonly Lane[];
   readonly types: readonly IRType[];
   readonly marks: readonly (number | undefined)[];
+  /** For an argument that is a value of the engine (`IRType.engine`), the
+   *  expression that the call evaluates in its place, as the interpreter
+   *  evaluates the argument (CE-1911). */
+  readonly values?: readonly (Expression | undefined)[];
   readonly result: Lane | 'nothing';
 };
 
@@ -620,6 +631,7 @@ export function typeToString(
   // A string field of a known value (CE-1652, step 4c).
   if (t.constant !== undefined) return JSON.stringify(t.constant);
   if (t.array !== undefined) return `array<${t.array.cell}>`;
+  if (t.engine !== undefined) return `function value ${t.engine}`;
   // A record: its fields, named or not.
   if (t.lane === 'record')
     return `${t.resultRecord ? 'result ' : ''}${t.nominal ?? t.head ?? 'record'}(${(
@@ -937,7 +949,10 @@ export class Builder {
       this.emit({ k: 'op', out, op, args });
       return out;
     };
-    return this.pure(op) ? this.once(`o ${op} ${args}`, make) : make();
+    // Two function values (`IRType.engine`) are two values: the lowering
+    // reads the expression from the type of the value.
+    const engine = type.engine === undefined ? '' : ` e${type.engine}`;
+    return this.pure(op) ? this.once(`o ${op} ${args}${engine}`, make) : make();
   }
 
   list(args: V[], type: IRType): V {

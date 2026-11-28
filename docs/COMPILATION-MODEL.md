@@ -2886,11 +2886,29 @@ by its name to `Map` compiles (`Map(Sin, L)`). A derivative callee,
 defined function: the code is the closed form of the derivative
 (`f := t ↦ t^3` gives `3 * (_.x * _.x)` for `f'(x)`).
 
+On JavaScript, a function value given to a function of the host compiles
+(CE-1911): a name bound to a function (`inc = (i: integer) => i + 1`), a user
+function, or a function literal. The host receives the engine's value of the argument, as from
+the interpreter, and the compiled code does not call it. The argument can also
+go through a parameter of no stated type or of type `any` of a user function
+or of a protocol method that passes it on to the host
+(`function apply(self: Box, f: any) -> nothing { hostApply(self.cells, f) }`,
+`box.apply(inc)`), also in a loop or a condition. The engine evaluates the
+function when the host calls it, so the function reads only names that the
+engine holds: a name of the engine with a value, read at that time (a variable
+that the compiled code assigns is published before the call), its own
+parameters and locals, and the functions it calls. A function that reads a
+parameter or a local of the compiled code (`box.apply((i) => i + t)` in
+`(t: integer) => …`) or an input of the compilation (a name with no value)
+declines, and so does any other use of the parameter that holds a function
+value (`f(3)`, `f + 1`).
+
 Every other function value declines, with a reason that names the form:
 
 - a partial application or a curried call: `Apply(Apply(f, 1), u)`;
-- a function value passed as an argument to a user function (`h(x ↦ x + u)`)
-  or held in a block local (`Declare(h, "function", t ↦ 2t)`);
+- a function value passed as an argument to a user function that calls it or
+  computes with it (`h(x ↦ x + u)`), or held in a block local
+  (`Declare(h, "function", t ↦ 2t)`);
 - a parameter of the root declared with a function type
   (`(h: (real) -> real) ↦ Map(h, [1, 2])`);
 - `Sort` with an ordering function;
@@ -3610,8 +3628,11 @@ an index that is not a constant key (`d[1]`), and every other reader
 dictionary that is a `List` or a `Tuple` literal reaches the host as that
 literal (`figureDraw({p -> (t, 1)})`); a value that the interpreter can hold
 as a lazy collection (`{p -> Range(1, 3)}`, `{p -> [t, 1] + 1}`) declines, as
-it does in a tuple given to a function of the host. GLSL, the interval
-mode and the `bigint` mode decline a dictionary literal ("records compile on
+it does in a tuple given to a function of the host. A parameter of no stated
+type, of type `any` or of a `dictionary` type holds a dictionary literal, also
+the default of an optional parameter
+(`function image(r: Raster, opts: dictionary = {->})`; CE-1911). GLSL, the interval mode
+and the `bigint` mode decline a dictionary literal ("records compile on
 javascript only").
 
 ### GPU `At`

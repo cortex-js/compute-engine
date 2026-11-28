@@ -407,6 +407,14 @@ export type Lowering = {
   mayHoldKnown(v: V): void;
   /** The lowering keeps the string constants (`known()`). */
   readonly keepsStrings: boolean;
+  /** The argument `op` of a call as a value of the engine that the code
+   *  does not hold (`IRType.engine`; CE-1911), or `undefined` when `op` is
+   *  not a function value. A function value is a name whose static type is
+   *  a function type and that the program does not bind, a function
+   *  literal, or a parameter that holds such a value. A function literal
+   *  that reads a name that the program binds (a parameter, a local)
+   *  declines: the engine does not see the value of that name. */
+  engineArgument(op: Expression): V | undefined;
   /** The value of the known string `v` that the place `place` (a
    *  parameter `f#i`, a record field `T.k`) keeps in its type, or
    *  `undefined`: the last lowering keeps a constant only at a place whose

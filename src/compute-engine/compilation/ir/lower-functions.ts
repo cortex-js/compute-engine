@@ -18,6 +18,7 @@ import type {
 } from '../../../common/type/types.js';
 import { typeToString as engineTypeToString } from '../../../common/type/serialize.js';
 import { isSubtype } from '../../../common/type/subtype.js';
+import { resolveTypeAlias } from '../../../common/type/utils.js';
 import type { BoxedValueDefinition, Expression } from '../../global-types.js';
 import {
   freeBinding,
@@ -299,6 +300,16 @@ function present(t: Type): Type {
   return rest.length === 1 ? rest[0] : t;
 }
 
+/** `t` is a dictionary type (`dictionary`, `dictionary<boolean>`): a
+ *  parameter of that type holds the record of a dictionary literal
+ *  (`held()`; CE-1911). */
+function isDictionaryType(t: Type): boolean {
+  const r = resolveTypeAlias(present(t));
+  return (
+    r === 'dictionary' || (typeof r === 'object' && r.kind === 'dictionary')
+  );
+}
+
 /** `t` is a union whose every member is a real type, `nan` or an infinity
  *  (`nan | real | signed_infinity`): a double holds each of its values, so
  *  it is on the real lane, also when the finite members are integers. */
@@ -492,14 +503,17 @@ function signatureTypes(
           open: present(t) === 'unknown' || present(t) === 'number',
           // No stated type, `any`, or a nominal tuple type: the type of a
           // record argument (`held()`); `true` for any record, else the
-          // nominal type that the record must have.
-          record: isUntyped(t)
-            ? (true as const)
-            : tupleBody(t) !== undefined
-              ? (t as TypeReference)
-              : undefined,
+          // nominal type that the record must have. A dictionary type: the
+          // record of a dictionary literal only (`dictionary`).
+          record:
+            isUntyped(t) || isDictionaryType(t)
+              ? (true as const)
+              : tupleBody(t) !== undefined
+                ? (t as TypeReference)
+                : undefined,
           // Of type `any`: also the lane of a number (`held()`).
           any: isUntyped(t) && present(t) !== 'unknown',
+          dictionary: isDictionaryType(t),
         };
   });
   // A user function declares its result as the type of its body
@@ -856,7 +870,18 @@ export function functionLowering(
         );
       return t;
     }
-    if (t.lane === 'array')
+    // A parameter of a dictionary type takes the record of a dictionary
+    // literal (CE-1911), which the code reads by its keys; another record
+    // declines.
+    if ('dictionary' in p && p.dictionary) {
+      if (t.lane !== 'record' || t.head !== 'Dictionary')
+        decline(
+          op ?? cx.root,
+          `an argument of type ${typeToString(t)} for a parameter of a dictionary type (only a dictionary literal compiles there)`
+        );
+      return t;
+    }
+    if (t.lane === 'array' || t.engine !== undefined)
       return 'record' in p && p.record === true ? t : undefined;
     const text =
       javascript &&
@@ -1621,13 +1646,16 @@ export function functionLowering(
           // value of the type `nothing`, which the parameter holds
           // (`held()`; CE-1652, step 4b).
           const p = sig.params[i];
-          return javascript &&
-            isSymbol(op, 'Nothing') &&
-            p !== undefined &&
-            'record' in p &&
-            p.record === true
+          const holds =
+            javascript && p !== undefined && 'record' in p && p.record === true;
+          if (!holds)
+            return argument(op, rowsAt(sig, i, op) ? 'rows' : p?.lane);
+          // A function value at such a parameter: the value of the engine
+          // that the function passes on to a function of the host, one
+          // function per value (`held()`; CE-1911).
+          return isSymbol(op, 'Nothing')
             ? b.op('nothing', [], { lane: 'nothing', shape: [] })
-            : argument(op, rowsAt(sig, i, op) ? 'rows' : p?.lane);
+            : (cx.engineArgument(op) ?? argument(op, p.lane));
         });
       // A list of points there: the call maps, one point per call, each
       // other argument as at any mapped call (`mapOver()`).

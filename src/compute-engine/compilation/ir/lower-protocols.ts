@@ -168,6 +168,21 @@ export function protocolLowering(cx: Lowering) {
     };
     const values = args.map((op, i) => {
       if (i === 0) return self;
+      // A function value at a parameter of no stated type or of type
+      // `any`, which the implementation passes on (`held()` of
+      // `lower-functions.ts`; CE-1911).
+      // The argument must have the type of the requirement, which the
+      // interpreter checks it against.
+      const p0 = declared[i]?.type;
+      const required = params[i]?.type;
+      if (
+        defaults[i] === undefined &&
+        (p0 === undefined || isUntyped(p0)) &&
+        (required === undefined || isSubtype(op.type.type, required))
+      ) {
+        const fv = cx.engineArgument(op);
+        if (fv !== undefined) return fv;
+      }
       // A symbol default is read when the call is evaluated, in the scope
       // of the protocol: its value is a capture (`symbolDeps`), as for a
       // free name with a value (`captured()` of `lower.ts`), so a host

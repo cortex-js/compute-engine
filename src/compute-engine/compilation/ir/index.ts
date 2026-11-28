@@ -336,8 +336,10 @@ export function admits(
  * A value of the lane `nothing` (`Nothing`, `README.md`, "Records") is read
  * only as a field of a record that a `list` makes: any other read of it, and
  * a yield of it (an arm, a carried value, the result of a function or of
- * the entry), refuses. The passes run before, so a field read only by a
- * type test that the lowering decided is gone.
+ * the entry), refuses. A function value (`IRType.engine`; CE-1911) is read
+ * also as an argument of a call of a function of the host or of a user
+ * function. The passes run before, so a field read only by a type test
+ * that the lowering decided is gone.
  */
 function nothingRefusal(p: Program): Refusal | undefined {
   const nothing = (v: V) => p.types[v].lane === 'nothing';
@@ -347,7 +349,14 @@ function nothingRefusal(p: Program): Refusal | undefined {
   const walk = (r: Region): Refusal | undefined => {
     for (const i of r.body) {
       const field = i.k === 'list' && p.types[i.out].lane === 'record';
-      if (!field && argsOf(i).some(nothing)) return refusal;
+      const call = i.k === 'call' || (i.k === 'op' && isHostCallOp(i.op));
+      if (
+        !field &&
+        argsOf(i).some(
+          (v) => nothing(v) && !(call && p.types[v].engine !== undefined)
+        )
+      )
+        return refusal;
       for (const x of regionsOf(i)) {
         const m = walk(x);
         if (m !== undefined) return m;

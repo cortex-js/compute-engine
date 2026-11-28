@@ -4975,6 +4975,13 @@ function lowerOnce(
       return undefined;
     }
     const known = lookup(name);
+    // A parameter that holds a function value (`engineArgument()`): only
+    // an argument of a call reads it.
+    if (known !== undefined && type(known.binding.v).engine !== undefined)
+      decline(
+        e,
+        `the function value ${name} read other than as the argument of a call of a function of the host or of a user function`
+      );
     // The occurrence in an assigned expression can predate the temporary
     // declaration of `inputs`. Rebind free reads only, using that scope.
     if (
@@ -8660,6 +8667,7 @@ function lowerOnce(
     },
     mayHoldKnown: (v) => knowable.add(v),
     keepsStrings: strings.keep,
+    engineArgument: (op) => engineArgument(op),
     keepKnown,
     holdKnown: (v, value, place) => knownStrings.set(v, { value, place }),
     readKnown,
@@ -8815,6 +8823,137 @@ function lowerOnce(
   let stagedAssignments = false;
   // The functions of the host that the program calls (`hostCall()`).
   const hosts: HostCall[] = [];
+  // The function values that the code gives to a function of the host
+  // (`engineArgument()`), by the index of `IRType.engine`.
+  const engineValues: Expression[] = [];
+  // The definitions of the system scope (`engineArgument()`), made once.
+  let libraryDefinitions: Set<object> | undefined;
+
+  /** `Lowering.engineArgument()`. */
+  const engineArgument = (op: Expression): V | undefined => {
+    if (!javascript) return undefined;
+    const given = (n: string) =>
+      lookup(n) !== undefined || (options.vars?.includes(n) ?? false);
+    if (isSymbol(op)) {
+      const known = lookup(op.symbol);
+      if (known !== undefined)
+        return type(known.binding.v).engine !== undefined
+          ? known.binding.v
+          : undefined;
+      if (given(op.symbol) || !isSubtype(op.type.type, 'function'))
+        return undefined;
+    } else if (!isFunction(op, 'Function')) return undefined;
+    // The engine evaluates the function value when the host calls it, so
+    // the function reads only what the engine holds: a binder of the
+    // function (a parameter, a `let` local, an index) whose name the engine
+    // does not also declare as an input, a library operator or a function
+    // of the host, a constant or a name of the engine with a value (a
+    // function value or a user function among them is read in turn, also
+    // as the head of a call), and a variable of the engine that the
+    // program assigns, which the code publishes before a call of the host
+    // (`refreshState()`). Anything else declines: a parameter or a local of
+    // the program, an input of the compilation (a name with no value, which
+    // only the code holds), a call of such a name. The walk does not follow
+    // scopes, so a binder of the name of an input declines too.
+    const published = (n: string) =>
+      assigns.some((s) => s.name === n) &&
+      lookup(n)?.binding === frames[0].names.get(n);
+    const library = (d: object): boolean => {
+      if (libraryDefinitions === undefined) {
+        libraryDefinitions = new Set();
+        for (const x of ce.contextStack[0]?.lexicalScope.bindings.values() ??
+          []) {
+          if ('operator' in x) libraryDefinitions.add(x.operator);
+          if ('value' in x) libraryDefinitions.add(x.value);
+        }
+      }
+      return libraryDefinitions.has(d);
+    };
+    // A name of the engine with no value: an input of the compilation.
+    const input = (n: string): boolean => {
+      const d = ce.lookupDefinition(n);
+      if (d === undefined || !('value' in d)) return false;
+      return d.value.value === undefined && !d.value.isConstant;
+    };
+    const seen = new Set<object>();
+    const binders = (f: Expression): Set<string> => {
+      const names = new Set<string>();
+      const walk = (x: Expression) => {
+        if (isDictionary(x)) x.values.forEach(walk);
+        if (!isFunction(x)) return;
+        if (x.operator === 'Function')
+          x.ops.slice(1).forEach((p) => names.add(parameterName(p) ?? ''));
+        else if (
+          ['Declare', 'Element', 'Limits'].includes(x.operator) &&
+          isSymbol(x.ops[0])
+        )
+          names.add(x.ops[0].symbol);
+        x.ops.forEach(walk);
+      };
+      walk(f);
+      return names;
+    };
+    type Lambda = { _isLambda?: boolean; _lambdaLiteral?: Expression };
+    /** Why the engine does not hold the name `n`, of the definitions `od`
+     *  and `vd`, read in a function of the binders `bound`, or `undefined`.
+     *  `head`: the head of a call, which can be a structural form of no
+     *  definition (`Typed`). */
+    const held = (
+      n: string,
+      od: object | undefined,
+      vd: { value?: unknown; isConstant?: boolean } | undefined,
+      bound: Set<string>,
+      head = false
+    ): string | undefined => {
+      if (published(n)) return undefined;
+      if (given(n)) return n;
+      if (bound.has(n)) return input(n) ? n : undefined;
+      if (od !== undefined) {
+        if (library(od)) return undefined;
+        const l = od as Lambda;
+        if (l._isLambda) return body(l._lambdaLiteral);
+        return isHostFunctionDefinition(od as never) ? undefined : n;
+      }
+      if (vd === undefined) return head ? undefined : n;
+      const v = vd.value as Expression | undefined;
+      if (v === undefined) return vd.isConstant ? undefined : n;
+      return isFunction(v, 'Function') ? body(v) : undefined;
+    };
+    const read = (x: Expression, bound: Set<string>): string | undefined => {
+      if (isSymbol(x))
+        return held(x.symbol, x.operatorDefinition, x.valueDefinition, bound);
+      const parts = isFunction(x) ? x.ops : isDictionary(x) ? x.values : [];
+      const head = isFunction(x)
+        ? held(x.operator, x.operatorDefinition, x.valueDefinition, bound, true)
+        : undefined;
+      return parts.reduce<string | undefined>(
+        (n, y) => n ?? read(y, bound),
+        head
+      );
+    };
+    const body = (f: Expression | undefined): string | undefined => {
+      if (f === undefined || seen.has(f)) return undefined;
+      seen.add(f);
+      return read(f, binders(f));
+    };
+    const n = isSymbol(op) ? read(op, new Set()) : body(op);
+    if (n !== undefined)
+      decline(
+        op,
+        `a function value given to a function that reads ${n}, a name of the compiled code or an input, which the engine does not hold`
+      );
+    let k = engineValues.findIndex(
+      (x) =>
+        x === op ||
+        (isSymbol(x) &&
+          isSymbol(op) &&
+          x.symbol === op.symbol &&
+          x.valueDefinition === op.valueDefinition &&
+          x.operatorDefinition === op.operatorDefinition)
+    );
+    if (k < 0) k = engineValues.push(op) - 1;
+    return b.op('nothing', [], { lane: 'nothing', shape: [], engine: k });
+  };
 
   /** Whether the value `Nothing` of `x` is read only where the code does
    *  not read it: as the value of the root function literal, or as the
@@ -8873,6 +9012,8 @@ function lowerOnce(
     if (t.shape.length === 0 && mark === undefined && scalars.includes(t.lane))
       return undefined;
     if (!javascript) return 'not a real, an integer, a boolean or a string';
+    // A function value: the call evaluates its expression (CE-1911).
+    if (t.engine !== undefined) return undefined;
     // An array of the engine: the host receives the same reference.
     if (t.lane === 'array') return undefined;
     if (t.lane === 'record') {
@@ -8991,6 +9132,8 @@ function lowerOnce(
     if (result === 'nothing' && want && !nothingPlace(e))
       why('whose value Nothing is read', POSSIBLE_NOTHING);
     const args = e.ops.map((op) => {
+      const fv = engineArgument(op);
+      if (fv !== undefined) return fv;
       const effects = b.changes();
       const v = value(op)!;
       const a = type(v);
@@ -9039,6 +9182,9 @@ function lowerOnce(
       };
     });
     const marks = args.map((v) => tuples.get(v));
+    const values = types.map((t) =>
+      t.engine === undefined ? undefined : engineValues[t.engine]
+    );
     const key = (ts: readonly IRType[], ms: readonly (number | undefined)[]) =>
       ts.map((t, j) => typeToString(t, ms[j] ?? -1)).join('\u0000');
     const def = e.operatorDefinition!;
@@ -9059,6 +9205,7 @@ function lowerOnce(
         args: lanes,
         types,
         marks,
+        ...(values.some((x) => x !== undefined) ? { values } : {}),
         result: result!,
       });
     }
